@@ -7,8 +7,6 @@ from collections import defaultdict
 from matplotlib import pyplot as plt
 import pandas as pd
 import numpy as np
-import seaborn as sns
-
 
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
@@ -525,40 +523,7 @@ class FeatureSet(SampleCollection):
         fig.update_layout(title_text="FeatureSet Subset Sankey", font_size=12)
         fig.show()
     
-    def plot_subset_overlap_matrix(self):
-        """
-        Plots a heatmap showing the number of overlapping samples between all subsets
-        in the FeatureSet.
-
-        Overlap is computed based on shared sample IDs.
-        """
-        
-        if not self.subsets:
-            raise ValueError("No subsets available. Use `.split()` or `.add_subset()` first.")
-
-        subset_names = list(self.subsets.keys())
-        overlap_matrix = pd.DataFrame(0, index=subset_names, columns=subset_names)
-
-        # Precompute sample ID sets for each subset
-        subset_ids = {name: set(subset.sample_ids) for name, subset in self.subsets.items()}
-
-        for i, name_i in enumerate(subset_names):
-            for j, name_j in enumerate(subset_names):
-                overlap = subset_ids[name_i].intersection(subset_ids[name_j])
-                overlap_matrix.loc[name_i, name_j] = len(overlap)
-
-        # Plot
-        plt.figure(figsize=(max(6, len(subset_names)), 6))
-        sns.heatmap(overlap_matrix, annot=True, fmt='d', cmap='Blues', square=True)
-        plt.title("Sample Overlap Between Subsets")
-        plt.xlabel("Subset B")
-        plt.ylabel("Subset A")
-        plt.xticks(rotation=45, ha="right")
-        plt.yticks(rotation=0)
-        plt.tight_layout()
-        plt.show()
-    
-    
+  
     
     # TODO:
     #   - apply transforms in init
