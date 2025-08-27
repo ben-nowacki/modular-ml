@@ -5,7 +5,7 @@ Modular, fast, and reproducible ML experimentation built for R\&D.
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/modularml.svg)](https://pypi.org/project/modularml/)
-[![Docs](https://img.shields.io/badge/docs-coming--soon-lightgrey)](https://github.com/REIL-UConn/modular-ml/)
+[![Docs](https://app.readthedocs.org/projects/<project-slug>/badge/?version=<latest>&style=<flat>)](https://modular-ml.readthedocs.io/en/latest/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange
 )](LICENSE)
 
@@ -82,7 +82,7 @@ Below outlines a basic toy example of using ModularML:
 
 ## Explore More
 - **[Examples (coming soon)](examples/)** – Explore complete examples of how to set up FeatureSets, samplers, model graphs, and training configurations.
-- **[Documentation (coming soon)](https://github.com/REIL-UConn/modular-ml/)** – API reference, component explanations, YAML configuration guides, and tutorials.
+- **[Documentation (coming soon)](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, YAML configuration guides, and tutorials.
 - **[Discussions (coming soon)](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
 
 ---
