@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=65", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ModularML"
+dynamic = ["version"]
+description = "A library for modular, fast, and reproducible ML experimentation built for R&D."
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    {name = "Benjamin Nowacki", email = "benjamin.nowacki@uconn.edu"},
+    {name = "Tingkai Li", email = "tingkai.li@uconn.edu"},
+    {name = "Chao Hu", email = "chao.hu@uconn.edu"}
+]
+
+requires-python = ">=3.9"
+keywords = [
+    "Machine learning",
+    "Deep learning",
+    "Reproducible research",
+    "Neural networks",
+    "Scientific computing",
+    "Scientific machine learning"
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python"
+]
+
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "scikit-learn",
+    "scikit-optimize>=0.9.0",
+    "optuna",                      # For hyperparameter tuning
+    "torch",                       # PyTorch backend
+    "tensorflow",                  # TensorFlow backend
+    "networkx",                    # DAG structure
+    "plotly",
+    "matplotlib",
+    "nbformat"
+]
+
+
+[project.urls]
+Homepage = "https://github.com/REIL-UConn/modular-ml"
+Repository = "https://github.com/REIL-UConn/modular-ml"
+Issues = "https://github.com/REIL-UConn/modular-ml/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["modularml"]
+exclude = ["docs*", "examples*"]
+
+[tool.setuptools_scm]
+version_scheme = "post-release"
+local_scheme = "no-local-version"
