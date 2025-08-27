@@ -2,6 +2,13 @@
 
 Modular, fast, and reproducible ML experimentation built for R\&D.
 
+
+[![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
+[![PyPI](https://img.shields.io/pypi/v/modularml.svg)](https://pypi.org/project/modularml/)
+[![Docs](https://img.shields.io/badge/docs-coming--soon-lightgrey)](https://github.com/REIL-UConn/modular-ml/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-orange
+)](LICENSE)
+
 ---
 
 # Why ModularML?
