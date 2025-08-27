@@ -13,9 +13,9 @@ sys.path.insert(0, os.path.abspath(".."))
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'modularml'
-copyright = '2025, -'
-author = '-'
+project = 'ModularML'
+copyright = '2025, Benjamin Nowacki, Tingkai Li, and Chao Hu'
+author = 'Benjamin Nowacki, Tingkai Li, and Chao Hu'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
@@ -57,6 +57,15 @@ nb_merge_streams = True  # cleaner stdout/stderr in output
 html_theme = "sphinx_rtd_theme"
 html_static_path = ['_static']
 html_theme_options = {
-    "collapse_navigation": False,  # keep sections expanded
-    "navigation_depth": 4,         # how deep the sidebar can go
+    "collapse_navigation": False,
+    "navigation_depth": 4,
+    "style_external_links": True,
+}
+
+html_context = {
+    "display_github": True,  # enables the GitHub icon
+    "github_user": "REIL-UConn",
+    "github_repo": "modular-ml",
+    "github_version": "main",
+    "conf_py_path": "/docs/",
 }
