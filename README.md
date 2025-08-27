@@ -88,7 +88,7 @@ Below outlines a basic toy example of using ModularML:
 
 - **[Examples (coming soon)](https://github.com/REIL-UConn/modular-ml/examples/)** – Explore complete examples of how to set up FeatureSets, samplers, model graphs, and training configurations.
 - **[Documentation (coming soon)](https://github.com/REIL-UConn/modular-ml/)** – API reference, component explanations, YAML configuration guides, and tutorials.
-- **[Discussions](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
+- **[Discussions (coming soon)](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
 
 ---
 
