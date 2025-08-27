@@ -24,6 +24,8 @@ from modularml.core.data_structures.batch import Batch
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.feature_set import FeatureSet
 from modularml.core.data_structures.multi_batch import MultiBatch
+from modularml.core.data_structures.sample import Sample
+from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.model_graph.model_stage import ModelStage, StageInput
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import get_data_format_for_backend
@@ -40,11 +42,25 @@ def make_dummy_data(shape: Tuple[int, ...], batch_size:int=None) -> Data:
         shape = (batch_size, ) + shape
         
     # Create dummy data
-    d = Data(np.zeros(shape=shape))
+    d = Data(np.ones(shape=shape))
     
     return d
-        
+
+def make_dummy_batch(feature_shape: Tuple[int, ...], batch_size:int=8) -> Batch:
+    sample_coll = SampleCollection([
+        Sample(
+            features={'features_1': make_dummy_data(shape=feature_shape)},
+            targets={'targets_1': make_dummy_data(shape=(1,1))},
+            tags={'tags_1': make_dummy_data(shape=(1,)), 'tags_2': make_dummy_data(shape=(1,))},
+        )
+        for i in range(batch_size)
+    ])
+    return Batch(
+        role_samples = {'default': sample_coll}, 
+        label='dummy', 
+    )    
     
+
 class ModelGraph:
     def __init__(
         self,
@@ -210,7 +226,7 @@ class ModelGraph:
             prev_node = self.all_nodes[inp.source]
             
             if isinstance(prev_node, FeatureSet):
-                input_shapes.append( prev_node.feature_shape )
+                input_shapes.append(tuple(int(d) for d in prev_node.feature_shape))
                 continue
             
             elif isinstance(prev_node, ModelStage):
@@ -219,7 +235,7 @@ class ModelGraph:
                         f"Previous ModelStage has no output shape. "
                         f"Run .build() to perform model input/output shape inference."
                     )
-                input_shapes.append( prev_node.output_shape )
+                input_shapes.append(tuple(int(d) for d in prev_node.output_shape))
                 continue
             
             else:
@@ -246,9 +262,9 @@ class ModelGraph:
         y = node.forward(X)
         
         # Drop batch dimension
-        return y.shape[1:]
-    
-    
+        return tuple(int(dim) for dim in y.shape[1:])
+
+
 
     def forward(self, batch: MultiBatch) -> Dict[str, Batch]:
         
@@ -286,6 +302,21 @@ class ModelGraph:
             
         return cache
     
+    def dummy_foward(self, batch_size:int = 8) -> Batch:
+        """
+        A foward pass through the entire ModelGraph with a dummy input to test connections.
+        """
+        if len(self._feature_sets.keys()) > 1:
+            raise NotImplementedError(
+                f"`dummy_forward` doesn't currently support ModelGraphs with multiple FeatureSets."
+            )
+        fs = self._feature_sets[self.feature_set_labels[0]]
+        batch = make_dummy_batch(feature_shape=fs.feature_shape, batch_size=batch_size)
+        multi_batch = MultiBatch({self.feature_set_labels[0]: batch})
+        
+        res = self.forward(multi_batch)
+        output = res[self._sorted_stage_labels[-1]]
+        return output.get_samples('default').get_all_features(format='np').tolist()
         
     def visualize(
         self, 

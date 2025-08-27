@@ -310,7 +310,7 @@ class FeatureSet(SampleCollection):
         for i in range(n_samples):
             features = {k: Data(np.atleast_1d(data[k][i])) for k in feature_keys}
             targets = {k: Data(np.atleast_1d(data[k][i])) for k in target_keys}
-            tags = {k: Data(np.atleast_1d(data[k][i])) for k in tag_keys}
+            tags = {k: Data(data[k][i]) for k in tag_keys}
             samples.append(Sample(features=features, targets=targets, tags=tags, label=i))
 
         return cls(label=label, samples=samples)

@@ -143,14 +143,16 @@ class SampleCollection:
         raw : Dict[str, Any] = {}
 
         for key in self.samples[0].tags:
-            values = [s.tags[key].value for s in self.samples]
+            values = [
+                v.value.item() if isinstance(v.value, np.ndarray) and v.value.size == 1 else v.value
+                for v in [s.tags[key] for s in self.samples]
+            ]
 
-            # Automatically convert to numpy if all values are scalars
             if format in ("dict_numpy", DataFormat.DICT_NUMPY):
                 try:
                     raw[key] = np.array(values)
                 except Exception:
-                    raw[key] = values   # Fallback to list if dtype is inconsistent
+                    raw[key] = values
             else:
                 raw[key] = values
 
