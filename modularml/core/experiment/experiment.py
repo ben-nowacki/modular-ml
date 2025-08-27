@@ -45,7 +45,7 @@ class Experiment:
         self,
         graph: ModelGraph,
         phases: List[TrainingPhase],
-        tracking: Optional[TrackingManager] = None
+        tracking: Optional["TrackingManager"] = None    # type: ignore
     ):
         pass
     

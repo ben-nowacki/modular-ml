@@ -1,12 +1,10 @@
 
 
-
 from typing import List, Union
 
-from modularml.core.loss import AppliedLoss
-from modularml.core.model_stage import ModelStage
+from modularml.core.model_graph.loss import AppliedLoss
+from modularml.core.model_graph.model_stage import ModelStage
 from modularml.core.samplers.feature_sampler import FeatureSampler
-
 
 '''
 Encapsulates one stage of training

@@ -1,6 +1,12 @@
 
-# from modularml.core import *
-from modularml.models import *
+
+from modularml.utils.backend import Backend
+from modularml.utils.data_format import DataFormat
 
 
-__version__ = "0.1.0"
+
+try:
+    from importlib.metadata import version
+    __version__ = version("ModularML")
+except ImportError:
+    __version__ = "unknown"
