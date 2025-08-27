@@ -1,0 +1,192 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>modularml.core.model_graph.model_graph &mdash; modularml  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="modularml.core.model_graph.model_stage" href="modularml.core.model_graph.model_stage.html" />
+    <link rel="prev" title="modularml.core.model_graph.loss" href="modularml.core.model_graph.loss.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            modularml
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="modularml.html">modularml</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="modularml.core.html">modularml.core</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Batch"><code class="docutils literal notranslate"><span class="pre">Batch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Data"><code class="docutils literal notranslate"><span class="pre">Data</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSet"><code class="docutils literal notranslate"><span class="pre">FeatureSet</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSubset"><code class="docutils literal notranslate"><span class="pre">FeatureSubset</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.MultiBatch"><code class="docutils literal notranslate"><span class="pre">MultiBatch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Sample"><code class="docutils literal notranslate"><span class="pre">Sample</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.SampleCollection"><code class="docutils literal notranslate"><span class="pre">SampleCollection</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.StageInput"><code class="docutils literal notranslate"><span class="pre">StageInput</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.data_structures.html">modularml.core.data_structures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.experiment.html">modularml.core.experiment</a></li>
+<li class="toctree-l4 current"><a class="reference internal" href="modularml.core.model_graph.html">modularml.core.model_graph</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.samplers.html">modularml.core.samplers</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.splitters.html">modularml.core.splitters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.training.html">modularml.core.training</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.models.html">modularml.models</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialCNN"><code class="docutils literal notranslate"><span class="pre">SequentialCNN</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialMLP"><code class="docutils literal notranslate"><span class="pre">SequentialMLP</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.base.html">modularml.models.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.combinators.html">modularml.models.combinators</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.sequential.html">modularml.models.sequential</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.utils.html">modularml.utils</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.Backend"><code class="docutils literal notranslate"><span class="pre">Backend</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.DataFormat"><code class="docutils literal notranslate"><span class="pre">DataFormat</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.backend.html">modularml.utils.backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.data_format.html">modularml.utils.data_format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.exceptions.html">modularml.utils.exceptions</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples/index.html">Examples</a><ul class="simple">
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">modularml</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">API Reference</a></li>
+          <li class="breadcrumb-item"><a href="modularml.html">modularml</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.html">modularml.core</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.model_graph.html">modularml.core.model_graph</a></li>
+      <li class="breadcrumb-item active">modularml.core.model_graph.model_graph</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="../../_sources/api/generated/modularml.core.model_graph.model_graph.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-modularml.core.model_graph.model_graph">
+<span id="modularml-core-model-graph-model-graph"></span><h1>modularml.core.model_graph.model_graph<a class="headerlink" href="#module-modularml.core.model_graph.model_graph" title="Link to this heading"></a></h1>
+<p>DAG of FeatureSets and ModelStages</p>
+<dl>
+<dt>Responsibilities:</dt><dd><p>Stores all nodes: FeatureSets and ModelStages.
+Stores all edges: how outputs of one stage feed another.
+Performs:</p>
+<blockquote>
+<div><p>Topological sorting
+Lazy build() propagation of shapes
+Forward pass through the graph</p>
+</div></blockquote>
+</dd>
+</dl>
+<p class="rubric">Functions</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">make_dummy_batch</span></code>(feature_shape[, batch_size])</p></td>
+<td><p></p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#modularml.core.model_graph.model_graph.make_dummy_data" title="modularml.core.model_graph.model_graph.make_dummy_data"><code class="xref py py-obj docutils literal notranslate"><span class="pre">make_dummy_data</span></code></a>(shape[, batch_size])</p></td>
+<td><p>Creates a dummy Data object.</p></td>
+</tr>
+</tbody>
+</table>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><code class="xref py py-obj docutils literal notranslate"><span class="pre">ModelGraph</span></code>(nodes)</p></td>
+<td><p></p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py function">
+<dt class="sig sig-object py" id="modularml.core.model_graph.model_graph.make_dummy_data">
+<span class="sig-prename descclassname"><span class="pre">modularml.core.model_graph.model_graph.</span></span><span class="sig-name descname"><span class="pre">make_dummy_data</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">shape</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Tuple</span><span class="p"><span class="pre">[</span></span><span class="pre">int</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">batch_size</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="modularml.core.data_structures.data.html#modularml.core.data_structures.data.Data" title="modularml.core.data_structures.data.Data"><span class="pre">Data</span></a></span></span><a class="headerlink" href="#modularml.core.model_graph.model_graph.make_dummy_data" title="Link to this definition"></a></dt>
+<dd><p>Creates a dummy Data object. A batch dimension is added if <cite>batch_size</cite> is not None.</p>
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modularml.core.model_graph.loss.html" class="btn btn-neutral float-left" title="modularml.core.model_graph.loss" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="modularml.core.model_graph.model_stage.html" class="btn btn-neutral float-right" title="modularml.core.model_graph.model_stage" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, -.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

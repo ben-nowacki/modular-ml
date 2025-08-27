@@ -5,9 +5,19 @@ Welcome to the **modular-ml** docs!
 ## Installation
 ```bash
 pip install modular-ml
+```
 
 ## Quick start
-```bash
-import modular_ml
-print(modular_ml.__version__)
+```python
+import modularml
+print(modularml.__version__)
+```
+
+```{toctree}
+:caption: Contents
+:maxdepth: 3
+
+api/index
+examples/index
+
 
