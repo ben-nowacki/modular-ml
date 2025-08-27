@@ -14,6 +14,9 @@ class BaseModel(ABC):
         self.config = config
         self._backend = backend
         self._built = False
+        
+        self.output_shape = None
+        self.input_shape = None
 
     @property
     def backend(self) -> Backend:
@@ -26,17 +29,13 @@ class BaseModel(ABC):
         return self._built
         
     @abstractmethod
-    def build(self, input_shape: Tuple[int, ...]) -> None:
-        """
-        Build the internal model layers given an input shape.
-        """
+    def build(self, input_shape: Optional[Tuple[int]] = None, output_shape: Optional[Tuple[int]] = None) -> None:
+        """Build the internal model layers given an input shape."""
         pass
 
     @abstractmethod
     def forward(self, *args, **kwargs):
-        """
-        Forward pass.
-        """
+        """Forward pass."""
         pass
 
     @abstractmethod
@@ -44,8 +43,6 @@ class BaseModel(ABC):
         """Run a forward pass"""
         pass
 
-
-    
     def get_config(self) -> Dict[str, Any]:
         """Return a serializable config dictionary, including `_target_`."""
         return {

@@ -85,7 +85,7 @@ def convert_to_format(data: Dict[str, Any], format: Union[str, DataFormat]) -> A
     elif fmt == DataFormat.TORCH:
         if torch is None:
             raise ImportError("PyTorch is not installed.")
-        return torch.from_numpy(np.column_stack(list(data.values()))).float()
+        return torch.from_numpy(np.column_stack(list(data.values()))).to(torch.float32)
 
     elif fmt == DataFormat.TENSORFLOW:
         if tf is None:
@@ -95,4 +95,19 @@ def convert_to_format(data: Dict[str, Any], format: Union[str, DataFormat]) -> A
     else:
         raise ValueError(f"Unsupported data format: {fmt}")
 
+def get_data_format_for_backend(backend: Union[str, Backend]) -> DataFormat:
+    if isinstance(backend, str):
+        backend = Backend(backend)
+        
+    if backend == Backend.TORCH:
+        return DataFormat.TORCH
+    elif backend == Backend.TENSORFLOW:
+        return DataFormat.TENSORFLOW
+    elif backend == Backend.SCIKIT:
+        return DataFormat.NUMPY
+    else:
+        raise ValueError(f"Unsupported backend: {backend}")
+    
+    
 
+    

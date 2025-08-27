@@ -6,13 +6,10 @@ from typing import Tuple, Dict, Any, Optional
 
 
 from modularml.models.base import BaseModel
-# from modularml.models.model_registry import ModelRegistry
 from modularml.utils.backend import Backend
-from modularml.core.activation import Activation
+from modularml.core.model_graph.activation import Activation
 
 
-
-# @ModelRegistry.register("SequentialMLP")
 class SequentialMLP(BaseModel, torch.nn.Module):
     def __init__(
         self, 
@@ -127,7 +124,7 @@ class SequentialMLP(BaseModel, torch.nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, *output_shape)
         """
         if not self.is_built():
-            self.build(input_shape=x.shape[1:])  # input_shape = (n_features, feature_len)
+            self.build(input_shape=tuple(x.shape[1:]))  # input_shape = (n_features, feature_len)
         
         x = x.view(x.size(0), -1)
         x = self.fc(x)
@@ -146,7 +143,6 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         return self.forward(x)
 
 
-# @ModelRegistry.register("SequentialCNN")
 class SequentialCNN(BaseModel, torch.nn.Module):
     def __init__(
         self, 
