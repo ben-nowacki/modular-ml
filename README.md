@@ -59,11 +59,7 @@ ModularML includes a comprehensive set of components for scientific ML workflows
 
 ## Getting Started
 
-### Requirements
-- Python >= 3.8  
-- PyTorch >= 1.10  
-- TensorFlow >= 2.8  
-- NumPy >= 1.22  
+Requires Python >= 3.9
 
 ### Installation
 Install from PyPI:
