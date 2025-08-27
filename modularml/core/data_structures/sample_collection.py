@@ -5,6 +5,9 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Union
 
+import numpy as np
+
+from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import DataFormat, convert_to_format
@@ -33,6 +36,15 @@ class SampleCollection:
         self._label_sample_map: Dict[str, Sample] = {
             s.label: s for s in self.samples
         }
+        
+        # Enforce consistent shapes
+        f_shapes = list(set([s.feature_shape for s in self.samples]))
+        if not len(f_shapes) == 1:
+            raise ValueError(f"Inconsistent SampleCollection feature shapes: {f_shapes}.")
+            
+        t_shapes = list(set([s.target_shape for s in self.samples]))
+        if not len(t_shapes) == 1:
+            raise ValueError(f"Inconsistent SampleCollection target sizes: {t_shapes}.")
         
     
     def __len__(self) -> int:
@@ -85,22 +97,65 @@ class SampleCollection:
     def get_all_features(self, format: Union[str, DataFormat] = DataFormat.DICT_NUMPY) -> Any:
         """
         Returns all features across all samples in the specified format.
-        """        
-        raw = {k: [s.features[k].to_numpy() for s in self.samples] for k in self.feature_keys}
+        """ 
+        raw = {}
+
+        for k in self.feature_keys:
+            values = [s.features[k].value for s in self.samples]
+
+            if format in ("dict_numpy", DataFormat.DICT_NUMPY):
+                try:
+                    raw[k] = np.array(values)
+                except Exception:
+                    raw[k] = values
+            else:
+                raw[k] = values
+
         return convert_to_format(raw, format=format)
 
     def get_all_targets(self, format: Union[str, DataFormat] = DataFormat.DICT_NUMPY) -> Any:
         """
         Returns all targets across all samples in the specified format.
         """
-        raw = {k: [s.targets[k].to_numpy() for s in self.samples] for k in self.samples[0].targets}
+        target_keys = self.samples[0].targets.keys()
+        raw = {}
+
+        for k in target_keys:
+            values = [s.targets[k].value for s in self.samples]
+
+            if format in ("dict_numpy", DataFormat.DICT_NUMPY):
+                try:
+                    raw[k] = np.array(values)
+                except Exception:
+                    raw[k] = values
+            else:
+                raw[k] = values
+
         return convert_to_format(raw, format=format)
 
     def get_all_tags(self, format: Union[str, DataFormat] = DataFormat.DICT_NUMPY) -> Any:
         """
         Returns all tags across all samples in the specified format.
+
+        Each tag will be returned as a list of values across samples.
+        The format argument controls the output structure.
         """
-        raw = {k: [s.tags[k].to_numpy() for s in self.samples] for k in self.samples[0].tags}
+        raw : Dict[str, Any] = {}
+
+        for key in self.samples[0].tags:
+            values = [
+                v.value.item() if isinstance(v.value, np.ndarray) and v.value.size == 1 else v.value
+                for v in [s.tags[key] for s in self.samples]
+            ]
+
+            if format in ("dict_numpy", DataFormat.DICT_NUMPY):
+                try:
+                    raw[key] = np.array(values)
+                except Exception:
+                    raw[key] = values
+            else:
+                raw[key] = values
+
         return convert_to_format(raw, format=format)
 
 

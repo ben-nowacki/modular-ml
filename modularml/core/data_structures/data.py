@@ -23,8 +23,8 @@ class Data:
             return Backend.TENSORFLOW
         elif isinstance(self.value, (np.ndarray, np.generic)):
             return Backend.SCIKIT
-        elif isinstance(self.value, (int, float, bool)):
-            return Backend.SCIKIT
+        elif isinstance(self.value, (int, float, list, bool)):
+            return Backend.NONE
         else:
             raise TypeError(f"Unsupported type for Data: {type(self.value)}")
 
@@ -34,12 +34,24 @@ class Data:
 
     @property
     def shape(self):
-        return self.value.shape
+        if hasattr(self.value, 'shape'):
+            return self.value.shape
+        else:
+            return tuple(np.asarray(self.value).shape)
 
     @property
     def dtype(self):
-        return self.value.dtype
-        
+        if hasattr(self.value, 'dtype'):
+            return self.value.dtype
+        else: 
+            return type(self.value)
+    
+    def __len__(self):
+        try:
+            return len(self.value)
+        except TypeError:
+            raise TypeError(f"Data object wrapping {type(self.value)} has no length")
+    
     def __getitem__(self, key) -> "Data":
         return Data(self.value[key])
     
@@ -66,33 +78,33 @@ class Data:
     def __ge__(self, other):
         return self.value >= (other.value if isinstance(other, Data) else other)
     
-
-    def to_numpy(self) -> np.ndarray:
+    
+    # ==================================================================
+    # Raw Conversions
+    # ==================================================================
+    def to_numpy(self, dtype: np.dtype = np.float32) -> np.ndarray:
         if self.backend == Backend.TORCH:
-            return self.value.detach().cpu().numpy()
+            return self.value.detach().cpu().numpy().astype(dtype)
         elif self.backend == Backend.TENSORFLOW:
-            return self.value.numpy()
-        elif self.backend == Backend.SCIKIT:
-            return self.value
+            return self.value.numpy().astype(dtype)
+        elif self.backend in (Backend.SCIKIT, Backend.NONE):
+            return np.array(self.value, dtype=dtype)
         else:
-            raise RuntimeError(f"Cannot convert unknown backend to NumPy")
+            raise RuntimeError("Cannot convert unknown backend to NumPy")
 
-    def to_torch(self) -> torch.Tensor:
+    def to_torch(self, dtype: torch.dtype = torch.float32) -> torch.Tensor:
         if self.backend == Backend.TORCH:
-            return self.value
-        else:
-            return torch.from_numpy(self.to_numpy())
+            return self.value.to(dtype=dtype)
+        return torch.from_numpy(self.to_numpy()).to(dtype=dtype)
 
-    def to_tensorflow(self) -> tf.Tensor:
+    def to_tensorflow(self, dtype: tf.dtypes.DType = tf.float32) -> tf.Tensor:
         if self.backend == Backend.TENSORFLOW:
-            return self.value
-        else:
-            return tf.convert_to_tensor(self.to_numpy())
+            return tf.cast(self.value, dtype)
+        return tf.convert_to_tensor(self.to_numpy(), dtype=dtype)
 
     def to_backend(self, target: Union[str, Backend]) -> Union[np.ndarray, torch.Tensor, tf.Tensor]:
         if isinstance(target, str):
             target = Backend(target)
-            
         if target == Backend.TORCH:
             return self.to_torch()
         elif target == Backend.TENSORFLOW:
@@ -102,5 +114,18 @@ class Data:
         else:
             raise ValueError(f"Unsupported target backend: {target}")
 
+    # ==================================================================
+    # Data-Wrapped Conversions
+    # ==================================================================
+    def as_numpy(self, dtype: np.dtype = np.float32) -> "Data":
+        return Data(self.to_numpy(dtype))
 
-    
+    def as_torch(self, dtype: torch.dtype = torch.float32) -> "Data":
+        return Data(self.to_torch(dtype))
+
+    def as_tensorflow(self, dtype: tf.dtypes.DType = tf.float32) -> "Data":
+        return Data(self.to_tensorflow(dtype))
+
+    def as_backend(self, target: Union[str, Backend]) -> "Data":
+        return Data(self.to_backend(target))
+   

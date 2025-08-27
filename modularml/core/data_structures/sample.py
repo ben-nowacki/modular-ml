@@ -31,21 +31,38 @@ class Sample:
         if not isinstance(self.uuid, str):
             raise TypeError(f"Sample ID must be a string. Got: {type(self.uuid)}")
         
-        # Enforce consistent backend on creation
-        backends = {d.backend for d in list(self.features.values()) + list(self.targets.values())}
+        # Check Data type
+        for k, v in self.features.items():
+            if not isinstance(v, Data):
+                raise TypeError(f"Feature '{k}' is not a Data object: {type(v)}")
+        for k, v in self.targets.items():
+            if not isinstance(v, Data):
+                raise TypeError(f"Target '{k}' is not a Data object: {type(v)}")
+        for k, v in self.tags.items():
+            if not isinstance(v, Data):
+                raise TypeError(f"Tag '{k}' is not a Data object: {type(v)}")
+    
+        # Check for backend consistency
+        data_items = list(self.features.values()) + list(self.targets.values())
+        backends = {d.backend for d in data_items if isinstance(d, Data)}
+
         if len(backends) > 1:
-            self = self.to_backend(backend=Backend.SCIKIT)
-        
+            # Choose a target backend (e.g., SCITKIT by default)
+            target_backend = Backend.SCIKIT
+            self.features = {k: v.as_backend(target_backend) for k, v in self.features.items()}
+            self.targets = {k: v.as_backend(target_backend) for k, v in self.targets.items()}
+            
         # Enforce consistent shapes
         f_shapes = [d.shape for d in self.features.values()]
         if len(set(f_shapes)) > 1:
             raise ValueError(f"Inconsistent feature shapes: {f_shapes}")
-        self._feature_shape = f_shapes[0]
+        self._feature_shape = (len(f_shapes), ) + tuple(f_shapes[0])
         
         t_shapes = [d.shape for d in self.targets.values()]
         if len(set(t_shapes)) > 1:
             raise ValueError(f"Inconsistent target shapes: {t_shapes}")
-        self._target_shape = t_shapes[0]
+        self._target_shape = (len(t_shapes), ) + tuple(t_shapes[0])
+        
         
     def __repr__(self) -> str:
         def summarize(d: Dict[str, Any]) -> Dict[str, str]:

@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple, U
 import warnings
 import numpy as np
 
+from modularml.core.data_structures.sample_collection import SampleCollection
+
 
 if TYPE_CHECKING:
     from modularml.core.data_structures.sample import Sample
@@ -123,8 +125,8 @@ class FeatureSampler:
                         continue
                     
                     batches.append(Batch(
-                        _samples={'main':batch_samples}, 
-                        index=batch_idx
+                        role_samples={'main':SampleCollection(batch_samples)}, 
+                        label=batch_idx
                     ))
                     batch_idx += 1
                         
@@ -173,8 +175,8 @@ class FeatureSampler:
                     continue
                 batches.append(
                     Batch(
-                        _samples={'main':batch_samples}, 
-                        index=batch_idx
+                        role_samples={'main':SampleCollection(batch_samples)}, 
+                        label=batch_idx
                     )
                 )
                 batch_idx += 1
@@ -201,8 +203,8 @@ class FeatureSampler:
                 
                 batches.append(
                     Batch(
-                        _samples={'main':batch_samples}, 
-                        index=batch_idx
+                        role_samples={'main':SampleCollection(batch_samples)}, 
+                        label=batch_idx
                     )
                 )
                 

@@ -87,11 +87,9 @@ class Optimizer:
         for k,v in self.opt_kwargs.items():
             msg_kwargs += f", {k}={v}"
         return (
-            f"Optimizer `{self.name}` ("
-            f"backend={self.backend}"
-            f"{msg_kwargs}"
-            f")\n"
+            f"Optimizer('{self.name}'{msg_kwargs})"
         )
+        
 
 
     @property
