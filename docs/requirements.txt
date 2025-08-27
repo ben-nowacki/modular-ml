@@ -1,8 +1,6 @@
 sphinx
-myst-parser
 sphinx-rtd-theme
-torch
-tensorflow
 myst-nb
 nbclient
 ipykernel
+nbformat

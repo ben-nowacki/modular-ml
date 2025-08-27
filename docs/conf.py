@@ -29,7 +29,10 @@ extensions = [
 autosummary_generate = True
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
-autodoc_mock_imports = ["torch", "tensorflow"]
+autodoc_mock_imports = [
+    "torch", "tensorflow", "pandas", "numpy", "scipy", "sklearn",
+    "skopt", "optuna", "networkx", "plotly", "matplotlib",
+]
 # Show both the class docstring and the __init__ docstring
 autoclass_content = "both"
 # If you use Google/NumPy style via napoleon, include __init__ in class docs
