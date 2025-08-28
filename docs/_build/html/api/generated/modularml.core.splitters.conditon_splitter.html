@@ -1,0 +1,233 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>modularml.core.splitters.conditon_splitter &mdash; ModularML  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css?v=6644e6bb" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="modularml.core.splitters.random_splitter" href="modularml.core.splitters.random_splitter.html" />
+    <link rel="prev" title="modularml.core.splitters" href="modularml.core.splitters.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            ModularML
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="modularml.html">modularml</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="modularml.core.html">modularml.core</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Batch"><code class="docutils literal notranslate"><span class="pre">Batch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Data"><code class="docutils literal notranslate"><span class="pre">Data</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSet"><code class="docutils literal notranslate"><span class="pre">FeatureSet</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSubset"><code class="docutils literal notranslate"><span class="pre">FeatureSubset</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.MultiBatch"><code class="docutils literal notranslate"><span class="pre">MultiBatch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Sample"><code class="docutils literal notranslate"><span class="pre">Sample</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.SampleCollection"><code class="docutils literal notranslate"><span class="pre">SampleCollection</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.StageInput"><code class="docutils literal notranslate"><span class="pre">StageInput</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.data_structures.html">modularml.core.data_structures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.experiment.html">modularml.core.experiment</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.model_graph.html">modularml.core.model_graph</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.samplers.html">modularml.core.samplers</a></li>
+<li class="toctree-l4 current"><a class="reference internal" href="modularml.core.splitters.html">modularml.core.splitters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.training.html">modularml.core.training</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.models.html">modularml.models</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialCNN"><code class="docutils literal notranslate"><span class="pre">SequentialCNN</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialMLP"><code class="docutils literal notranslate"><span class="pre">SequentialMLP</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.base.html">modularml.models.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.combinators.html">modularml.models.combinators</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.sequential.html">modularml.models.sequential</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.utils.html">modularml.utils</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.Backend"><code class="docutils literal notranslate"><span class="pre">Backend</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.DataFormat"><code class="docutils literal notranslate"><span class="pre">DataFormat</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.backend.html">modularml.utils.backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.data_format.html">modularml.utils.data_format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.exceptions.html">modularml.utils.exceptions</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples/index.html">Examples</a><ul class="simple">
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">ModularML</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content style-external-links">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">API Reference</a></li>
+          <li class="breadcrumb-item"><a href="modularml.html">modularml</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.html">modularml.core</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.splitters.html">modularml.core.splitters</a></li>
+      <li class="breadcrumb-item active">modularml.core.splitters.conditon_splitter</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/REIL-UConn/modular-ml/blob/main/docs/api/generated/modularml.core.splitters.conditon_splitter.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-modularml.core.splitters.conditon_splitter">
+<span id="modularml-core-splitters-conditon-splitter"></span><h1>modularml.core.splitters.conditon_splitter<a class="headerlink" href="#module-modularml.core.splitters.conditon_splitter" title="Link to this heading"></a></h1>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modularml.core.splitters.conditon_splitter.ConditionSplitter" title="modularml.core.splitters.conditon_splitter.ConditionSplitter"><code class="xref py py-obj docutils literal notranslate"><span class="pre">ConditionSplitter</span></code></a>(**conditions)</p></td>
+<td><p>Splits samples into subsets based on user-defined filtering conditions.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="modularml.core.splitters.conditon_splitter.ConditionSplitter">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">modularml.core.splitters.conditon_splitter.</span></span><span class="sig-name descname"><span class="pre">ConditionSplitter</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">conditions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Callable</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modularml.core.splitters.conditon_splitter.ConditionSplitter" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="modularml.core.splitters.splitter.html#modularml.core.splitters.splitter.BaseSplitter" title="modularml.core.splitters.splitter.BaseSplitter"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseSplitter</span></code></a></p>
+<p>Splits samples into subsets based on user-defined filtering conditions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>conditions</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>Dict</em><em>[</em><em>str</em><em>, </em><em>Union</em><em>[</em><em>Any</em><em>, </em><em>List</em><em>[</em><em>Any</em><em>]</em><em>, </em><em>Callable</em><em>]</em><em>]</em><em>]</em>) – The outer                 dict defines keys representing the new subset names. Within each subset,                 an inner dict defines the filtering conditions to construct the subset.                 The inner dictionary uses that same format as the <cite>FeatureSet.filter())</cite>                 method.</p>
+</dd>
+</dl>
+<p>Examples:
+Below defines three subsets (‘low_temp’, ‘high_temp’, and ‘cell_5’). The ‘low_temp’         subset contains all samples with temperatures under 20, the ‘high_temp’ subsets contains         all samples with temperature greater than 20, and the ‘cell_5’ subset contains all samples         where cell_id is 5.
+<strong>Note that subsets can have overlapping samples if the split conditions are not carefully</strong>
+<a href="#id1"><span class="problematic" id="id2">**</span></a>defined. A UserWarning will be raised when this happens, **</p>
+<dl>
+<dt><a href="#id3"><span class="problematic" id="id4">``</span></a>` python</dt><dd><dl class="simple">
+<dt>ConditionSplitter(</dt><dd><p>low_temp={‘temperature’: lambda x: x &lt; 20},
+high_temp={‘temperature’: lambda x: x &gt;= 20},
+cell_5={‘cell_id’: 5}</p>
+</dd>
+</dl>
+<p>)</p>
+</dd>
+</dl>
+<p><a href="#id5"><span class="problematic" id="id6">``</span></a><a href="#id7"><span class="problematic" id="id8">`</span></a></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.splitters.conditon_splitter.ConditionSplitter.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">conditions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">Callable</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modularml.core.splitters.conditon_splitter.ConditionSplitter.__init__" title="Link to this definition"></a></dt>
+<dd><p>Splits samples into subsets based on user-defined filtering conditions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>conditions</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>Dict</em><em>[</em><em>str</em><em>, </em><em>Union</em><em>[</em><em>Any</em><em>, </em><em>List</em><em>[</em><em>Any</em><em>]</em><em>, </em><em>Callable</em><em>]</em><em>]</em><em>]</em>) – The outer                 dict defines keys representing the new subset names. Within each subset,                 an inner dict defines the filtering conditions to construct the subset.                 The inner dictionary uses that same format as the <cite>FeatureSet.filter())</cite>                 method.</p>
+</dd>
+</dl>
+<p>Examples:
+Below defines three subsets (‘low_temp’, ‘high_temp’, and ‘cell_5’). The ‘low_temp’         subset contains all samples with temperatures under 20, the ‘high_temp’ subsets contains         all samples with temperature greater than 20, and the ‘cell_5’ subset contains all samples         where cell_id is 5.
+<strong>Note that subsets can have overlapping samples if the split conditions are not carefully</strong>
+<a href="#id9"><span class="problematic" id="id10">**</span></a>defined. A UserWarning will be raised when this happens, **</p>
+<dl>
+<dt><a href="#id11"><span class="problematic" id="id12">``</span></a>` python</dt><dd><dl class="simple">
+<dt>ConditionSplitter(</dt><dd><p>low_temp={‘temperature’: lambda x: x &lt; 20},
+high_temp={‘temperature’: lambda x: x &gt;= 20},
+cell_5={‘cell_id’: 5}</p>
+</dd>
+</dl>
+<p>)</p>
+</dd>
+</dl>
+<p><a href="#id13"><span class="problematic" id="id14">``</span></a><a href="#id15"><span class="problematic" id="id16">`</span></a></p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.splitters.conditon_splitter.ConditionSplitter.split">
+<span class="sig-name descname"><span class="pre">split</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">samples</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="modularml.core.data_structures.sample.html#modularml.core.data_structures.sample.Sample" title="modularml.core.data_structures.sample.Sample"><span class="pre">Sample</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#modularml.core.splitters.conditon_splitter.ConditionSplitter.split" title="Link to this definition"></a></dt>
+<dd><p>Applies the condition-based split on the given samples.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>samples</strong> (<em>List</em><em>[</em><a class="reference internal" href="modularml.core.html#modularml.core.Sample" title="modularml.core.Sample"><em>Sample</em></a><em>]</em>) – The list of samples to split.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Dictionary mapping subset names to <cite>Sample.uuid</cite>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Dict[str, List[str]]</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modularml.core.splitters.html" class="btn btn-neutral float-left" title="modularml.core.splitters" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="modularml.core.splitters.random_splitter.html" class="btn btn-neutral float-right" title="modularml.core.splitters.random_splitter" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Benjamin Nowacki, Tingkai Li, and Chao Hu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
