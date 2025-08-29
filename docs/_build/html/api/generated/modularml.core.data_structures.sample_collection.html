@@ -1,0 +1,207 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>modularml.core.data_structures.sample_collection &mdash; ModularML  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css?v=6644e6bb" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="modularml.core.experiment" href="modularml.core.experiment.html" />
+    <link rel="prev" title="modularml.core.data_structures.sample" href="modularml.core.data_structures.sample.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            ModularML
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="modularml.html">modularml</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="modularml.core.html">modularml.core</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Batch"><code class="docutils literal notranslate"><span class="pre">Batch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Data"><code class="docutils literal notranslate"><span class="pre">Data</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSet"><code class="docutils literal notranslate"><span class="pre">FeatureSet</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSubset"><code class="docutils literal notranslate"><span class="pre">FeatureSubset</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.MultiBatch"><code class="docutils literal notranslate"><span class="pre">MultiBatch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Sample"><code class="docutils literal notranslate"><span class="pre">Sample</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.SampleCollection"><code class="docutils literal notranslate"><span class="pre">SampleCollection</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.StageInput"><code class="docutils literal notranslate"><span class="pre">StageInput</span></code></a></li>
+<li class="toctree-l4 current"><a class="reference internal" href="modularml.core.data_structures.html">modularml.core.data_structures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.experiment.html">modularml.core.experiment</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.model_graph.html">modularml.core.model_graph</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.samplers.html">modularml.core.samplers</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.splitters.html">modularml.core.splitters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.training.html">modularml.core.training</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.models.html">modularml.models</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialCNN"><code class="docutils literal notranslate"><span class="pre">SequentialCNN</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialMLP"><code class="docutils literal notranslate"><span class="pre">SequentialMLP</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.base.html">modularml.models.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.combinators.html">modularml.models.combinators</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.sequential.html">modularml.models.sequential</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.utils.html">modularml.utils</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.Backend"><code class="docutils literal notranslate"><span class="pre">Backend</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.DataFormat"><code class="docutils literal notranslate"><span class="pre">DataFormat</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.backend.html">modularml.utils.backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.data_format.html">modularml.utils.data_format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.exceptions.html">modularml.utils.exceptions</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples/index.html">Examples</a><ul class="simple">
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">ModularML</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content style-external-links">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">API Reference</a></li>
+          <li class="breadcrumb-item"><a href="modularml.html">modularml</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.html">modularml.core</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.data_structures.html">modularml.core.data_structures</a></li>
+      <li class="breadcrumb-item active">modularml.core.data_structures.sample_collection</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/REIL-UConn/modular-ml/blob/main/docs/api/generated/modularml.core.data_structures.sample_collection.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-modularml.core.data_structures.sample_collection">
+<span id="modularml-core-data-structures-sample-collection"></span><h1>modularml.core.data_structures.sample_collection<a class="headerlink" href="#module-modularml.core.data_structures.sample_collection" title="Link to this heading"></a></h1>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modularml.core.data_structures.sample_collection.SampleCollection" title="modularml.core.data_structures.sample_collection.SampleCollection"><code class="xref py py-obj docutils literal notranslate"><span class="pre">SampleCollection</span></code></a>(samples)</p></td>
+<td><p>A lightweight container for a list of Sample instances.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="modularml.core.data_structures.sample_collection.SampleCollection">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">modularml.core.data_structures.sample_collection.</span></span><span class="sig-name descname"><span class="pre">SampleCollection</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">samples</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="modularml.core.data_structures.sample.html#modularml.core.data_structures.sample.Sample" title="modularml.core.data_structures.sample.Sample"><span class="pre">Sample</span></a><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modularml.core.data_structures.sample_collection.SampleCollection" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>A lightweight container for a list of Sample instances.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="modularml.core.data_structures.sample_collection.SampleCollection.samples">
+<span class="sig-name descname"><span class="pre">samples</span></span><a class="headerlink" href="#modularml.core.data_structures.sample_collection.SampleCollection.samples" title="Link to this definition"></a></dt>
+<dd><p>A list of Sample instances.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List[<a class="reference internal" href="modularml.core.html#modularml.core.Sample" title="modularml.core.Sample">Sample</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.sample_collection.SampleCollection.get_all_features">
+<span class="sig-name descname"><span class="pre">get_all_features</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">format</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.data_format.html#modularml.utils.data_format.DataFormat" title="modularml.utils.data_format.DataFormat"><span class="pre">DataFormat</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DataFormat.DICT_NUMPY</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#modularml.core.data_structures.sample_collection.SampleCollection.get_all_features" title="Link to this definition"></a></dt>
+<dd><p>Returns all features across all samples in the specified format.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.sample_collection.SampleCollection.get_all_tags">
+<span class="sig-name descname"><span class="pre">get_all_tags</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">format</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.data_format.html#modularml.utils.data_format.DataFormat" title="modularml.utils.data_format.DataFormat"><span class="pre">DataFormat</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DataFormat.DICT_NUMPY</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#modularml.core.data_structures.sample_collection.SampleCollection.get_all_tags" title="Link to this definition"></a></dt>
+<dd><p>Returns all tags across all samples in the specified format.</p>
+<p>Each tag will be returned as a list of values across samples.
+The format argument controls the output structure.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.sample_collection.SampleCollection.get_all_targets">
+<span class="sig-name descname"><span class="pre">get_all_targets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">format</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.data_format.html#modularml.utils.data_format.DataFormat" title="modularml.utils.data_format.DataFormat"><span class="pre">DataFormat</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DataFormat.DICT_NUMPY</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#modularml.core.data_structures.sample_collection.SampleCollection.get_all_targets" title="Link to this definition"></a></dt>
+<dd><p>Returns all targets across all samples in the specified format.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.sample_collection.SampleCollection.to_backend">
+<span class="sig-name descname"><span class="pre">to_backend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.backend.html#modularml.utils.backend.Backend" title="modularml.utils.backend.Backend"><span class="pre">Backend</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#modularml.core.data_structures.sample_collection.SampleCollection" title="modularml.core.data_structures.sample_collection.SampleCollection"><span class="pre">SampleCollection</span></a></span></span><a class="headerlink" href="#modularml.core.data_structures.sample_collection.SampleCollection.to_backend" title="Link to this definition"></a></dt>
+<dd><p>Returns a new SampleCollection with all Data objects converted to the specified backend.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modularml.core.data_structures.sample.html" class="btn btn-neutral float-left" title="modularml.core.data_structures.sample" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="modularml.core.experiment.html" class="btn btn-neutral float-right" title="modularml.core.experiment" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Benjamin Nowacki, Tingkai Li, and Chao Hu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

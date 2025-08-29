@@ -1,0 +1,294 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>modularml.core.data_structures.feature_subset &mdash; ModularML  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css?v=6644e6bb" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="modularml.core.data_structures.feature_transform" href="modularml.core.data_structures.feature_transform.html" />
+    <link rel="prev" title="modularml.core.data_structures.feature_set" href="modularml.core.data_structures.feature_set.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            ModularML
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="reference internal" href="../index.html">API Reference</a><ul class="current">
+<li class="toctree-l2 current"><a class="reference internal" href="modularml.html">modularml</a><ul class="current">
+<li class="toctree-l3 current"><a class="reference internal" href="modularml.core.html">modularml.core</a><ul class="current">
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Batch"><code class="docutils literal notranslate"><span class="pre">Batch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Data"><code class="docutils literal notranslate"><span class="pre">Data</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSet"><code class="docutils literal notranslate"><span class="pre">FeatureSet</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSubset"><code class="docutils literal notranslate"><span class="pre">FeatureSubset</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.MultiBatch"><code class="docutils literal notranslate"><span class="pre">MultiBatch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.Sample"><code class="docutils literal notranslate"><span class="pre">Sample</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.SampleCollection"><code class="docutils literal notranslate"><span class="pre">SampleCollection</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.html#modularml.core.StageInput"><code class="docutils literal notranslate"><span class="pre">StageInput</span></code></a></li>
+<li class="toctree-l4 current"><a class="reference internal" href="modularml.core.data_structures.html">modularml.core.data_structures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.experiment.html">modularml.core.experiment</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.model_graph.html">modularml.core.model_graph</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.samplers.html">modularml.core.samplers</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.splitters.html">modularml.core.splitters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.core.training.html">modularml.core.training</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.models.html">modularml.models</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialCNN"><code class="docutils literal notranslate"><span class="pre">SequentialCNN</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.html#modularml.models.SequentialMLP"><code class="docutils literal notranslate"><span class="pre">SequentialMLP</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.base.html">modularml.models.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.combinators.html">modularml.models.combinators</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.models.sequential.html">modularml.models.sequential</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="modularml.utils.html">modularml.utils</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.Backend"><code class="docutils literal notranslate"><span class="pre">Backend</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.html#modularml.utils.DataFormat"><code class="docutils literal notranslate"><span class="pre">DataFormat</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.backend.html">modularml.utils.backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.data_format.html">modularml.utils.data_format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="modularml.utils.exceptions.html">modularml.utils.exceptions</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../examples/index.html">Examples</a><ul class="simple">
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">ModularML</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content style-external-links">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">API Reference</a></li>
+          <li class="breadcrumb-item"><a href="modularml.html">modularml</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.html">modularml.core</a></li>
+          <li class="breadcrumb-item"><a href="modularml.core.data_structures.html">modularml.core.data_structures</a></li>
+      <li class="breadcrumb-item active">modularml.core.data_structures.feature_subset</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/REIL-UConn/modular-ml/blob/main/docs/api/generated/modularml.core.data_structures.feature_subset.rst" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="module-modularml.core.data_structures.feature_subset">
+<span id="modularml-core-data-structures-feature-subset"></span><h1>modularml.core.data_structures.feature_subset<a class="headerlink" href="#module-modularml.core.data_structures.feature_subset" title="Link to this heading"></a></h1>
+<p class="rubric">Classes</p>
+<table class="autosummary longtable docutils align-default">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset"><code class="xref py py-obj docutils literal notranslate"><span class="pre">FeatureSubset</span></code></a>(label, parent, sample_uuids)</p></td>
+<td><p>A filtered subset of samples from a parent FeatureSet.</p></td>
+</tr>
+</tbody>
+</table>
+<dl class="py class">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">modularml.core.data_structures.feature_subset.</span></span><span class="sig-name descname"><span class="pre">FeatureSubset</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">label</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">parent</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSet" title="modularml.core.FeatureSet"><span class="pre">FeatureSet</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">sample_uuids</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="Link to this definition"></a></dt>
+<dd><p>Bases: <a class="reference internal" href="modularml.core.data_structures.sample_collection.html#modularml.core.data_structures.sample_collection.SampleCollection" title="modularml.core.data_structures.sample_collection.SampleCollection"><code class="xref py py-class docutils literal notranslate"><span class="pre">SampleCollection</span></code></a></p>
+<p>A filtered subset of samples from a parent FeatureSet.
+Holds weak reference to parent FeatureSet to avoid circular memory references.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.get_all_features">
+<span class="sig-name descname"><span class="pre">get_all_features</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">format</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.data_format.html#modularml.utils.data_format.DataFormat" title="modularml.utils.data_format.DataFormat"><span class="pre">DataFormat</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DataFormat.DICT_NUMPY</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.get_all_features" title="Link to this definition"></a></dt>
+<dd><p>Returns all features across all samples in the specified format.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.get_all_tags">
+<span class="sig-name descname"><span class="pre">get_all_tags</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">format</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.data_format.html#modularml.utils.data_format.DataFormat" title="modularml.utils.data_format.DataFormat"><span class="pre">DataFormat</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DataFormat.DICT_NUMPY</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.get_all_tags" title="Link to this definition"></a></dt>
+<dd><p>Returns all tags across all samples in the specified format.</p>
+<p>Each tag will be returned as a list of values across samples.
+The format argument controls the output structure.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.get_all_targets">
+<span class="sig-name descname"><span class="pre">get_all_targets</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">format</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.data_format.html#modularml.utils.data_format.DataFormat" title="modularml.utils.data_format.DataFormat"><span class="pre">DataFormat</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">DataFormat.DICT_NUMPY</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Any</span></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.get_all_targets" title="Link to this definition"></a></dt>
+<dd><p>Returns all targets across all samples in the specified format.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.is_disjoint_with">
+<span class="sig-name descname"><span class="pre">is_disjoint_with</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">other</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset"><span class="pre">FeatureSubset</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">bool</span></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.is_disjoint_with" title="Link to this definition"></a></dt>
+<dd><p>Checks whether this subset is disjoint from another (i.e., no overlapping samples).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>other</strong> (<a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset"><em>FeatureSubset</em></a>) – Another subset to compare against.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>True if the subsets are disjoint (no shared samples), False otherwise.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py property">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.parent">
+<em class="property"><span class="k"><span class="pre">property</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">parent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="modularml.core.html#modularml.core.FeatureSet" title="modularml.core.FeatureSet"><span class="pre">FeatureSet</span></a></em><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.parent" title="Link to this definition"></a></dt>
+<dd><p>Access the parent FeatureSet. Raises error if parent is no longer alive.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.split">
+<span class="sig-name descname"><span class="pre">split</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">splitter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="modularml.core.splitters.splitter.html#modularml.core.splitters.splitter.BaseSplitter" title="modularml.core.splitters.splitter.BaseSplitter"><span class="pre">BaseSplitter</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset"><span class="pre">FeatureSubset</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.split" title="Link to this definition"></a></dt>
+<dd><p>Split the current FeatureSubset into multiple FeatureSubsets.
+<em>The created splits are automatically added to the parent `FeatureSet.subsets`,         in addition to being returned.</em></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>splitter</strong> (<a class="reference internal" href="modularml.core.splitters.html#modularml.core.splitters.BaseSplitter" title="modularml.core.splitters.BaseSplitter"><em>BaseSplitter</em></a>) – The splitting method.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The created subsets.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List[<a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset">FeatureSubset</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.split_by_condition">
+<span class="sig-name descname"><span class="pre">split_by_condition</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">conditions</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">Any</span><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset"><span class="pre">FeatureSubset</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.split_by_condition" title="Link to this definition"></a></dt>
+<dd><p>Convenience method to split samples using condition-based rules.
+This is equivalent to calling <cite>FeatureSet.split(splitter=ConditionSplitter(…))</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>**conditions</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>Dict</em><em>[</em><em>str</em><em>, </em><em>Any</em><em>]</em><em>]</em>) – Keyword arguments where each key                 is a subset name and each value is a dictionary of filter conditions.                 The filter conditions use the same format as <cite>.filter()</cite> method.</p>
+</dd>
+</dl>
+<p>Examples:
+Below defines three subsets (‘low_temp’, ‘high_temp’, and ‘cell_5’). The ‘low_temp’         subset contains all samples with temperatures under 20, the ‘high_temp’ subsets contains         all samples with temperature greater than 20, and the ‘cell_5’ subset contains all samples         where cell_id is 5.
+<strong>Note that subsets can have overlapping samples if the split conditions are not carefully</strong>
+<a href="#id1"><span class="problematic" id="id2">**</span></a>defined. A UserWarning will be raised when this happens, **</p>
+<dl>
+<dt><a href="#id3"><span class="problematic" id="id4">``</span></a>` python</dt><dd><dl class="simple">
+<dt>FeatureSet.split_by_condition(</dt><dd><p>low_temp={‘temperature’: lambda x: x &lt; 20},
+high_temp={‘temperature’: lambda x: x &gt;= 20},
+cell_5={‘cell_id’: 5}</p>
+</dd>
+</dl>
+<p>)</p>
+</dd>
+</dl>
+<p><a href="#id5"><span class="problematic" id="id6">``</span></a><a href="#id7"><span class="problematic" id="id8">`</span></a></p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>The created subsets.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>List[<a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset">FeatureSubset</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.split_random">
+<span class="sig-name descname"><span class="pre">split_random</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ratios</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Dict</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="pre">float</span><span class="p"><span class="pre">]</span></span></span></em>, <em class="sig-param"><span class="n"><span class="pre">seed</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">42</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">List</span><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset"><span class="pre">FeatureSubset</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.split_random" title="Link to this definition"></a></dt>
+<dd><p>Convenience method to split samples randomly based on given ratios.
+This is equivalent to calling <cite>FeatureSet.split(splitter=RandomSplitter(…))</cite>.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>ratios</strong> (<em>Dict</em><em>[</em><em>str</em><em>, </em><em>float</em><em>]</em>) – Dictionary mapping subset names to their respective                 split ratios. E.g., <cite>ratios={‘train’:0.5, ‘test’:0.5)</cite>. All values must add                 to exactly 1.0.</p></li>
+<li><p><strong>seed</strong> (<em>int</em><em>, </em><em>optional</em>) – Random seed for reproducibility. Defaults to 42.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>The created subsets.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List[<a class="reference internal" href="#modularml.core.data_structures.feature_subset.FeatureSubset" title="modularml.core.data_structures.feature_subset.FeatureSubset">FeatureSubset</a>]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="modularml.core.data_structures.feature_subset.FeatureSubset.to_backend">
+<span class="sig-name descname"><span class="pre">to_backend</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">backend</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="modularml.utils.backend.html#modularml.utils.backend.Backend" title="modularml.utils.backend.Backend"><span class="pre">Backend</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="modularml.core.data_structures.sample_collection.html#modularml.core.data_structures.sample_collection.SampleCollection" title="modularml.core.data_structures.sample_collection.SampleCollection"><span class="pre">SampleCollection</span></a></span></span><a class="headerlink" href="#modularml.core.data_structures.feature_subset.FeatureSubset.to_backend" title="Link to this definition"></a></dt>
+<dd><p>Returns a new SampleCollection with all Data objects converted to the specified backend.</p>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="modularml.core.data_structures.feature_set.html" class="btn btn-neutral float-left" title="modularml.core.data_structures.feature_set" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="modularml.core.data_structures.feature_transform.html" class="btn btn-neutral float-right" title="modularml.core.data_structures.feature_transform" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Benjamin Nowacki, Tingkai Li, and Chao Hu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,524 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Getting Started &mdash; ModularML  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../_static/mystnb.8ecb98da25f57f5357bf6f572d296f466b2cfe2517ffebfabe82451661e28f02.css?v=6644e6bb" />
+
+  
+      <script src="../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../index.html" class="icon icon-home">
+            ModularML
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/index.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../api/generated/modularml.html">modularml</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../api/generated/modularml.core.html">modularml.core</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.Batch"><code class="docutils literal notranslate"><span class="pre">Batch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.Data"><code class="docutils literal notranslate"><span class="pre">Data</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.FeatureSet"><code class="docutils literal notranslate"><span class="pre">FeatureSet</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.FeatureSubset"><code class="docutils literal notranslate"><span class="pre">FeatureSubset</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.MultiBatch"><code class="docutils literal notranslate"><span class="pre">MultiBatch</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.Sample"><code class="docutils literal notranslate"><span class="pre">Sample</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.SampleCollection"><code class="docutils literal notranslate"><span class="pre">SampleCollection</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.html#modularml.core.StageInput"><code class="docutils literal notranslate"><span class="pre">StageInput</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.data_structures.html">modularml.core.data_structures</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.experiment.html">modularml.core.experiment</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.model_graph.html">modularml.core.model_graph</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.samplers.html">modularml.core.samplers</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.splitters.html">modularml.core.splitters</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.core.training.html">modularml.core.training</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api/generated/modularml.models.html">modularml.models</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.models.html#modularml.models.SequentialCNN"><code class="docutils literal notranslate"><span class="pre">SequentialCNN</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.models.html#modularml.models.SequentialMLP"><code class="docutils literal notranslate"><span class="pre">SequentialMLP</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.models.base.html">modularml.models.base</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.models.combinators.html">modularml.models.combinators</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.models.sequential.html">modularml.models.sequential</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../api/generated/modularml.utils.html">modularml.utils</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.utils.html#modularml.utils.Backend"><code class="docutils literal notranslate"><span class="pre">Backend</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.utils.html#modularml.utils.DataFormat"><code class="docutils literal notranslate"><span class="pre">DataFormat</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.utils.backend.html">modularml.utils.backend</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.utils.data_format.html">modularml.utils.data_format</a></li>
+<li class="toctree-l4"><a class="reference internal" href="../api/generated/modularml.utils.exceptions.html">modularml.utils.exceptions</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="index.html">Examples</a><ul class="simple">
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../index.html">ModularML</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content style-external-links">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Getting Started</li>
+      <li class="wy-breadcrumbs-aside">
+              <a href="https://github.com/REIL-UConn/modular-ml/blob/main/docs/examples/01_quickstart.ipynb" class="fa fa-github"> Edit on GitHub</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">pickle</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">modularml</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">mml</span>
+</pre></div>
+</div>
+</div>
+</div>
+<section id="getting-started">
+<h1>Getting Started<a class="headerlink" href="#getting-started" title="Link to this heading"></a></h1>
+<p>Constructing a full ModularML pipeline can be divided in to the following sub-tasks:</p>
+<ol class="arabic simple">
+<li><p>Defining FeatureSets</p></li>
+<li><p>Constructing a ModelGraph</p></li>
+<li><p>Creating the TrainingPhases</p></li>
+<li><p>Running</p></li>
+</ol>
+<p>This notebook provides an exmaple workflow for constructing a ML model to estimate battery state of health (SOH) using voltage-based features across a wide variety of aging conditions and state of charge (SOC).</p>
+<hr class="docutils" />
+<section id="defining-featuresets">
+<h2>1 - Defining FeatureSets<a class="headerlink" href="#defining-featuresets" title="Link to this heading"></a></h2>
+<hr class="docutils" />
+<p>The first step in creating a ModularML experiment is to outline the data structures. We need to decide on:</p>
+<ul class="simple">
+<li><p>the data source to be used (your raw or preprocessed data),</p></li>
+<li><p>how the data should be structured into features, targets, and tags for modeling, and</p></li>
+<li><p>how the set of features should be split for different training stages (e.g., ‘training’, ‘validation’, ‘testing’)</p></li>
+</ul>
+<p>Let’s import some data.
+For this example, we will be using a set of preprocessed battery aging data from our recent paper: “Fine-tuning for rapid capacity estimation of lithium-ion batteries” (<a class="reference external" href="https://doi.org/10.1016/j.ensm.2025.104425">10.1016/j.ensm.2025.104425</a>).</p>
+<p>It contains short-duration (100-second) pulses applied to a battery over a long-term aging routine. More details can be found at the following GitHub repository: [REIL-UConn/fine-tuning-for-rapid-soh-estimation]{https://github.com/REIL-UConn/fine-tuning-for-rapid-soh-estimation.git}.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Download the data from GitHub</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">urllib.request</span>
+
+<span class="n">DATA_URL</span> <span class="o">=</span> <span class="s2">&quot;https://raw.githubusercontent.com/REIL-UConn/fine-tuning-for-rapid-soh-estimation/main/processed_data/UConn-ILCC-NMC/data_slowpulse_1.pkl&quot;</span>
+<span class="n">DATA_DIR</span> <span class="o">=</span> <span class="s2">&quot;downloaded_data&quot;</span>
+<span class="n">DATA_PATH</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">DATA_DIR</span><span class="p">,</span> <span class="s2">&quot;data_slowpulse_1.pkl&quot;</span><span class="p">)</span>
+
+<span class="c1"># Create local directory</span>
+<span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">DATA_DIR</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Download if not already present</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">DATA_PATH</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Downloading data...&quot;</span><span class="p">)</span>
+    <span class="n">urllib</span><span class="o">.</span><span class="n">request</span><span class="o">.</span><span class="n">urlretrieve</span><span class="p">(</span><span class="n">DATA_URL</span><span class="p">,</span> <span class="n">DATA_PATH</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Download complete.&quot;</span><span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Data already downloaded.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Downloading data...
+Download complete.
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Loading our data</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="nb">open</span><span class="p">(</span><span class="n">DATA_PATH</span><span class="p">,</span> <span class="s1">&#39;rb&#39;</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s1">&#39;cell_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;group_id&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;voltage&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">,</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;soh&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
+<span class="n">data</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>(24048,) (24048,) (24048, 101) (24048,)
+</pre></div>
+</div>
+<div class="output stderr highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>/var/folders/21/fsx4ddjs3fg2wgpl7_ksh0k00000gn/T/ipykernel_63568/143080519.py:2: DeprecationWarning: numpy.core.numeric is deprecated and has been renamed to numpy._core.numeric. The numpy._core namespace contains private NumPy internals and its use is discouraged, as NumPy internals can change without warning in any release. In practice, most real-world usage of numpy.core is to access functionality in the public NumPy API. If that is the case, use the public NumPy API. If not, you are using NumPy internals. If you would still like to access an internal attribute, use numpy._core.numeric._frombuffer.
+  data = pickle.load(open(DATA_PATH, &#39;rb&#39;))
+</pre></div>
+</div>
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>dict_keys([&#39;cell_id&#39;, &#39;group_id&#39;, &#39;rpt&#39;, &#39;num_cycles&#39;, &#39;soc&#39;, &#39;soc - coulomb&#39;, &#39;pulse_type&#39;, &#39;voltage&#39;, &#39;q_dchg&#39;, &#39;soh&#39;, &#39;dcir_chg_10&#39;, &#39;dcir_dchg_10&#39;, &#39;dcir_chg_20&#39;, &#39;dcir_dchg_20&#39;, &#39;dcir_chg_30&#39;, &#39;dcir_dchg_30&#39;, &#39;dcir_chg_40&#39;, &#39;dcir_dchg_40&#39;, &#39;dcir_chg_50&#39;, &#39;dcir_dchg_50&#39;, &#39;dcir_chg_60&#39;, &#39;dcir_dchg_60&#39;, &#39;dcir_chg_70&#39;, &#39;dcir_dchg_70&#39;, &#39;dcir_chg_80&#39;, &#39;dcir_dchg_80&#39;, &#39;dcir_chg_90&#39;, &#39;dcir_dchg_90&#39;])
+</pre></div>
+</div>
+</div>
+</div>
+<p>Here we see our initial data is structured a single dictionary.
+The FeatureSet class provides several constructors, including a <code class="docutils literal notranslate"><span class="pre">FeatureSet.from_dict</span></code> that we will use here.
+We will need to decide on the dictionary keys that consitute our the features, targets, and tags to be used in the downstream modeling.</p>
+<p>In this example, we will use <code class="docutils literal notranslate"><span class="pre">voltage</span></code> as our modeling input feature. Each <code class="docutils literal notranslate"><span class="pre">voltage</span></code> element is a 100-element vector of time-series voltage readings. Our target will be the <code class="docutils literal notranslate"><span class="pre">soh</span></code> (state-of-health) associated to each feature. To maintain sample traceability, and give us future options in how we split the data, we will retain several identifying tags with each sample. These include <code class="docutils literal notranslate"><span class="pre">cell_id</span></code>, <code class="docutils literal notranslate"><span class="pre">group_id</span></code>, <code class="docutils literal notranslate"><span class="pre">pulse_type</span></code>, and <code class="docutils literal notranslate"><span class="pre">pulse_soc</span></code>.</p>
+<p>We see that the structured FeatureSet contains 24048 valid samples.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">modularml.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">FeatureSet</span>
+
+<span class="n">fs</span> <span class="o">=</span> <span class="n">FeatureSet</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span>
+	<span class="n">label</span><span class="o">=</span><span class="s1">&#39;PulseFeatures&#39;</span><span class="p">,</span>
+	<span class="n">data</span><span class="o">=</span><span class="p">{</span>
+		<span class="s1">&#39;voltage&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;voltage&#39;</span><span class="p">],</span>
+		<span class="s1">&#39;soh&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;soh&#39;</span><span class="p">],</span>
+		<span class="s1">&#39;cell_id&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;cell_id&#39;</span><span class="p">],</span>
+  		<span class="s1">&#39;group_id&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;group_id&#39;</span><span class="p">],</span>
+    	<span class="s1">&#39;pulse_type&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;pulse_type&#39;</span><span class="p">],</span>
+     	<span class="s1">&#39;pulse_soc&#39;</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="s1">&#39;soc&#39;</span><span class="p">],</span>
+	<span class="p">},</span>
+	<span class="n">feature_keys</span><span class="o">=</span><span class="s1">&#39;voltage&#39;</span><span class="p">,</span>
+	<span class="n">target_keys</span><span class="o">=</span><span class="s1">&#39;soh&#39;</span><span class="p">,</span>
+	<span class="n">tag_keys</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;cell_id&#39;</span><span class="p">,</span> <span class="s1">&#39;group_id&#39;</span><span class="p">,</span> <span class="s1">&#39;pulse_type&#39;</span><span class="p">,</span> <span class="s1">&#39;pulse_soc&#39;</span><span class="p">]</span>
+<span class="p">)</span>
+<span class="n">fs</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>FeatureSet(label=&#39;PulseFeatures&#39;, n_samples=24048)
+</pre></div>
+</div>
+</div>
+</div>
+<p>Now we want to split our full FeatureSet into several subsets. ModularML provides several built-in splitting methods, including:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">FeatureSet.split_random()</span></code>: to create splits by assigning random proportions of all samples to each split</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">FeatureSet.split_by_condition()</span></code>: to assign samples to subsets using any number of explicit conditions.</p></li>
+</ul>
+<p>To use a random 50% train, 30% valdation, 20% test split, we could do the following:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fs</span><span class="o">.</span><span class="n">split_random</span><span class="p">(</span><span class="n">ratios</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;train&#39;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span> <span class="s1">&#39;val&#39;</span><span class="p">:</span><span class="mf">0.3</span><span class="p">,</span> <span class="s1">&#39;test&#39;</span><span class="p">:</span><span class="mf">0.2</span><span class="p">})</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[FeatureSubset(label=&#39;train&#39;, n_samples=12024),
+ FeatureSubset(label=&#39;val&#39;, n_samples=7214),
+ FeatureSubset(label=&#39;test&#39;, n_samples=4810)]
+</pre></div>
+</div>
+</div>
+</div>
+<p>But to better evaluate how good our SOH-estimation model really is, we’ll want to isolate the train and test sets by unique cycling conditions. Therefore, we are testing how well our model can estimate SOH even when applied to unseen cycling conditions.</p>
+<p>Let’s clear those subsets and create a more effective splitting strategy:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fs</span><span class="o">.</span><span class="n">clear_subsets</span><span class="p">()</span>
+<span class="n">fs</span><span class="o">.</span><span class="n">available_subsets</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>dict_keys([])
+</pre></div>
+</div>
+</div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">FeatureSet.available_subset</span></code> attribute is useful for double-checking which subsets are available.</p>
+<p>In our data, unique cycling conditions are indentified by the <code class="docutils literal notranslate"><span class="pre">group_id</span></code> tag (a value between 1 and 11). We can easily double check the available tags information using <code class="docutils literal notranslate"><span class="pre">FeatureSet.get_all_tags</span></code>. This function allows for the returned information to be structured in several way (e.g., a Pandas dataframe, a dictionary, a numpy array, etc). We’ll use a dataframe.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">df_tags</span> <span class="o">=</span> <span class="n">fs</span><span class="o">.</span><span class="n">get_all_tags</span><span class="p">(</span><span class="nb">format</span><span class="o">=</span><span class="n">mml</span><span class="o">.</span><span class="n">DataFormat</span><span class="o">.</span><span class="n">PANDAS</span><span class="p">)</span>
+<span class="n">df_tags</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">&#39;group_id&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+<span class="n">group_counts</span> <span class="o">=</span> <span class="n">df_tags</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">&#39;group_id&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">size</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">group_counts</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>group_id
+1     2196
+2     1962
+3     2898
+4     1206
+5     3852
+6     1890
+7      954
+8     4752
+9      738
+10    1494
+11    2106
+dtype: int64
+</pre></div>
+</div>
+</div>
+</div>
+<p>Great, we see that <code class="docutils literal notranslate"><span class="pre">group_id</span></code> tag has 11 unique values.
+Note that there are a different number of samples in each group (this is due to different cycling condition resulting in faster or slower aging).
+We will adjust for this sample imbalance later.</p>
+<p>Back to splitting, we will take 6 cycling groups for training, 3 for validation, and 2 for testing.
+Let’s make a quick helper function to random select the group_ids for each subset.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">get_group_ids</span><span class="p">(</span><span class="n">train_size</span><span class="p">:</span><span class="nb">int</span><span class="p">,</span> <span class="n">val_size</span><span class="p">:</span><span class="nb">int</span><span class="p">,</span> <span class="n">test_size</span><span class="p">:</span><span class="nb">int</span><span class="p">):</span>
+    <span class="n">group_ids</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="c1"># Shuffle the groups</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="n">seed</span><span class="o">=</span><span class="mi">13</span><span class="p">)</span>
+    <span class="n">rng</span><span class="o">.</span><span class="n">shuffle</span><span class="p">(</span><span class="n">group_ids</span><span class="p">)</span>
+    
+    <span class="n">a</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">train_size</span><span class="p">,</span> <span class="n">train_size</span> <span class="o">+</span> <span class="n">val_size</span>
+    <span class="k">return</span> <span class="n">group_ids</span><span class="p">[:</span><span class="n">a</span><span class="p">],</span> <span class="n">group_ids</span><span class="p">[</span><span class="n">a</span><span class="p">:</span><span class="n">b</span><span class="p">],</span> <span class="n">group_ids</span><span class="p">[</span><span class="n">b</span><span class="p">:]</span>
+
+<span class="n">train_ids</span><span class="p">,</span> <span class="n">val_ids</span><span class="p">,</span> <span class="n">test_ids</span> <span class="o">=</span> <span class="n">get_group_ids</span><span class="p">(</span><span class="n">train_size</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">val_size</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">test_size</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Train IDs: &quot;</span><span class="p">,</span> <span class="n">train_ids</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Val IDs: &quot;</span><span class="p">,</span> <span class="n">val_ids</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Test IDs: &quot;</span><span class="p">,</span> <span class="n">test_ids</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Train IDs:  [7 2 6 1 5 8]
+Val IDs:  [3 9 4]
+Test IDs:  [11 10]
+</pre></div>
+</div>
+</div>
+</div>
+<p>To split, we’ll use <code class="docutils literal notranslate"><span class="pre">FeatureSet.split_by_condition</span></code> and define the explicit <code class="docutils literal notranslate"><span class="pre">group_id</span></code> values to assign to each subset.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fs</span><span class="o">.</span><span class="n">get_all_tags</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>{&#39;cell_id&#39;: array([ 1,  1,  1, ..., 44, 44, 44]),
+ &#39;group_id&#39;: array([ 1,  1,  1, ..., 11, 11, 11]),
+ &#39;pulse_type&#39;: array([&#39;chg&#39;, &#39;dchg&#39;, &#39;chg&#39;, ..., &#39;dchg&#39;, &#39;chg&#39;, &#39;dchg&#39;], dtype=&#39;&lt;U4&#39;),
+ &#39;pulse_soc&#39;: array([10, 10, 20, ..., 80, 90, 90])}
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fs</span><span class="o">.</span><span class="n">split_by_condition</span><span class="p">(</span>
+	<span class="n">train</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;group_id&#39;</span><span class="p">:</span> <span class="n">train_ids</span><span class="p">},</span>
+	<span class="n">val</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;group_id&#39;</span><span class="p">:</span> <span class="n">val_ids</span><span class="p">},</span>
+	<span class="n">test</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;group_id&#39;</span><span class="p">:</span> <span class="n">test_ids</span><span class="p">}</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[FeatureSubset(label=&#39;train&#39;, n_samples=15606),
+ FeatureSubset(label=&#39;val&#39;, n_samples=4842),
+ FeatureSubset(label=&#39;test&#39;, n_samples=3600)]
+</pre></div>
+</div>
+</div>
+</div>
+<p>We can also plot a quick Sankey diagram to view our subsets.
+This exmaple is fairly straight forward, but ModularML allows for an unlimited number of nested subsets to be created within a single FeatureSet object.
+In these cases, the Sankey diagram becomes much more useful to visual the flow of samples into subsets.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fs</span><span class="o">.</span><span class="n">plot_sankey</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+</div>
+</div>
+</section>
+</section>
+<section id="coming-soon-adding-featuretransform-logic">
+<h1>COMING SOON: Adding FeatureTransform Logic<a class="headerlink" href="#coming-soon-adding-featuretransform-logic" title="Link to this heading"></a></h1>
+<p>The FeatureTransform class encapsulates all feature/target scaling and normalization methods.
+Its wraps all available scalers from <code class="docutils literal notranslate"><span class="pre">sklearn.preprocessing</span></code> and provides easy integration with the <code class="docutils literal notranslate"><span class="pre">FeatureSet</span></code> class.</p>
+<p>Apply transforms to the underlying features in FeatureSet are as easy as:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">FeatureSet</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">fit</span><span class="o">=</span><span class="s1">&#39;features&#39;</span><span class="p">,</span> <span class="n">apply</span><span class="o">=</span><span class="s1">&#39;features&#39;</span><span class="p">,</span> <span class="n">transform</span><span class="o">=</span><span class="n">FeatureTransform</span><span class="p">(</span><span class="o">...</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>Here we fit the transform object to <code class="docutils literal notranslate"><span class="pre">fit='features'</span></code> (i.e., fit to all features in the FeatureSet), and applied it to <code class="docutils literal notranslate"><span class="pre">apply='features'</span></code> (i.e., apply to all features in the FeatureSet).</p>
+<p>However, to prevent data leakage in ML workflow, it is required that any data transform be fit only to the training set.
+This can be accomplished with a simple adjustment of the <code class="docutils literal notranslate"><span class="pre">fit</span></code> argument:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">FeatureSet</span><span class="o">.</span><span class="n">fit_transform</span><span class="p">(</span><span class="n">fit</span><span class="o">=</span><span class="s1">&#39;train.features&#39;</span><span class="p">,</span> <span class="n">apply</span><span class="o">=</span><span class="s1">&#39;features&#39;</span><span class="p">,</span> <span class="n">transform</span><span class="o">=</span><span class="n">FeatureTransform</span><span class="p">(</span><span class="o">...</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>Now, the transform is only fit to all features in the train subset (<code class="docutils literal notranslate"><span class="pre">fit='train.features'</span></code>).</p>
+<p>Note that all data access methods of FeatureSet (e.g., <code class="docutils literal notranslate"><span class="pre">.get_all_features()</span></code>) will return the transformed versions of the data by default.
+Receiving the unscaled data can be achieved by using the <code class="docutils literal notranslate"><span class="pre">scaled</span></code> argument of the data access methods (e.g., <code class="docutils literal notranslate"><span class="pre">.get_all_features(scaled=False)</span></code>).</p>
+<p>Additionally, theunderlying transform in the <code class="docutils literal notranslate"><span class="pre">FeatureTransform(...)</span></code> object passed to <code class="docutils literal notranslate"><span class="pre">FeatureSet.fit_transform(...)</span></code> is not mutated.
+A copy is made and stored internal to FeatureSet.
+Accessing the fit tranforms is achieved with the <code class="docutils literal notranslate"><span class="pre">FeatureSet.available_transform</span></code> property. This returns a list of fit FeatureTransform objects.</p>
+<p>They can be reused later without re-fitting using the <code class="docutils literal notranslate"><span class="pre">.transform()</span></code> method of <code class="docutils literal notranslate"><span class="pre">FeatureSet</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">fs</span> <span class="o">=</span> <span class="n">FeatureSet</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<span class="n">my_transform</span> <span class="o">=</span> <span class="n">fs</span><span class="o">.</span><span class="n">available_transforms</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<span class="n">fs</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">apply</span><span class="o">=</span><span class="s1">&#39;new_subset.features&#39;</span><span class="p">,</span> <span class="n">transform</span><span class="o">=</span><span class="n">my_transform</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Here we applied the transform to the features in some other subset (<code class="docutils literal notranslate"><span class="pre">new_subset</span></code>).</p>
+<p>Now that we have our main FeatureSet and corresponding subsets, let’s move on to step 2.</p>
+<hr class="docutils" />
+<section id="building-a-modelgraph">
+<h2>2 - Building a ModelGraph<a class="headerlink" href="#building-a-modelgraph" title="Link to this heading"></a></h2>
+<hr class="docutils" />
+<p>One of most powerful aspects of ModularML is its directed-acyclic-graph (DAG)-based ModelGraph container.
+It allows for any number of ModelStages to be linked together into a larger structure.
+Even better, each ModelStage can have any backend (e.g., PyTorch, Tensorflow/Keras, Scikit-learn).
+This lets you defined a complex multi-objective evaluation pipeline all under a unified ModelGraph.</p>
+<p>But let’s stop talking and get back to modeling…</p>
+<p>In this example, we’ll create a multi-stage model that uses a CNN encoder to embed the voltage features into some learned latent space and a final MLP regressor to convert the embedded feature into an SOH estimate.</p>
+<p>ModularML provides pre-built classes for the more commonly used model like sequential CNNs and MLPs. We’ll use those here, but any custom model can be easily defined. All you need to do is subclass the <code class="docutils literal notranslate"><span class="pre">modularml.BaseModel</span></code> class and defined the required methods.</p>
+<p>With complex ModelGraphs, it can get annoying to keep track of input/output shape of each ModelStage.
+Don’t worry, ModularML can infer these for you at runtime.
+Just leave any shapes you don’t know as None and ModularML will handle the rest.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">modularml.core</span><span class="w"> </span><span class="kn">import</span> <span class="n">StageInput</span><span class="p">,</span> <span class="n">ModelStage</span><span class="p">,</span> <span class="n">ModelGraph</span><span class="p">,</span> <span class="n">Optimizer</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">modularml.models</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialCNN</span><span class="p">,</span> <span class="n">SequentialMLP</span>
+
+
+<span class="n">ms_encoder</span> <span class="o">=</span> <span class="n">ModelStage</span><span class="p">(</span>
+	<span class="n">model</span><span class="o">=</span><span class="n">SequentialCNN</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">32</span><span class="p">),</span> <span class="n">n_layers</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="o">=</span><span class="mi">16</span><span class="p">,</span> <span class="n">flatten_output</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+	<span class="n">label</span><span class="o">=</span><span class="s2">&quot;Encoder&quot;</span><span class="p">,</span>
+	<span class="n">inputs</span><span class="o">=</span><span class="n">StageInput</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="s1">&#39;PulseFeatures&#39;</span><span class="p">),</span>				<span class="c1"># input from FeatureSet</span>
+	<span class="n">optimizer</span><span class="o">=</span><span class="n">Optimizer</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;adam&#39;</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="n">mml</span><span class="o">.</span><span class="n">Backend</span><span class="o">.</span><span class="n">TORCH</span><span class="p">)</span>
+<span class="p">)</span>
+
+<span class="n">ms_regressor</span> <span class="o">=</span> <span class="n">ModelStage</span><span class="p">(</span>
+	<span class="n">model</span><span class="o">=</span><span class="n">SequentialMLP</span><span class="p">(</span><span class="n">output_shape</span><span class="o">=</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="mi">1</span><span class="p">),</span> <span class="n">n_layers</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">hidden_dim</span><span class="o">=</span><span class="mi">16</span><span class="p">),</span>
+ 	<span class="n">label</span><span class="o">=</span><span class="s1">&#39;Regressor&#39;</span><span class="p">,</span>
+  	<span class="n">inputs</span><span class="o">=</span><span class="n">StageInput</span><span class="p">(</span><span class="n">source</span><span class="o">=</span><span class="s1">&#39;Encoder&#39;</span><span class="p">),</span>					<span class="c1"># input from Encoder</span>
+	<span class="n">optimizer</span><span class="o">=</span><span class="n">Optimizer</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s1">&#39;adam&#39;</span><span class="p">,</span> <span class="n">backend</span><span class="o">=</span><span class="n">mml</span><span class="o">.</span><span class="n">Backend</span><span class="o">.</span><span class="n">TORCH</span><span class="p">)</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>With the ModelStages defined, we simply need to pass them all to a single ModelGraph instance.</p>
+<p>The ModelGraph will handle all data routing and shape inference with the <code class="docutils literal notranslate"><span class="pre">.build_all()</span></code> method.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Order of node arguments don&#39;t matter but make sure you include any </span>
+<span class="c1"># FeatureSets referenced by any ModelStage.inputs</span>
+<span class="n">mg</span> <span class="o">=</span> <span class="n">ModelGraph</span><span class="p">(</span><span class="n">nodes</span><span class="o">=</span><span class="p">[</span><span class="n">fs</span><span class="p">,</span> <span class="n">ms_regressor</span><span class="p">,</span> <span class="n">ms_encoder</span><span class="p">,</span> <span class="p">])</span>
+<span class="n">mg</span><span class="o">.</span><span class="n">build_all</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Inferred shapes for `Encoder`:  torch.Size([1, 101]) -&gt; (1, 32)
+Inferred shapes for `Regressor`:  (1, 32) -&gt; (1, 1)
+</pre></div>
+</div>
+</div>
+</div>
+<p>Lets run a temporary forward pass to make sure everythings connected properly.</p>
+<p>ModelGraph builds in a connection test with <code class="docutils literal notranslate"><span class="pre">.dummy_forward()</span></code></p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">mg</span><span class="o">.</span><span class="n">dummy_foward</span><span class="p">(</span><span class="n">batch_size</span><span class="o">=</span><span class="mi">8</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[[[-0.20918120443820953]],
+ [[-0.20918120443820953]],
+ [[-0.20918120443820953]],
+ [[-0.20918120443820953]],
+ [[-0.20918120443820953]],
+ [[-0.20918120443820953]],
+ [[-0.20918120443820953]],
+ [[-0.20918120443820953]]]
+</pre></div>
+</div>
+</div>
+</div>
+<p>ModelGraph also has a built in visualization method to view all node connection, although it’s not too exciting for this example.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">mg</span><span class="o">.</span><span class="n">visualize</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>(&lt;Figure size 600x300 with 1 Axes&gt;, &lt;Axes: &gt;)
+</pre></div>
+</div>
+<img alt="../_images/0fff265363b9acad1e478813c57df8c5c196f182441738763c235bd883eec9fd.png" src="../_images/0fff265363b9acad1e478813c57df8c5c196f182441738763c235bd883eec9fd.png" />
+</div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Benjamin Nowacki, Tingkai Li, and Chao Hu.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

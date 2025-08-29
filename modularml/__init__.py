@@ -3,6 +3,9 @@
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import DataFormat
 
+# Expose core and models as attributes for Sphinx autosummary
+from . import core
+from . import models
 
 
 try:
