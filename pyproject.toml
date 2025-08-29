@@ -45,7 +45,9 @@ dependencies = [
     "networkx",                    # DAG structure
     "plotly",
     "matplotlib",
-    "nbformat"
+    "nbformat",
+    "pickle",
+    "joblib"
 ]
 
 

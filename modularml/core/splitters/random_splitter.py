@@ -1,16 +1,19 @@
 
 
+from collections import defaultdict
 from logging import warning
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Dict, List, Union
 import warnings
 import numpy as np
 
 from modularml.core.data_structures.sample import Sample
+from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.splitters.splitter import BaseSplitter
+from modularml.utils.data_format import DataFormat
 
 
 class RandomSplitter(BaseSplitter):
-    def __init__(self, ratios: Dict[str, float], seed: int = 42):
+    def __init__(self, ratios: Dict[str, float], group_by: Union[str, List[str]] = None, seed: int = 42):
         """
         Creates a random splitter based on sample ratios
         
@@ -18,6 +21,8 @@ class RandomSplitter(BaseSplitter):
             ratios (Dict[str, float]): Keyword-arguments that define subset names \
                 and percent splits. E.g., `RandomSplitter(train=0.5, test=0.5)`. \
                 All values must add to exactly 1.0.
+            group_by (Union[str, List[str]], optional): Tag key(s) to group samples \
+                by before splitting.
             seed (int): The seed of the random generator.
         """
         super().__init__()
@@ -33,45 +38,74 @@ class RandomSplitter(BaseSplitter):
         if not total == 1.0:
             raise ValueError(f"ratios must sum to exactly 1.0. Total = {total}")
         
-        self.ratios = ratios
+        self.ratios = ratios        
+        self.group_by = group_by if isinstance(group_by, list) else [group_by, ] if isinstance(group_by, str) else None
+
         self.seed = int(seed)
         
+    def _get_split_boundaries(self, n: int) -> Dict[str, tuple]:
+        """
+        Returns index boundaries for each subset split (for n elements).
+        """
+        boundaries = {}
+        current = 0
+        for i, (split_name, ratio) in enumerate(self.ratios.items()):
+            count = int(ratio * n)
+            if i == len(self.ratios) - 1:
+                count = n - current
+            boundaries[split_name] = (current, current + count)
+            current += count
+        return boundaries
+    
+    
+    
     def split(self, samples:List[Sample]) -> Dict[str, List[str]]:
         """
-        Randomly splits a list of samples based on the defined ratios.
+        Splits samples into subsets according to ratios and grouping.
 
         Args:
             samples (List[Sample]): The list of samples to split.
-
+            
         Returns:
-            Dict[str, List[str]]: Dictionary mapping subset names to `Sample.uuid`.
+            Dict[str, List[str]]: Mapping from subset name to list of Sample.uuid.
         """
+        sample_coll = SampleCollection(samples)
         rng = np.random.default_rng(self.seed)
-        n_samples = len(samples)
         
-        sample_uuids = np.asarray([
-            s.uuid for s in samples
-        ])
-        rng.shuffle(sample_uuids)
+        if self.group_by is None:
+            uuids = [s.uuid for s in samples]
+            rng.shuffle(uuids)
 
-        split_sizes = {
-            key: int(round(ratio * n_samples))
-            for key, ratio in self.ratios.items()
-        }
+            n_total = len(uuids)
+            boundaries = self._get_split_boundaries(n_total)
 
-        # Adjust to make sure sum of sizes equals total_samples
-        size_diff = n_samples - sum(split_sizes.values())
-        if size_diff != 0:
-            # Adjust the largest split to make total count match
-            max_key = max(split_sizes, key=split_sizes.get)
-            split_sizes[max_key] += size_diff
+            split_result = {}
+            for i, (split_name, (start, end)) in enumerate(boundaries.items()):
+                split_result[split_name] = uuids[start:end]
 
-        # Slice shuffled sample_uuids according to sizes
-        splits = {}
-        start = 0
-        for key, size in split_sizes.items():
-            splits[key] = sample_uuids[start:start + size].tolist()
-            start += size
+            return split_result
         
-        return splits
-    
+        else:
+            # Group by tags
+            df_tags = sample_coll.get_all_tags(format=DataFormat.PANDAS)
+            df_tags["uuid"] = [s.uuid for s in samples]
+            grouped = df_tags.groupby(self.group_by)
+
+            group_keys = list(grouped.groups.keys())
+            rng.shuffle(group_keys)
+
+            n_total = len(group_keys)
+            boundaries = self._get_split_boundaries(n_total)
+
+            group_to_split = {}
+            for split_name, (start, end) in boundaries.items():
+                for gk in group_keys[start:end]:
+                    group_to_split[gk] = split_name
+
+            split_result = defaultdict(list)
+            for _, row in df_tags.iterrows():
+                group_key = tuple(row[k] for k in self.group_by) if len(self.group_by) > 1 else row[self.group_by[0]]
+                split_name = str(group_to_split[group_key])
+                split_result[split_name].append(row["uuid"])
+
+            return dict(split_result)
