@@ -19,7 +19,10 @@ It enables rapid experimentation with complex model architectures, supports doma
 > ModularML provides a plug-and-play ecosystem of interoperable components for data preprocessing, sampling, modeling, training, and evaluation — all wrapped in a unified experiment container.
 
 
-![ModularML Overview Diagram](docs/images/modularml_overview.png)
+<p align="center">
+  <img src="assets/modularml_overview_diagram.png" alt="ModularML Overview Diagram" width="600"/>
+</p>
+<p align="center"><em>Figure 1. Overview of the ModularML framework, highlighting the three core abstractions: feature set preprocessing and splitting, modular model graph construction, and staged training orchestration.</em></p>
 
 
 
@@ -72,18 +75,11 @@ To install the latest development version:
 pip install git+https://github.com/REIL-UConn/modular-ml.git
 ```
 
-Below outlines a basic toy example of using ModularML:
-
-```python
-# EXAMPLE COMING SOON ...
-```
-
-
 
 ## Explore More
-- **[Examples (coming soon)](examples/)** – Explore complete examples of how to set up FeatureSets, samplers, model graphs, and training configurations.
-- **[Documentation (coming soon)](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, YAML configuration guides, and tutorials.
-- **[Discussions (coming soon)](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
+- **[Examples](examples/)** – Explore complete examples of how to set up FeatureSets, samplers, model graphs, and training configurations.
+- **[Documentation](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, YAML configuration guides, and tutorials.
+- **[Discussions](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
 
 ---
 
