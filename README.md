@@ -1,7 +1,9 @@
-# ModularML
 
-Modular, fast, and reproducible ML experimentation built for R\&D.
+<div align="center">
 
+[![ModularML Banner](assets/modularml_logo_banner.png)](https://github.com/REIL-UConn/modular-ml)
+
+**Modular, fast, and reproducible ML experimentation built for R\&D.**
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/modularml.svg)](https://pypi.org/project/modularml/)
@@ -9,11 +11,10 @@ Modular, fast, and reproducible ML experimentation built for R\&D.
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange
 )](LICENSE)
 
----
+</div>
 
-# Why ModularML?
 
-**ModularML** is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating modular ML pipelines, tailored specifically for research and scientific workflows. 
+ModularML is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating modular ML pipelines, tailored specifically for research and scientific workflows. 
 It enables rapid experimentation with complex model architectures, supports domain-specific feature engineering, and provides full reproducibility through configuration-driven declaration.
 
 > ModularML provides a plug-and-play ecosystem of interoperable components for data preprocessing, sampling, modeling, training, and evaluation — all wrapped in a unified experiment container.
