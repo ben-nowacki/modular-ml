@@ -78,8 +78,8 @@ pip install git+https://github.com/REIL-UConn/modular-ml.git
 
 
 ## Explore More
-- **[Examples](examples/)** – Explore complete examples of how to set up FeatureSets, samplers, model graphs, and training configurations.
-- **[Documentation](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, YAML configuration guides, and tutorials.
+- **[Examples](examples/)** – Explore complete examples of how to set up FeatureSets, apply feature preprocessing, construct model graphs, and run training configurations.
+- **[Documentation](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, configuration guides, and tutorials.
 - **[Discussions](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
 
 ---
