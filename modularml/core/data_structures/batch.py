@@ -1,69 +1,13 @@
 
-
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
-import pandas as pd
-
 from modularml.core.data_structures.data import Data
-from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
-from modularml.utils.data_format import DataFormat, convert_to_format
 
-
-class SampleAttribute(str, Enum):
-    FEATURES = "features"
-    TARGETS = "targets"
-    TAGS = "tags"
-
-@dataclass(frozen=True) 
-class BatchComponentSelector:
-    """
-    A selector class to wrap accessing specific components
-    of the Batch object.
-    
-    Attributes:
-        role (str): The role within Batch to use
-        sample_attribute (SampleAttribute): The attribute of Sample to use.
-        attribute_key (str, optional): An optional subset of the specified Sample.sample_attribute. 
-            E.g., if Sample.features contains {'voltage':..., 'current':...}, you can access just \
-            the 'voltage' component using: `sample_attribute='features', attribute_key='voltage'`
-    """
-    role: str
-    sample_attribute: SampleAttribute
-    attribute_key: Optional[str] = None
-    
-    def __post_init__(self):
-        if not self.sample_attribute in SampleAttribute:
-            raise ValueError(
-                f"`sample_attribute` must be one of the following: {SampleAttribute._member_names_}"
-                f"Received: {self.sample_attribute}."
-            )
-    
-    def to_string(self) -> str:
-        return f"{self.role}.{self.sample_attribute.value}.{self.attribute_key}"
-
-
-    def get_config(self) -> Dict[str, Any]:
-        cfg = {
-            "role": str(self.role),
-            "sample_attribute": str(self.sample_attribute.value),
-        }
-        if self.attribute_key is not None:
-            cfg['attribute_key'] = str(self.attribute_key)
-        
-    @classmethod
-    def from_config(cls, config: Dict[str, Any]) -> "BatchComponentSelector":
-        return cls(
-            role=config['role'],
-            sample_attribute=SampleAttribute(config['sample_attribute']),
-            attribute_key=config.get('attribute_key', None)
-        )
-    
-            
+ 
 @dataclass
 class Batch: 
     """
@@ -199,7 +143,7 @@ class Batch:
     #                     f"Available attribute_keys include: {list(all_features.columns)}"
     #                 )
                     
-    #             return convert_to_format(
+    #             return convert_dict_to_format(
     #                 data={selection.to_string(): all_features[selection.attribute_key].values},
     #                 format=format
     #             )
@@ -216,7 +160,7 @@ class Batch:
     #                     f"Available attribute_keys include: {list(all_targets.columns)}"
     #                 )
                 
-    #             return convert_to_format(
+    #             return convert_dict_to_format(
     #                 data={selection.to_string(): all_targets[selection.attribute_key].values},
     #                 format=format
     #             )
@@ -233,7 +177,7 @@ class Batch:
     #                     f"Available attribute_keys include: {list(all_tags.columns)}"
     #                 )
                 
-    #             return convert_to_format(
+    #             return convert_dict_to_format(
     #                 data={selection.to_string(): all_tags[selection.attribute_key].values},
     #                 format=format
     #             )

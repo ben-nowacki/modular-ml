@@ -26,8 +26,8 @@ if TYPE_CHECKING:
     
 @dataclass
 class StageInput:
-    source: str                 # Label of upstream ModelStage.label or FeatureSet.label
-    key: Optional[str] = None   # Optional key for multi-output stages
+    source: str                 # Upstream ModelStage.label or FeatureSet.label
+    key: Optional[str] = None   # Optional key. E.g., one of FeatureSet.features names or ModelStage.outputs names
 
     @property
     def resolved_label(self):

@@ -254,7 +254,7 @@ def to_tensorflow(obj: Any, errors: T_ERRORS = 'raise') -> "tf.Tensor": # type: 
             return tf.convert_to_tensor(np.asarray([py_obj]), dtype=tf.float32)
   
   
-def convert_to_format(
+def convert_dict_to_format(
     data: Dict[str, Any],
     format: Union[str, DataFormat],
     errors: T_ERRORS = 'raise',

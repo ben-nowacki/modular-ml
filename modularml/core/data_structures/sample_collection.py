@@ -10,7 +10,7 @@ import numpy as np
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import DataFormat, convert_to_format
+from modularml.utils.data_format import DataFormat, convert_dict_to_format
 
 
 @dataclass
@@ -111,7 +111,7 @@ class SampleCollection:
             else:
                 raw[k] = values
 
-        return convert_to_format(raw, format=format)
+        return convert_dict_to_format(raw, format=format)
 
     def get_all_targets(self, format: Union[str, DataFormat] = DataFormat.DICT_NUMPY) -> Any:
         """
@@ -131,7 +131,7 @@ class SampleCollection:
             else:
                 raw[k] = values
 
-        return convert_to_format(raw, format=format)
+        return convert_dict_to_format(raw, format=format)
 
     def get_all_tags(self, format: Union[str, DataFormat] = DataFormat.DICT_NUMPY) -> Any:
         """
@@ -156,7 +156,7 @@ class SampleCollection:
             else:
                 raw[key] = values
 
-        return convert_to_format(raw, format=format)
+        return convert_dict_to_format(raw, format=format)
 
 
     def to_backend(self, backend: Union[str, Backend]) -> "SampleCollection":

@@ -1,6 +1,6 @@
 
 from .data_structures import (
-    Data, Sample, SampleCollection, Batch, MultiBatch,
+    Data, Sample, SampleCollection, Batch,
     FeatureSet, FeatureSubset
 )
 from .feature_transforms import FeatureTransform
@@ -14,7 +14,7 @@ from .training import TrainingPhase
 
 __all__ = [
     "Data", "Sample", "SampleCollection", "Batch", 
-    "MultiBatch", "FeatureSet", "FeatureSubset", 
+    "FeatureSet", "FeatureSubset", 
     
     "FeatureTransform",
     

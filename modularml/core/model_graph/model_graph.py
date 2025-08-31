@@ -23,7 +23,6 @@ import numpy as np
 from modularml.core.data_structures.batch import Batch
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.feature_set import FeatureSet
-from modularml.core.data_structures.multi_batch import MultiBatch
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.model_graph.model_stage import ModelStage, StageInput
@@ -266,14 +265,14 @@ class ModelGraph:
 
 
 
-    def forward(self, batch: MultiBatch) -> Dict[str, Batch]:
+    def forward(self, batches: Dict[str, Batch]) -> Dict[str, Batch]:
         
         missing_featuresets = []
         for fs in self._feature_sets.keys():
-            if fs not in batch.keys(): missing_featuresets.append(fs)
+            if fs not in batches.keys(): missing_featuresets.append(fs)
         if missing_featuresets:
             raise ValueError(
-                f"The MultiBatch provided to ModelGraph is missing data from required "
+                f"The batches provided to ModelGraph is missing data from required "
                 f"FeatureSets. Missing: {missing_featuresets}"
             )
         
@@ -282,7 +281,7 @@ class ModelGraph:
         
         # Add FeatureSet data
         for fs_label in self.feature_set_labels:
-            cache[fs_label] = batch[fs_label]
+            cache[fs_label] = batches[fs_label]
             
         # Topological forward pass through ModelStages
         for label in self._sorted_stage_labels:
@@ -312,7 +311,7 @@ class ModelGraph:
             )
         fs = self._feature_sets[self.feature_set_labels[0]]
         batch = make_dummy_batch(feature_shape=fs.feature_shape, batch_size=batch_size)
-        multi_batch = MultiBatch({self.feature_set_labels[0]: batch})
+        multi_batch = {self.feature_set_labels[0]: batch}
         
         res = self.forward(multi_batch)
         output = res[self._sorted_stage_labels[-1]]
