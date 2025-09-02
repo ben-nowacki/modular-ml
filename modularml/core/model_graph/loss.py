@@ -8,7 +8,7 @@ import tensorflow as tf
 import torch as torch
 import inspect
 
-from modularml.core.data_structures.batch import Batch
+from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import DataFormat, convert_dict_to_format, get_data_format_for_backend, to_numpy
 from modularml.utils.exceptions import BackendNotSupportedError, LossError
@@ -36,7 +36,7 @@ class Loss:
             ``` python
             from sklearn.metrics import mean_squared_error 
             from modularml import Backend
-            loss1 = Loss(loss_function: mean_squared_error)
+            loss1 = Loss(loss_function = mean_squared_error)
             loss2 = Loss(name='mse', backend=Backend.TORCH)
             ```
         """
@@ -109,15 +109,14 @@ class Loss:
             return f"Loss(name='{self.name}', backend='{self.backend.name}', reduction='{self.reduction}')"
         return f"Loss(custom_function={self.loss_function})"
     
-    
+
 
 @dataclass
 class LossResult:
     label: str              # for logging (e.g. 'mse_regression')
     value: Any              # raw loss tensor or float (backend-dependent)
-    weight: float           # scalar weight
-    sample_weights: Any     # per-sample weight
-
+    # weight: float           # scalar weight
+    # n_samples: int          # number of samples used in loss calc
 
 class AppliedLoss:
     def __init__(
@@ -178,7 +177,7 @@ class AppliedLoss:
         """
         
         self.loss : Loss = loss
-        self.inputs : Dict[str, Tuple[str, str, Optional[str]]] = {
+        self.inputs : Dict[str, Tuple[str, str, str]] = {
             str(k): self._parse_input_spec(p) 
             for k,p in inputs.items()
         }
@@ -188,6 +187,19 @@ class AppliedLoss:
     @property
     def backend(self) -> Backend:
         return self.loss.backend
+    
+    @property
+    def parsed_inputs(self) -> Dict[str, Tuple[str, str, str]]:
+        """
+        Returns the required Loss input specs. Returned list could include:
+            - "pred": (Encoder, output, default)
+            - "true": (PulseFeatures, features, default)
+            - "anchor": (Encoder, output, anchor)
+
+        Returns:
+            Dict[str, Tuple[str, str, str]]
+        """
+        return self.inputs
     
     def _parse_input_spec(self, spec: str) -> Tuple[str, str, str]:
         """
@@ -229,18 +241,18 @@ class AppliedLoss:
 
         return node, attribute, role
         
-    def compute(self, batches: Dict[str, Batch], model_outputs: Dict[str, Batch]) -> LossResult:
+    def compute(self, batch_input: Dict[str, Batch], model_outputs: Dict[str, BatchOutput]) -> LossResult:
         """
         Computes the loss value using the specified input mappings and provided data.
 
         Args:
-            batches (Dict[str, Batch]):
-                A dictionary of FeatureSet batches keyed by FeatureSet label.
+            batch_input (Dict[str, Batch]):
+                A dictionary of FeatureSet batch_input keyed by FeatureSet label.
                 Each Batch contains samples and per-role sample weights.
 
-            model_outputs (Dict[str, Batch]):
+            model_outputs (Dict[str, BatchOutput]):
                 A dictionary of ModelStage outputs keyed by ModelStage label.
-                Each output is treated as a Batch where `.features` holds the model output values.
+                Each output is treated as a BatchOutput where `.features` holds the model output values.
 
         Returns:
             LossResult:
@@ -266,19 +278,20 @@ class AppliedLoss:
             # Get FeatureSet data 
             if attribute in ['features', 'targets']:
                 # Check that node label exists in batches (eg, "PulseFeatures" or "Encoder")
-                if node not in batches.keys():
+                if node not in batch_input.keys():
                     raise ValueError(
-                        f"Required AppliedLoss input (`{node}`) is missing from batch data: {batches.keys()}"
+                        f"Required AppliedLoss input (`{node}`) is missing from batch data: {batch_input.keys()}"
                     )
                 # Check that role exists in batch (eg, "default" or "anchor")
-                if role not in batches[node].available_roles:
+                if role not in batch_input[node].available_roles:
                     raise ValueError(
-                        f"Required AppliedLoss input (`{role}`) is missing from batch data: {batches[node].available_roles}"
+                        f"Required AppliedLoss input (`{role}`) is missing from batch data: {batch_input[node].available_roles}"
                     )
                 
                 # Get sample data
-                sample_coll = batches[node].role_samples[role]
-                sample_weights[k] = batches[node].role_sample_weights[role]
+                sample_coll = batch_input[node].role_samples[role]
+                n_samples = len(sample_coll)
+                sample_weights[k] = batch_input[node].role_sample_weights[role]
                 if attribute == 'features':
                     kwargs[k] = sample_coll.get_all_features(
                         format=get_data_format_for_backend(backend=self.backend)
@@ -301,23 +314,18 @@ class AppliedLoss:
                         f"Required AppliedLoss input (`{role}`) is missing from model_outputs data: {model_outputs[node].available_roles}"
                     )
                     
-                # Get sample data
-                sample_coll = model_outputs[node].role_samples[role]
-                sample_weights[k] = model_outputs[node].role_sample_weights[role]
-                # Model outputs are provided as samples where features=model output, targets=featureset targets
-                kwargs[k] = sample_coll.get_all_features(
-                    format=get_data_format_for_backend(backend=self.backend)
-                )
+                # Get sample data (don't convert data formats - will break pytorch autograd)
+                kwargs[k] = model_outputs[node].features[role]
                 
             else:
                 raise ValueError(f"Unsupported attribute value: {attribute}")
-            
+        
         # Average all sample weights (per-sample weights across all inputs)
         mean_weights = None
         if sample_weights:
             sample_weights = [to_numpy(v) for v in sample_weights.values()]
             # Avg across roles (retain len = len(samples))
-            mean_weights = np.mean(np.stack(sample_weights, axis=0), axis=0)    # shape: (n_samples, )
+            mean_weights = np.mean(np.stack(sample_weights, axis=0), axis=0).reshape(-1)    # shape: (n_samples, )
             
         # Call loss function (convert to positional args if needed)
         if all(k.isdigit() for k in kwargs.keys()):
@@ -326,10 +334,41 @@ class AppliedLoss:
         else:
             loss_res = self.loss(**kwargs)
         
+        
+        # Apply sample weighting
+        # Convert mean_weights to correct backend tensor
+        weighted_loss = None
+        if self.backend == Backend.TORCH:
+            # Ensure loss has shape (batch_size, )
+            loss_res = loss_res.view(-1)
+            mean_weights_tensor = torch.as_tensor(mean_weights, device=loss_res.device)
+            weighted_loss = torch.sum(loss_res * mean_weights_tensor) * self.weight
+
+
+        elif self.backend == Backend.TENSORFLOW:
+            # Ensure loss has shape (batch_size, )
+            loss_res = tf.reshape(loss_res, [-1])
+            mean_weights_tensor = tf.convert_to_tensor(mean_weights, dtype=loss_res.dtype)
+            weighted_loss = tf.reduce_sum(loss_res * mean_weights_tensor) * self.weight
+            
+        else:
+            # Assume NumPy
+            loss_res = np.reshape(loss_res, (-1,))
+            mean_weights = np.reshape(mean_weights, (-1,))
+            weighted_loss = np.sum(loss_res * mean_weights) * self.weight
+        
         return LossResult(
             label=self.label,
-            value=loss_res,
-            weight=self.weight,
-            sample_weights=mean_weights
+            value=weighted_loss,
         )
     
+    
+
+    def __repr__(self) -> str:
+        return (
+            f"AppliedLoss("
+            f"label={self.label}, "
+            # f"loss={self.loss}, "
+            # f"inputs={self.inputs}, "
+            f"weight={self.weight})"
+        )
