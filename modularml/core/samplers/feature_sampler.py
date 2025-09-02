@@ -1,6 +1,6 @@
 
 
-from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Union
 import warnings
 import numpy as np
 
@@ -18,7 +18,7 @@ from modularml.core.data_structures.batch import Batch
 class FeatureSampler:
     def __init__(
         self,
-        source: Union["FeatureSet", "FeatureSubset"],
+        source: Optional[Union["FeatureSet", "FeatureSubset"]] = None,
         batch_size: int = 1,
         shuffle: bool = False,
         stratify_by: Optional[List[str]] = None,
@@ -30,21 +30,20 @@ class FeatureSampler:
         Initializes a sampler for a FeatureSet or FeatureSubset.
 
         Args:
-            source (FeatureSet or FeatureSubset): The source to sample from.
+            source (FeatureSet or FeatureSubset, optional): The source to sample from. If provided, 
+                batches are built immediately. If not provided, you must call `bind_source()` before 
+                using the sampler.
             batch_size (int, optional): Number of samples per batch. Defaults to 1.
-            shuffle (bool, optional): Whether to shuffle samples before sampling. Defaults \
-                to False.
-            stratify_by (List[str], optional): Sample.tag keys to use for stratified sampling. \
-                Using straification ensures that each batch has a representative distribution \
-                of a tag (or combination of tags). E.g., for `stratify_by=['cell_id', ]`, all \
-                batches will contains a similar distribution of differetn cell_id classes.
-            group_by (List[str], optional): Sample.tag keys to group samples together. Using \
-                grouping ensures that each batch contains samples within a single group. E.g., \
-                for `group_by=['cell_id', ]`, all samples in a single batch will be drawn from \
-                the same cell_id class.
-            drop_last (bool, optional): Drop the last batch if it's smaller than `batch_size`. \
-                Defaults to False.
-            seed (int, optional): Random seed for reproducibility.
+            shuffle (bool, optional): Whether to shuffle samples before batching. Defaults to False.
+            stratify_by (List[str], optional): One or more `Sample.tags` keys to stratify batches by. 
+                Ensures each batch has a representative distribution of tag values. For example, 
+                `stratify_by=["cell_id"]` ensures balanced sampling across different cell IDs.
+            group_by (List[str], optional): One or more `Sample.tags` keys to group samples into 
+                batches. Ensures each batch contains samples only from a single group. For example, 
+                `group_by=["cell_id"]` yields batches grouped by cell.
+            drop_last (bool, optional): Whether to drop the final batch if it's smaller than 
+                `batch_size`. Defaults to False.
+            seed (int, optional): Random seed for reproducible shuffling.
         """
         
         self.seed = seed
@@ -59,7 +58,9 @@ class FeatureSampler:
             raise ValueError(f"Both `group_by` and `stratify_by` cannot be applied at the same.")
         self.drop_last = bool(drop_last)
         
-        self.batches : List[Batch] = self._build_batches()
+        self.batches : Optional[List[Batch]] = \
+            self._build_batches() if self.source is not None else None
+        
         self._batch_by_id: Optional[Dict[str, Batch]] = None  # Lazy cache of Batch.batch_id : Batch
         self._batch_by_index: Optional[Dict[int, Batch]] = None  # Lazy cache of Batch.index : Batch
         
@@ -67,6 +68,9 @@ class FeatureSampler:
     @property
     def batch_ids(self) -> List[str]:
         """A list of `Batch.batch_id`."""
+        if self.source is None:
+            raise RuntimeError(f"`bind_source` must be called before batches are available.")
+        
         if self._batch_by_id is None:
             self._batch_by_id = {b.batch_id: b for b in self.batches}
         return list(self._batch_by_id.keys())
@@ -74,6 +78,9 @@ class FeatureSampler:
     @property
     def batch_by_id(self) -> Dict[str, Batch]:
         """Contains Batches mapped by the unique `Batch.batch_id` attribute."""
+        if self.source is None:
+            raise RuntimeError(f"`bind_source` must be called before batches are available.")
+        
         if self._batch_by_id is None:
             self._batch_by_id = {b.batch_id: b for b in self.batches}
         return self._batch_by_id
@@ -81,6 +88,9 @@ class FeatureSampler:
     @property
     def batch_by_index(self) -> Dict[int, Batch]:
         """Contains Batches mapped by the user-defined `Batch.index` attribute."""
+        if self.source is None:
+            raise RuntimeError(f"`bind_source` must be called before batches are available.")
+        
         if self._batch_by_index is None:
             self._batch_by_index = {b.index: b for b in self.batches}
         return self._batch_by_index
@@ -91,10 +101,15 @@ class FeatureSampler:
             return None
         return self.batches[0].available_roles
 
+
     def _build_batches(self) -> List[Batch]:
         """
         Builds and returns the batches according to shuffle, stratify, or group settings.
         """
+        if self.source is None:
+            raise RuntimeError(f"`bind_source` must be called before batches can be built.")
+        
+        
         samples : List["Sample"] = self.source.samples
         batches : List[Batch] = []
         batch_idx = 0
@@ -125,7 +140,7 @@ class FeatureSampler:
                         continue
                     
                     batches.append(Batch(
-                        role_samples={'main':SampleCollection(batch_samples)}, 
+                        role_samples={'default':SampleCollection(batch_samples)}, 
                         label=batch_idx
                     ))
                     batch_idx += 1
@@ -175,7 +190,7 @@ class FeatureSampler:
                     continue
                 batches.append(
                     Batch(
-                        role_samples={'main':SampleCollection(batch_samples)}, 
+                        role_samples={'default':SampleCollection(batch_samples)}, 
                         label=batch_idx
                     )
                 )
@@ -203,7 +218,7 @@ class FeatureSampler:
                 
                 batches.append(
                     Batch(
-                        role_samples={'main':SampleCollection(batch_samples)}, 
+                        role_samples={'default':SampleCollection(batch_samples)}, 
                         label=batch_idx
                     )
                 )
@@ -214,7 +229,24 @@ class FeatureSampler:
             
         return batches
 
-    
+
+    def is_bound(self) -> bool:
+        """Returns True if the sampler has a bound source and batches are built."""
+        return self.source is not None and self.batches is not None
+
+    def bind_source(self, source:Union["FeatureSet", "FeatureSubset"]):
+        """
+        Binds a source FeatureSet or FeatureSubset to this sampler and builds batches.
+
+        This method is required if `source` was not provided during initialization. 
+        It resets and rebuilds internal batches based on the sampler configuration.
+
+        Args:
+            source (FeatureSet or FeatureSubset): The data source to bind for sampling.
+        """
+        self.source = source
+        self.batches = self._build_batches()
+        
     
     def __len__(self):
         """Returns the number of valid batches."""
