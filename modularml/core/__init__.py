@@ -6,11 +6,9 @@ from .data_structures import (
 from .feature_transforms import FeatureTransform
 from .samplers import FeatureSampler
 from .model_graph import (
-    ModelStage, ModelGraph, StageInput, Optimizer, Activation
+    ModelStage, ModelGraph, Optimizer, Activation
 )
 from .experiment import Experiment
-from .training import TrainingPhase
-
 
 __all__ = [
     "Data", "Sample", "SampleCollection", "Batch", 
@@ -20,9 +18,7 @@ __all__ = [
     
     "FeatureSampler",
     
-    "ModelStage", "ModelGraph", "StageInput", "Optimizer", "Activation",
+    "ModelStage", "ModelGraph", "Optimizer", "Activation",
     
     "Experiment", 
-    
-    "TrainingPhase",   
 ]
