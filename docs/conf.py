@@ -31,7 +31,7 @@ templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 autodoc_mock_imports = [
     "torch", "tensorflow", "pandas", "numpy", "scipy", "sklearn",
-    "skopt", "optuna", "networkx", "plotly", "matplotlib",
+    "skopt", "optuna", "networkx", "plotly", "matplotlib", "joblib"
 ]
 # Show both the class docstring and the __init__ docstring
 autoclass_content = "both"

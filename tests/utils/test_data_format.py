@@ -20,7 +20,7 @@ from modularml.utils.data_format import (
     to_numpy,
     to_torch,
     to_tensorflow,
-    convert_to_format,
+    convert_dict_to_format,
     get_data_format_for_backend,
 )
 from modularml.utils.backend import Backend
@@ -169,51 +169,51 @@ def test_to_tensorflow_scalar_and_coerce():
 
 
 # ----------------------------------------------------
-# Tests for convert_to_format
+# Tests for convert_dict_to_format
 # ----------------------------------------------------
 
 @pytest.fixture
 def sample_data():
     return {"a": np.array([1, 2, 3]), "b": [4, 5, 6]}
 
-def test_convert_to_format_dict(sample_data):
-    result = convert_to_format(sample_data, "dict")
+def test_convert_dict_to_format_dict(sample_data):
+    result = convert_dict_to_format(sample_data, "dict")
     assert isinstance(result, dict)
     assert all(isinstance(v, list) for v in result.values())
 
-def test_convert_to_format_dict_list(sample_data):
-    result = convert_to_format(sample_data, "dict_list")
+def test_convert_dict_to_format_dict_list(sample_data):
+    result = convert_dict_to_format(sample_data, "dict_list")
     assert isinstance(result, dict)
     assert all(isinstance(v, list) for v in result.values())
 
-def test_convert_to_format_dict_numpy(sample_data):
-    result = convert_to_format(sample_data, "dict_numpy")
+def test_convert_dict_to_format_dict_numpy(sample_data):
+    result = convert_dict_to_format(sample_data, "dict_numpy")
     assert all(isinstance(v, np.ndarray) for v in result.values())
 
-def test_convert_to_format_pandas(sample_data):
-    df = convert_to_format(sample_data, "pandas")
+def test_convert_dict_to_format_pandas(sample_data):
+    df = convert_dict_to_format(sample_data, "pandas")
     assert isinstance(df, pd.DataFrame)
     assert list(df.columns) == ["a", "b"]
 
-def test_convert_to_format_numpy(sample_data):
-    arr = convert_to_format(sample_data, "numpy")
+def test_convert_dict_to_format_numpy(sample_data):
+    arr = convert_dict_to_format(sample_data, "numpy")
     assert isinstance(arr, np.ndarray)
     assert arr.shape == (3, 2)
 
-def test_convert_to_format_list(sample_data):
-    result = convert_to_format(sample_data, "list")
+def test_convert_dict_to_format_list(sample_data):
+    result = convert_dict_to_format(sample_data, "list")
     assert isinstance(result, list)
     assert all(isinstance(row, list) for row in result)
 
 @pytest.mark.skipif(torch is None, reason="PyTorch not installed")
-def test_convert_to_format_torch(sample_data):
-    t = convert_to_format(sample_data, "torch")
+def test_convert_dict_to_format_torch(sample_data):
+    t = convert_dict_to_format(sample_data, "torch")
     assert isinstance(t, torch.Tensor)
     assert t.shape == (3, 2)
 
 @pytest.mark.skipif(tf is None, reason="TensorFlow not installed")
-def test_convert_to_format_tensorflow(sample_data):
-    t = convert_to_format(sample_data, "tensorflow")
+def test_convert_dict_to_format_tensorflow(sample_data):
+    t = convert_dict_to_format(sample_data, "tensorflow")
     assert isinstance(t, tf.Tensor)
     assert t.shape == (3, 2)
 

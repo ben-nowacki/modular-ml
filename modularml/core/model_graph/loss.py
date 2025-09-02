@@ -1,14 +1,16 @@
 
 
 from abc import ABC
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+import numpy as np
 import tensorflow as tf
 import torch as torch
 import inspect
 
-from modularml.core.data_structures.batch import Batch, BatchComponentSelector
-from modularml.core.data_structures.sample import Sample
+from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.utils.backend import Backend
+from modularml.utils.data_format import DataFormat, convert_dict_to_format, get_data_format_for_backend, to_numpy
 from modularml.utils.exceptions import BackendNotSupportedError, LossError
 
 
@@ -34,7 +36,7 @@ class Loss:
             ``` python
             from sklearn.metrics import mean_squared_error 
             from modularml import Backend
-            loss1 = Loss(loss_function: mean_squared_error)
+            loss1 = Loss(loss_function = mean_squared_error)
             loss2 = Loss(name='mse', backend=Backend.TORCH)
             ```
         """
@@ -88,6 +90,14 @@ class Loss:
             )
         return loss
     
+    @property
+    def allowed_keywords(self) -> List[str]:
+        # Get the signature object
+        sig = inspect.signature(self.loss_function)
+        # Iterate through the parameters in the signature
+        arg_names = [param.name for param in sig.parameters.values()]
+        return arg_names
+    
     def __call__(self, *args, **kwargs):
         try:
             return self.loss_function(*args, **kwargs)
@@ -99,423 +109,266 @@ class Loss:
             return f"Loss(name='{self.name}', backend='{self.backend.name}', reduction='{self.reduction}')"
         return f"Loss(custom_function={self.loss_function})"
     
-    
-    # ==========================================
-    #   State/Config Management Methods
-    # ==========================================	
-    def get_config(self) -> Dict[str, Any]:
-        if self.name is None or self.backend is None:
-            # TODO: figure out how to serialize/register custom Losses
-            raise LossError("Loss object created from callable is not serializable.")
-        return {
-            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
-            "name": self.name,
-            "backend": str(self.backend.value),
-            "reduction": self.reduction,
-        }
-        
-    @classmethod
-    def from_config(cls, config: Dict[str, Any]) -> "Loss":
-        name = config.pop("name")
-        backend = config.pop("backend")
-        reduction = config.pop("reduction")
-        return cls(name=name, backend=backend, reduction=reduction)
-    
-    
+
+
+@dataclass
+class LossResult:
+    label: str              # for logging (e.g. 'mse_regression')
+    value: Any              # raw loss tensor or float (backend-dependent)
+    # weight: float           # scalar weight
+    # n_samples: int          # number of samples used in loss calc
+
 class AppliedLoss:
     def __init__(
         self,
         loss: Loss,
-        loss_kw_selector: Dict[str, BatchComponentSelector],
+        inputs: Dict[str, str],
         weight: float = 1.0,
         label: Optional[str] = None
     ):
         """
-        A base class for different Loss applications (e.g. simple, constrastive, triplet, ...).
+        An applied loss term that maps data from the ModelGraph to keyword arguments of a `Loss` function.
 
         Args:
-            loss (Loss): The Loss function being applied.
-            loss_kw_selector (Dict[str, BatchComponentSelector]): Maps keyword arguments of `loss` \
-                to a specific selection of the batch data. See the examples below.
-            weight (float, optional): An optional weight to apply to this Loss. This is useful when \
-                balancing multiple loss terms in the larger ModelGraph. Defaults to 1.0.
-            label (Optional[str], optional): An optional label assigned to this Loss instance. \
-                This label will be used when logging/print/plotting. Defaults to None.
+            loss (Loss): A loss function wrapper (e.g., MSE, triplet, cross-entropy).
+            inputs (Dict[str, str]): Maps each argument of the loss function to a specific data source. \
+                Keys are the expected loss argument names (e.g., "true", "pred", "anchor", etc). Positional \
+                arguments are supported via "0" or "1" keys. 
+                Values are dot-strings of the form:
                 
-        Examples:
-            Say you have a triplet_loss function that requires keyword arguments of `anchor`, \
-            `negative`, and `positive`. There's also a FeatureSampler with `.available_roles` of \
-            `['ref_samples', 'high_soh', 'low_soh']`. We can map the sampler roles to the require \
-            loss keywords with:
-            ``` python
-                def triplet_loss(*, anchor, negative, positive): 
-                    ...
-                FeatureSampler.available_roles
-                >>> ['ref_samples', 'high_soh', 'low_soh']
-                
-                AppliedLoss(
-                    loss=triplet_loss,
-                    loss_kw_selector={
-                        'anchor': BatchComponentSelector('ref_samples', 'features'),
-                        'negative': BatchComponentSelector('low_soh', 'features'),
-                        'positive': BatchComponentSelector('high_soh', 'features'),
-                    }
-                )
+                - "FeatureSet.targets"          # use `targets` from a FeatureSet batch (default role)
+                - "FeatureSet.features.anchor"  # use `features` from a FeatureSet batch with role="anchor"
+                - "Encoder.output.pos"          # use `output` from a ModelStage with role="pos"
+
+                The three components are always:
+                - source node (FeatureSet or ModelStage)
+                - attribute: "features", "targets", or "output"
+                - role: optional; defaults to "default" if not specified.
+
+            weight (float, optional): A scalar weight to apply to the final loss value. \
+                Useful when combining multiple loss terms. Default is 1.0.
+
+            label (str, optional): Optional name to assign to this loss for logging or visualization. \
+                If not provided, defaults to the `Loss.name`.
+
+        Example:
+            For a triplet loss requiring `anchor`, `positive`, and `negative`:
+            ```python
+            AppliedLoss(
+                loss=triplet_loss,
+                inputs={
+                    "anchor": "Encoder.output.anchor",
+                    "positive": "Encoder.output.pos",
+                    "negative": "Encoder.output.neg"
+                }
+            )
             ```
-            This maps the features from samples under the role 'ref_samples' to 'anchor', 'low_soh' \
-            to 'negative', and 'high_soh' to 'positive'.
+
+            For an MSE loss requiring `pred` and `true`:
+            ```python
+            AppliedLoss(
+                loss=triplet_loss,
+                inputs={
+                    "pred": "Encoder.output",
+                    "true": "PulseFeatures.features",
+                }
+            )
+            ```
         """
         
-        self.loss = loss
-        self.loss_kw_selector : Dict[str, BatchComponentSelector] = loss_kw_selector
-        self.weight = weight
+        self.loss : Loss = loss
+        self.inputs : Dict[str, Tuple[str, str, str]] = {
+            str(k): self._parse_input_spec(p) 
+            for k,p in inputs.items()
+        }
+        self.weight = float(weight)
         self.label = label if label is not None else loss.name
         
     @property
     def backend(self) -> Backend:
         return self.loss.backend
     
-    
-    # ==========================================
-    #   State/Config Management Methods
-    # ==========================================	
-    def get_config(self) -> Dict[str, Any]:
-        return {
-            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
-            "loss": self.loss.get_config(),
-            "loss_kw_selector": {k: v.get_config() for k,v in self.loss_kw_selector.items()},
-            "weight": self.weight,
-            "label": self.label,
-        }
-  
-    @classmethod
-    def from_config(cls, config: Dict[str, Any]) -> "AppliedLoss":
-        return cls(
-            loss=Loss.from_config(config['loss']),
-            loss_kw_selector={
-                k: BatchComponentSelector.from_config(v)
-                for k,v in config['loss_kw_selector'].items()
-            },
-            weight=config['weight'],
-            label=config['label'],        
-        )
-    
-    
-    def compute(self, batch: Batch, model_outputs: Batch) -> Dict[str, Any]:
-        """
-        Computes the AppliedLoss on the provided batch data and subsequent model outputs.
-
-        Args:
-            batch (Batch): The batch data input to the model.
-            model_outputs (Batch): The batch data output by the model.
-            
-        Returns:
-            Dict[str, Any]: Keys include: `'loss', 'unweighted', 'label'`
-        """
-        
-        
-        
-        
-        
-        pass
-    
-    
-    
-    def compute(self, **kwargs) -> Dict[str, Any]:
-        """
-        Computes the AppliedLoss on the provided data. The required keyword argument differ \
-            based on the value of `self.between`. 
-
-        Args:
-            kwargs (Dict[str, Any]): Must contain an `'outputs'` key in addition to requirements \
-                defined by `self.between` (see below). The following keys will also be used if \
-                provided: `['weights', 'tags']`
-                * `between='target'`: `data.keys()` must contain `['outputs', 'targets']`
-                * `between='feature'`: `data.keys()` must contain `['outputs', 'features']`
-                * `between='sample'`: `data.keys()` must contain `'outputs'` and `'outputs'` must \
-                    be a dictionary with keys matching the values defined by `self.sample_key`.
-        Returns:
-            Dict[str, Any]: Keys include: `'loss', 'unweighted', 'label'`
-        """
-        
-        if not 'outputs' in kwargs:
-            raise LossError(f"AppliedLoss.compute() requires an `outputs` keyword.")
-        
-        loss_fnc_inputs = []
-        if self.between == 'target':            
-            if not "targets" in kwargs:
-                raise LossError(f"AppliedLoss.compute() requires an `targets` keyword for `between='target'`.")            
-            loss_fnc_inputs = [kwargs['outputs'], kwargs['targets']]
-
-        elif self.between == 'feature':
-            if not "features" in kwargs:
-                raise LossError(f"AppliedLoss.compute() requires an `features` keyword for `between='feature'`.")
-            loss_fnc_inputs = [kwargs['outputs'], kwargs['features']]
-        
-        elif self.between == 'sample':
-            if not isinstance(kwargs['outputs'], dict):
-                raise TypeError(
-                    f"Expected `kwargs['outputs']` to be a dictionary with keys equal to `self.sample_key`."
-                    f"Received: {type(kwargs['outputs'])}"
-                )
-            missing_sample_key = [
-                k for k in self.sample_key
-                if k not in kwargs['outputs'].keys()
-            ]
-            if missing_sample_key:
-                raise ValueError(f"`kwargs['outputs']` is missing required sample keys: {missing_sample_key}")
-            loss_fnc_inputs = [kwargs['outputs'][k] for k in self.sample_key]
-            
-        else:
-            raise LossError(f"Unknown `between` value: {self.between}")
-        
-        loss_value = 0.0
-        sample_weights = kwargs.get("weights", None)
-        
-        if sample_weights.shape[0] != loss_fnc_inputs[0].shape[0]:
-            raise LossError("Sample weights must match batch size.")
-
-        if self.backend == Backend.TORCH:
-            if sample_weights is not None:
-                # Case 1: Loss returns per-sample value (shape of [batch_size, ])
-                if getattr(self.loss, "reduction", None) == 'none':
-                    raw_loss = self.loss(*loss_fnc_inputs)  # shape: [batch_size, ]
-                    loss_value = (raw_loss * sample_weights).mean()
-                
-                # Case 2: Loss returns scalar, must iterate over samples
-                else:
-                    batch_size = loss_fnc_inputs[0].size(0)
-                    for i in range(batch_size):
-                        inputs = [x[i].unsqueeze(0) for x in loss_fnc_inputs]
-                        loss_value += self.loss(*inputs) * sample_weights[i]
-                    loss_value /= batch_size            
-            else:
-                # No sample weighting
-                loss_value = self.loss(*loss_fnc_inputs).mean()
-                 
-        elif self.backend == Backend.TENSORFLOW:
-            if sample_weights is not None:
-                # Case 1: Loss returns per-sample value (shape of [batch_size, ])
-                if getattr(self.loss, "reduction", None) == 'none':
-                    raw_loss = self.loss(*loss_fnc_inputs)  # shape: [batch_size, ]
-                    loss_value = tf.reduce_mean(raw_loss * sample_weights)
-                
-                # Case 2: Loss returns scalar, must iterate over samples
-                else:
-                    batch_size = tf.shape(loss_fnc_inputs[0])[0]
-                    for i in range(batch_size):
-                        inputs = [x[i:i+1] for x in loss_fnc_inputs]  # keep dims
-                        loss_value += self.loss(*inputs) * sample_weights[i]
-                    loss_value /= tf.cast(batch_size, tf.float32)       
-            else:
-                # No sample weighting
-                loss_value = tf.reduce_mean(self.loss(*loss_fnc_inputs))
-            
-        else:
-            raise BackendNotSupportedError(backend=self.backend, method="AppliedLoss.compute()")
-
-        return {
-            "loss": loss_value * self.weight,    # Apply overall loss weight
-            "unweighted": loss_value,
-            "label": self.label or self.loss.name or "custom_loss",
-        }
-
-
-
-
-    
-    
- 
-
-
-class AppliedLoss:
-    def __init__(
-        self,
-        loss: Loss,
-        between: Literal['target', 'feature', 'sample'], 
-        sample_key: Union[str, List[str]],
-        feature_key: Optional[str] = None,
-        weight: float = 1.0,
-        label: Optional[str] = None,
-    ):
-        """
-        A base class for different Loss applications (e.g. simple, constrastive, triplet, ...).
-
-        Args:
-            loss (Loss): The Loss function being applied.
-            between (Literal['target', 'feature', 'sample']): How the loss is computed.
-                * 'target': the loss is applied between the model output and the true output.
-                * 'feature': the loss is applied between the model output and the original feature.
-                * 'sample': the loss is applied between the model's output for multiple samples.
-                
-            sample_key (Union[str, List[str]]): Defines which sample to use when computing the loss. \
-                If `between='target'` or `between='feature'`, `sample_key` must be a single string \
-                matching a sample key name in FeatureSampler (e.g., 'anchor'). If `between='sample'`, \
-                `sample_key` must be a list of at least 2 strings (e.g.,. ['anchor', 'positive', 'negative']).
-            
-            feature_key (str, optional): Required if `between=feature`. Defines which feature source \
-                to use when computing the loss. 
-            weight (float, optional): An optional weight to apply to this Loss. \
-                This is useful when utilizing multiple loss terms in the ModelGraph. \
-                Defaults to 1.0.
-            label (Optional[str], optional): An optional label to assigned to this Loss instance. \
-                This label will be used when logging/print/plotting. Defaults to None.
-        """
-        
-        self.loss = loss
-        self.weight = weight
-        self.label = label
-        
-        valid_between = ['target', 'feature', 'sample']
-        if not between in valid_between:
-            raise LossError(f"`AppliedLoss.between` must be one of the following: {valid_between}")
-        self.between = between
-        
-        self.feature_key = feature_key
-        self.sample_key = sample_key
-        
-        self._validate_definitions()
-        
-    def _validate_definitions(self):
-        if self.between in ['target', 'feature']:
-            if not isinstance(self.sample_key, str):
-                raise LossError(
-                    f"`sample_key` must be a single string when `between='feature'` or `between='target'`"
-                )
-            if self.between == 'feature' and self.feature_key is None:
-                raise LossError(f"`feature_key` must be provided when `between='feature'`")
-        
-        elif self.between == 'sample':
-            if not isinstance(self.sample_key, list):
-                raise LossError(f"`sample_key` must be a list of strings when `between='sample'`")
-            if len(self.sample_key) < 2:
-                raise LossError(f"`sample_key` must have at least 2 elements when `between='sample'`")
-                    
     @property
-    def backend(self) -> Backend:
-        return self.loss.backend
-    
-    def compute(self, **kwargs) -> Dict[str, Any]:
+    def parsed_inputs(self) -> Dict[str, Tuple[str, str, str]]:
         """
-        Computes the AppliedLoss on the provided data. The required keyword argument differ \
-            based on the value of `self.between`. 
+        Returns the required Loss input specs. Returned list could include:
+            - "pred": (Encoder, output, default)
+            - "true": (PulseFeatures, features, default)
+            - "anchor": (Encoder, output, anchor)
+
+        Returns:
+            Dict[str, Tuple[str, str, str]]
+        """
+        return self.inputs
+    
+    def _parse_input_spec(self, spec: str) -> Tuple[str, str, str]:
+        """
+        Parses a string specifying a data source for a loss argument.
+
+        Accepted formats:
+            - "Node.attribute"         # role defaults to "default"
+            - "Node.attribute.role"    # explicitly specify the role
+
+        Where:
+            - Node: name of the FeatureSet or ModelStage
+            - Attribute: one of "features", "targets", or "output"
+            - Role: (optional) name of the role (e.g., "anchor", "pos")
+
+        Returns:
+            Tuple[str, str, str]: (node, attribute, role)
+        """
+        
+        node, attribute, role = None, None, None
+        
+        parts = spec.split(".")
+        if len(parts) < 2:
+            raise ValueError(f"Invalid `AppliedLoss.inputs` spec: {spec}")
+        elif len(parts) == 2:
+            node, attribute = parts
+            role = 'default'        # use default role if not specified
+        elif len(parts) == 3:
+            node, attribute, role = parts
+        else:
+            raise ValueError(f"Invalid `AppliedLoss.inputs` spec: {spec}")
+
+        allowed_attrs = ['features', "targets", "output"]
+        if not attribute in allowed_attrs:
+            raise ValueError(
+                f"Invalid `AppliedLoss.inputs` spec: {spec}. "
+                f"Attribute must be one of the following: {allowed_attrs}. "
+                f"Received: {attribute}"
+            )
+
+        return node, attribute, role
+        
+    def compute(self, batch_input: Dict[str, Batch], model_outputs: Dict[str, BatchOutput]) -> LossResult:
+        """
+        Computes the loss value using the specified input mappings and provided data.
 
         Args:
-            kwargs (Dict[str, Any]): Must contain an `'outputs'` key in addition to requirements \
-                defined by `self.between` (see below). The following keys will also be used if \
-                provided: `['weights', 'tags']`
-                * `between='target'`: `data.keys()` must contain `['outputs', 'targets']`
-                * `between='feature'`: `data.keys()` must contain `['outputs', 'features']`
-                * `between='sample'`: `data.keys()` must contain `'outputs'` and `'outputs'` must \
-                    be a dictionary with keys matching the values defined by `self.sample_key`.
+            batch_input (Dict[str, Batch]):
+                A dictionary of FeatureSet batch_input keyed by FeatureSet label.
+                Each Batch contains samples and per-role sample weights.
+
+            model_outputs (Dict[str, BatchOutput]):
+                A dictionary of ModelStage outputs keyed by ModelStage label.
+                Each output is treated as a BatchOutput where `.features` holds the model output values.
+
         Returns:
-            Dict[str, Any]: Keys include: `'loss', 'unweighted', 'label'`
+            LossResult:
+                Contains:
+                    - label (str): loss name for logging
+                    - value (Any): backend-dependent scalar or tensor (raw loss output)
+                    - weight (float): scalar weight applied to the loss
+                    - sample_weights (np.ndarray): shape (n_samples,), averaged across inputs
+                    - inputs (Dict[str, Any]): raw tensors passed to the loss function (for debugging)
+
+        Notes:
+            - If multiple roles are mapped to the loss function (e.g., "anchor", "pos", "neg"),
+              the sample weights from each input are averaged per sample.
+            - Loss inputs are converted to the appropriate backend format before evaluation.
         """
         
-        if not 'outputs' in kwargs:
-            raise LossError(f"AppliedLoss.compute() requires an `outputs` keyword.")
-        
-        loss_fnc_inputs = []
-        if self.between == 'target':            
-            if not "targets" in kwargs:
-                raise LossError(f"AppliedLoss.compute() requires an `targets` keyword for `between='target'`.")            
-            loss_fnc_inputs = [kwargs['outputs'], kwargs['targets']]
-
-        elif self.between == 'feature':
-            if not "features" in kwargs:
-                raise LossError(f"AppliedLoss.compute() requires an `features` keyword for `between='feature'`.")
-            loss_fnc_inputs = [kwargs['outputs'], kwargs['features']]
-        
-        elif self.between == 'sample':
-            if not isinstance(kwargs['outputs'], dict):
-                raise TypeError(
-                    f"Expected `kwargs['outputs']` to be a dictionary with keys equal to `self.sample_key`."
-                    f"Received: {type(kwargs['outputs'])}"
-                )
-            missing_sample_key = [
-                k for k in self.sample_key
-                if k not in kwargs['outputs'].keys()
-            ]
-            if missing_sample_key:
-                raise ValueError(f"`kwargs['outputs']` is missing required sample keys: {missing_sample_key}")
-            loss_fnc_inputs = [kwargs['outputs'][k] for k in self.sample_key]
+        kwargs = {}
+        sample_weights = {}
+        for k,input in self.inputs.items():
+            # Ex. values of input: ('PulseFeatures', 'targets', 'default')
+            node, attribute, role = input
             
+            # Get FeatureSet data 
+            if attribute in ['features', 'targets']:
+                # Check that node label exists in batches (eg, "PulseFeatures" or "Encoder")
+                if node not in batch_input.keys():
+                    raise ValueError(
+                        f"Required AppliedLoss input (`{node}`) is missing from batch data: {batch_input.keys()}"
+                    )
+                # Check that role exists in batch (eg, "default" or "anchor")
+                if role not in batch_input[node].available_roles:
+                    raise ValueError(
+                        f"Required AppliedLoss input (`{role}`) is missing from batch data: {batch_input[node].available_roles}"
+                    )
+                
+                # Get sample data
+                sample_coll = batch_input[node].role_samples[role]
+                n_samples = len(sample_coll)
+                sample_weights[k] = batch_input[node].role_sample_weights[role]
+                if attribute == 'features':
+                    kwargs[k] = sample_coll.get_all_features(
+                        format=get_data_format_for_backend(backend=self.backend)
+                    )
+                else:
+                    kwargs[k] = sample_coll.get_all_targets(
+                        format=get_data_format_for_backend(backend=self.backend)
+                    )
+            
+            # Get model output data
+            elif attribute == 'output':
+                # Check that node label exists in model output (eg, "Encoder")
+                if node not in model_outputs.keys():
+                    raise ValueError(
+                        f"Required AppliedLoss input (`{node}`) is missing from model_outputs data: {model_outputs.keys()}"
+                    )
+                # Check that role exists in model_outputs (eg, "default" or "anchor")
+                if role not in model_outputs[node].available_roles:
+                    raise ValueError(
+                        f"Required AppliedLoss input (`{role}`) is missing from model_outputs data: {model_outputs[node].available_roles}"
+                    )
+                    
+                # Get sample data (don't convert data formats - will break pytorch autograd)
+                kwargs[k] = model_outputs[node].features[role]
+                
+            else:
+                raise ValueError(f"Unsupported attribute value: {attribute}")
+        
+        # Average all sample weights (per-sample weights across all inputs)
+        mean_weights = None
+        if sample_weights:
+            sample_weights = [to_numpy(v) for v in sample_weights.values()]
+            # Avg across roles (retain len = len(samples))
+            mean_weights = np.mean(np.stack(sample_weights, axis=0), axis=0).reshape(-1)    # shape: (n_samples, )
+            
+        # Call loss function (convert to positional args if needed)
+        if all(k.isdigit() for k in kwargs.keys()):
+            args = [kwargs[str(i)] for i in range(len(kwargs))]
+            loss_res = self.loss(*args)
         else:
-            raise LossError(f"Unknown `between` value: {self.between}")
+            loss_res = self.loss(**kwargs)
         
-        loss_value = 0.0
-        sample_weights = kwargs.get("weights", None)
         
-        if sample_weights.shape[0] != loss_fnc_inputs[0].shape[0]:
-            raise LossError("Sample weights must match batch size.")
-
+        # Apply sample weighting
+        # Convert mean_weights to correct backend tensor
+        weighted_loss = None
         if self.backend == Backend.TORCH:
-            if sample_weights is not None:
-                # Case 1: Loss returns per-sample value (shape of [batch_size, ])
-                if getattr(self.loss, "reduction", None) == 'none':
-                    raw_loss = self.loss(*loss_fnc_inputs)  # shape: [batch_size, ]
-                    loss_value = (raw_loss * sample_weights).mean()
-                
-                # Case 2: Loss returns scalar, must iterate over samples
-                else:
-                    batch_size = loss_fnc_inputs[0].size(0)
-                    for i in range(batch_size):
-                        inputs = [x[i].unsqueeze(0) for x in loss_fnc_inputs]
-                        loss_value += self.loss(*inputs) * sample_weights[i]
-                    loss_value /= batch_size            
-            else:
-                # No sample weighting
-                loss_value = self.loss(*loss_fnc_inputs).mean()
-                 
+            # Ensure loss has shape (batch_size, )
+            loss_res = loss_res.view(-1)
+            mean_weights_tensor = torch.as_tensor(mean_weights, device=loss_res.device)
+            weighted_loss = torch.sum(loss_res * mean_weights_tensor) * self.weight
+
+
         elif self.backend == Backend.TENSORFLOW:
-            if sample_weights is not None:
-                # Case 1: Loss returns per-sample value (shape of [batch_size, ])
-                if getattr(self.loss, "reduction", None) == 'none':
-                    raw_loss = self.loss(*loss_fnc_inputs)  # shape: [batch_size, ]
-                    loss_value = tf.reduce_mean(raw_loss * sample_weights)
-                
-                # Case 2: Loss returns scalar, must iterate over samples
-                else:
-                    batch_size = tf.shape(loss_fnc_inputs[0])[0]
-                    for i in range(batch_size):
-                        inputs = [x[i:i+1] for x in loss_fnc_inputs]  # keep dims
-                        loss_value += self.loss(*inputs) * sample_weights[i]
-                    loss_value /= tf.cast(batch_size, tf.float32)       
-            else:
-                # No sample weighting
-                loss_value = tf.reduce_mean(self.loss(*loss_fnc_inputs))
+            # Ensure loss has shape (batch_size, )
+            loss_res = tf.reshape(loss_res, [-1])
+            mean_weights_tensor = tf.convert_to_tensor(mean_weights, dtype=loss_res.dtype)
+            weighted_loss = tf.reduce_sum(loss_res * mean_weights_tensor) * self.weight
             
         else:
-            raise BackendNotSupportedError(backend=self.backend, method="AppliedLoss.compute()")
-
-        return {
-            "loss": loss_value * self.weight,    # Apply overall loss weight
-            "unweighted": loss_value,
-            "label": self.label or self.loss.name or "custom_loss",
-        }
-
-    # ==========================================
-    #   State/Config Management Methods
-    # ==========================================	
-    def get_config(self) -> Dict[str, Any]:
-        return {
-            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
-            "loss": self.loss.get_config(),
-            "between": self.between,
-            "sample_key": self.sample_key,
-            "feature_key": self.feature_key,
-            "weight": self.weight,
-            "label": self.label,
-        }
-  
-    @classmethod
-    def from_config(cls, config: Dict[str, Any]) -> "AppliedLoss":
-        return cls(
-            loss=Loss.from_config(config['loss']),
-            between=config['between'],
-            sample_key=config['sample_key'],
-            feature_key=config['feature_key'],
-            weight=config['weight'],
-            label=config['label'],
+            # Assume NumPy
+            loss_res = np.reshape(loss_res, (-1,))
+            mean_weights = np.reshape(mean_weights, (-1,))
+            weighted_loss = np.sum(loss_res * mean_weights) * self.weight
+        
+        return LossResult(
+            label=self.label,
+            value=weighted_loss,
         )
- 
+    
+    
+
+    def __repr__(self) -> str:
+        return (
+            f"AppliedLoss("
+            f"label={self.label}, "
+            # f"loss={self.loss}, "
+            # f"inputs={self.inputs}, "
+            f"weight={self.weight})"
+        )
