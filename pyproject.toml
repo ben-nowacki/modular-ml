@@ -46,7 +46,6 @@ dependencies = [
     "plotly",
     "matplotlib",
     "nbformat",
-    "pickle",
     "joblib"
 ]
 
