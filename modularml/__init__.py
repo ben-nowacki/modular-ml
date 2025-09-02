@@ -11,6 +11,6 @@ from . import models
 
 try:
     from importlib.metadata import version
-    __version__ = version("ModularML")
+    __version__ = version("modularml")
 except ImportError:
     __version__ = "unknown"

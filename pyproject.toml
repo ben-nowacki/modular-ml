@@ -3,7 +3,7 @@ requires = ["setuptools>=65", "setuptools_scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ModularML"
+name = "modularml"
 dynamic = ["version"]
 description = "A library for modular, fast, and reproducible ML experimentation built for R&D."
 readme = "README.md"
@@ -46,7 +46,6 @@ dependencies = [
     "plotly",
     "matplotlib",
     "nbformat",
-    "pickle",
     "joblib"
 ]
 
