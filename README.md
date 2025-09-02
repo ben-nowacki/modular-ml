@@ -1,7 +1,9 @@
-# ModularML
 
-Modular, fast, and reproducible ML experimentation built for R\&D.
+<div align="center">
 
+[![ModularML Banner](assets/modularml_logo_banner.png)](https://github.com/REIL-UConn/modular-ml)
+
+**Modular, fast, and reproducible ML experimentation built for R\&D.**
 
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/modularml.svg)](https://pypi.org/project/modularml/)
@@ -9,11 +11,10 @@ Modular, fast, and reproducible ML experimentation built for R\&D.
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange
 )](LICENSE)
 
----
+</div>
 
-# Why ModularML?
 
-**ModularML** is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating modular ML pipelines, tailored specifically for research and scientific workflows. 
+ModularML is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating modular ML pipelines, tailored specifically for research and scientific workflows. 
 It enables rapid experimentation with complex model architectures, supports domain-specific feature engineering, and provides full reproducibility through configuration-driven declaration.
 
 > ModularML provides a plug-and-play ecosystem of interoperable components for data preprocessing, sampling, modeling, training, and evaluation — all wrapped in a unified experiment container.
@@ -49,11 +50,11 @@ ModularML includes a comprehensive set of components for scientific ML workflows
   - Each node is a `ModelStage` (e.g., encoder, head, discriminator).
   - Each stage can use a different backend (PyTorch, TensorFlow, scikit-learn, LightGBM, etc).
   - Mixed-backend models are supported with seamless input/output routing.
-- **Stage-wise training**: Custom `TrainingStage` configuration enables fine-tuning, freezing, and transfer learning across sub-models.
+- **Stage-wise training**: Custom `TrainingPhase` configuration enables fine-tuning, freezing, and transfer learning across sub-models.
 
 ### Training & Experiments
-- **`Experiment` class** encapsulates all training logic (via multiple `TrainingStage` objects), ModelGraph and FeatureSet definition, and a `TrackingManager` that logs all configuration files and training, validation, and evaluation metrics for rapid and reproducible ML experimentation.
-- Each `TrainingStage` defines training loop logic with early stopping, validation hooks, loss weighting, and optimizer configs.
+- **`Experiment` class** encapsulates all training logic (via multiple `TrainingPhase` objects), ModelGraph and FeatureSet definition, and a `TrackingManager` that logs all configuration files and training, validation, and evaluation metrics for rapid and reproducible ML experimentation.
+- Each `TrainingPhase` defines training loop logic with early stopping, validation hooks, loss weighting, and optimizer configs.
 - **Multi-objective loss support** with configurable stage-level targets, sample-based loss functions, and weighted combinations.
 - **Config-driven experiments**: Every experiment is fully seriallizable and reproducible from a single configuration file.
 - **Built-in experiment tracking** via a `TrackingManager`, with optional integration into external managers like MLflow or other logging backends.
@@ -77,8 +78,8 @@ pip install git+https://github.com/REIL-UConn/modular-ml.git
 
 
 ## Explore More
-- **[Examples](examples/)** – Explore complete examples of how to set up FeatureSets, samplers, model graphs, and training configurations.
-- **[Documentation](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, YAML configuration guides, and tutorials.
+- **[Examples](examples/)** – Explore complete examples of how to set up FeatureSets, apply feature preprocessing, construct model graphs, and run training configurations.
+- **[Documentation](https://modular-ml.readthedocs.io/en/latest/)** – API reference, component explanations, configuration guides, and tutorials.
 - **[Discussions](https://github.com/REIL-UConn/modular-ml/discussions)** – Join the community, ask questions, suggest features, or share use cases.
 
 ---

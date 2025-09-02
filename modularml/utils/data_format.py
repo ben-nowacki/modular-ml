@@ -2,7 +2,7 @@
 
 
 
-from typing import Any, Dict, Literal, Union
+from typing import TYPE_CHECKING, Any, Dict, Literal, Tuple, Union
 import numpy as np
 import pandas as pd
 try:
@@ -15,6 +15,9 @@ try:
 except ImportError:
     tf = None
 
+
+if TYPE_CHECKING:
+    from modularml.core.data_structures.data import Data
 
 from modularml.utils.backend import Backend
 
@@ -56,6 +59,7 @@ _FORMAT_ALIASES = {
     "tensorflow": DataFormat.TENSORFLOW,
     "tensorflow.tensor": DataFormat.TENSORFLOW,
 }
+
 
 
 def normalize_format(fmt: Union[str, DataFormat]) -> DataFormat:
@@ -143,6 +147,7 @@ def to_python(obj):
     Returns:
         Python-native object.
     """
+    from modularml.core.data_structures.data import Data
     
     # NumPy
     if isinstance(obj, np.generic):           # np.int64, np.float64, etc.
@@ -170,6 +175,8 @@ def to_python(obj):
         return {k: to_python(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
         return type(obj)(to_python(v) for v in obj)
+    elif isinstance(obj, Data):
+        return to_python(obj.value)
 
     # Base case
     return obj
@@ -204,7 +211,7 @@ def to_numpy(obj: Any, errors: T_ERRORS = 'raise') -> np.ndarray:
                 return py_obj
             elif errors == "coerce":
                 return np.array([py_obj])
-    
+
     # Scalars -> wrap into a 0-D array
     if np.isscalar(py_obj):
         return np.asarray(py_obj)
@@ -226,14 +233,14 @@ def to_torch(obj: Any, errors: T_ERRORS = 'raise') -> "torch.Tensor": # type: ig
 
     py_obj = to_python(obj)
     try:
-        return torch.tensor(np.asarray(py_obj), dtype=torch.float32)
+        return torch.as_tensor(np.asarray(py_obj), dtype=torch.float32)
     except Exception:
         if errors == "raise":
             raise TypeError(f"Cannot convert object of type {type(py_obj)} to Torch tensor.")
         elif errors == "ignore":
             return py_obj
         elif errors == "coerce":
-            return torch.tensor(np.asarray([py_obj]), dtype=torch.float32)
+            return torch.as_tensor(np.asarray([py_obj]), dtype=torch.float32)
 
 def to_tensorflow(obj: Any, errors: T_ERRORS = 'raise') -> "tf.Tensor": # type: ignore
     """
@@ -254,7 +261,20 @@ def to_tensorflow(obj: Any, errors: T_ERRORS = 'raise') -> "tf.Tensor": # type: 
             return tf.convert_to_tensor(np.asarray([py_obj]), dtype=tf.float32)
   
   
-def convert_to_format(
+def format_has_shape(format: DataFormat) -> bool:
+    """Returns True if the specified DataFormat has a shape attribute"""
+    return format in [
+        DataFormat.NUMPY, DataFormat.TORCH, DataFormat.TENSORFLOW
+    ]
+  
+def enforce_numpy_shape(arr: np.ndarray, target_shape: Tuple[int, ...]) -> np.ndarray:
+    arr = np.asarray(arr)
+    if arr.shape != target_shape:
+        arr = arr.reshape(target_shape)
+    return arr
+  
+
+def convert_dict_to_format(
     data: Dict[str, Any],
     format: Union[str, DataFormat],
     errors: T_ERRORS = 'raise',
@@ -308,8 +328,7 @@ def convert_to_format(
         return torch.tensor(
             np.column_stack([to_numpy(v, errors=errors) for v in data.values()]),
             dtype=torch.float32,
-        )
-        
+        )      
     elif fmt == DataFormat.TENSORFLOW:
         if tf is None:
             raise ImportError("TensorFlow is not installed.")
@@ -318,6 +337,49 @@ def convert_to_format(
             dtype=tf.float32,
         )
 
+    else:
+        raise ValueError(f"Unsupported data format: {fmt}")
+    
+def convert_to_format(
+    data: Any,
+    format: Union[str, DataFormat],
+    errors: T_ERRORS = 'raise',
+) -> Any:
+    """
+    Converts a data object into the specified format.
+
+    Args:
+        data: Dicts, arrays, lists, scalars, or tensors.
+        format: Target data format to convert into.
+        errors: How to handle incompatible types:
+            - "raise": Raise an error when conversion fails.
+            - "coerce": Force conversion where possible.
+            - "ignore": Leave unconvertible objects unchanged.
+
+    Returns:
+        Converted object.
+    """
+    
+    fmt = normalize_format(format)
+    if isinstance(data, dict):
+        return convert_dict_to_format(data=data, format=format, errors=errors)
+    
+    elif fmt == DataFormat.NUMPY:
+        return to_numpy(data, errors=errors)
+    
+    elif fmt == DataFormat.LIST:
+        return to_list(data, errors=errors)
+    
+    elif fmt == DataFormat.TORCH:
+        if torch is None:
+            raise ImportError("PyTorch is not installed.")
+        return to_torch(data, errors=errors)
+         
+    elif fmt == DataFormat.TENSORFLOW:
+        if tf is None:
+            raise ImportError("TensorFlow is not installed.")
+        return to_tensorflow(data, errors=errors)
+    
     else:
         raise ValueError(f"Unsupported data format: {fmt}")
     
