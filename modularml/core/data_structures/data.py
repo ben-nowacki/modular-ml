@@ -63,6 +63,9 @@ class Data:
             return self.value == other.value
         return self.value == other
     
+    def __hash__(self,):
+        return hash(self.value)
+    
     def __ne__(self, other):
         return not self.__eq__(other)
     
