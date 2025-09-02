@@ -130,8 +130,8 @@ class FeatureSet(SampleCollection):
         self._transform_logs : Dict[str, List[TransformRecord]] = {'features':[], 'targets':[]}
         
     @property
-    def available_subsets(self):
-        return self.subsets.keys()
+    def available_subsets(self) -> List[str]:
+        return list(self.subsets.keys())
     
     @property
     def n_subsets(self) -> int:
