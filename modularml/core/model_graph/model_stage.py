@@ -9,7 +9,7 @@ from modularml.core.model_graph.loss import AppliedLoss, LossResult
 from modularml.core.model_graph.optimizer import Optimizer
 from modularml.models.base import BaseModel
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import convert_to_format, get_data_format_for_backend
+from modularml.utils.data_format import DataFormat, convert_to_format, get_data_format_for_backend
 from modularml.utils.exceptions import BackendMismatchError, BackendNotSupportedError, OptimizerNotSetError
 
 
@@ -73,7 +73,7 @@ class ModelStage:
     
     @property
     def input_shape(self) -> Tuple[int, ...]:
-        inp_shape = self.model.input_shape
+        inp_shape = convert_to_format(self.model.input_shape, format=DataFormat.LIST)
         if inp_shape is None:
             if self.is_built:
                 raise RuntimeError(f"Input shape is None after model building.")
@@ -83,7 +83,7 @@ class ModelStage:
     
     @property
     def output_shape(self) -> Tuple[int, ...]:
-        out_shape = self.model.output_shape
+        out_shape = convert_to_format(self.model.output_shape, format=DataFormat.LIST)
         if out_shape is None:
             if self.is_built:
                 raise RuntimeError(f"Output shape is None after model building.")
