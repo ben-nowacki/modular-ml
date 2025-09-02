@@ -10,7 +10,7 @@ import numpy as np
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import DataFormat, convert_dict_to_format
+from modularml.utils.data_format import DataFormat, convert_dict_to_format, convert_to_format, enforce_numpy_shape, format_has_shape
 
 
 @dataclass
@@ -55,9 +55,20 @@ class SampleCollection:
     
     def get_sample_with_uuid(self, uuid:str) -> Sample:
         return self._uuid_sample_map[uuid]
+    def get_samples_with_uuid(self, uuids: List[str]) -> "SampleCollection":
+        return SampleCollection(samples=[
+            self.get_sample_with_uuid(x)
+            for x in uuids
+        ])
     
     def get_sample_with_label(self, label:str) -> Sample:
         return self._label_sample_map[label]
+    def get_samples_with_label(self, labels: List[str]) -> "SampleCollection":
+        return SampleCollection(samples=[
+            self.get_sample_with_uuid(x)
+            for x in labels
+        ])
+    
     
     def __iter__(self):
         return iter(self.samples)
@@ -98,38 +109,37 @@ class SampleCollection:
         """
         Returns all features across all samples in the specified format.
         """ 
-        raw = {}
-
-        for k in self.feature_keys:
-            values = [s.features[k].value for s in self.samples]
-
-            if format in ("dict_numpy", DataFormat.DICT_NUMPY):
-                try:
-                    raw[k] = np.array(values)
-                except Exception:
-                    raw[k] = values
-            else:
-                raw[k] = values
-
+        raw = {
+            k: [s.features[k].value for s in self.samples]
+            for k in self.feature_keys
+        }
+        if format_has_shape(format=format):
+            # force proper shape: conver to np, force shape, then convert to specific format
+            np_data = convert_dict_to_format(raw, format=DataFormat.NUMPY)
+            np_data = enforce_numpy_shape(
+                arr=np_data, 
+                target_shape=(len(self), *self.feature_shape)
+            )
+            return convert_to_format(np_data, format=format)
+        
         return convert_dict_to_format(raw, format=format)
-
+    
     def get_all_targets(self, format: Union[str, DataFormat] = DataFormat.DICT_NUMPY) -> Any:
         """
         Returns all targets across all samples in the specified format.
         """
-        target_keys = self.samples[0].targets.keys()
-        raw = {}
-
-        for k in target_keys:
-            values = [s.targets[k].value for s in self.samples]
-
-            if format in ("dict_numpy", DataFormat.DICT_NUMPY):
-                try:
-                    raw[k] = np.array(values)
-                except Exception:
-                    raw[k] = values
-            else:
-                raw[k] = values
+        raw = {
+            k: [s.targets[k].value for s in self.samples]
+            for k in self.target_keys
+        }
+        if format_has_shape(format=format):
+            # force proper shape: conver to np, force shape, then convert to specific format
+            np_data = convert_dict_to_format(raw, format=DataFormat.NUMPY)
+            np_data = enforce_numpy_shape(
+                arr=np_data, 
+                target_shape=(len(self), *self.target_shape)
+            )
+            return convert_to_format(np_data, format=format)
 
         return convert_dict_to_format(raw, format=format)
 
@@ -140,22 +150,10 @@ class SampleCollection:
         Each tag will be returned as a list of values across samples.
         The format argument controls the output structure.
         """
-        raw : Dict[str, Any] = {}
-
-        for key in self.samples[0].tags:
-            values = [
-                v.value.item() if isinstance(v.value, np.ndarray) and v.value.size == 1 else v.value
-                for v in [s.tags[key] for s in self.samples]
-            ]
-
-            if format in ("dict_numpy", DataFormat.DICT_NUMPY):
-                try:
-                    raw[key] = np.array(values)
-                except Exception:
-                    raw[key] = values
-            else:
-                raw[key] = values
-
+        raw = {
+            k: [s.tags[k].value for s in self.samples]
+            for k in self.tag_keys
+        }
         return convert_dict_to_format(raw, format=format)
 
 
