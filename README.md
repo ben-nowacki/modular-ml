@@ -50,11 +50,11 @@ ModularML includes a comprehensive set of components for scientific ML workflows
   - Each node is a `ModelStage` (e.g., encoder, head, discriminator).
   - Each stage can use a different backend (PyTorch, TensorFlow, scikit-learn, LightGBM, etc).
   - Mixed-backend models are supported with seamless input/output routing.
-- **Stage-wise training**: Custom `TrainingStage` configuration enables fine-tuning, freezing, and transfer learning across sub-models.
+- **Stage-wise training**: Custom `TrainingPhase` configuration enables fine-tuning, freezing, and transfer learning across sub-models.
 
 ### Training & Experiments
-- **`Experiment` class** encapsulates all training logic (via multiple `TrainingStage` objects), ModelGraph and FeatureSet definition, and a `TrackingManager` that logs all configuration files and training, validation, and evaluation metrics for rapid and reproducible ML experimentation.
-- Each `TrainingStage` defines training loop logic with early stopping, validation hooks, loss weighting, and optimizer configs.
+- **`Experiment` class** encapsulates all training logic (via multiple `TrainingPhase` objects), ModelGraph and FeatureSet definition, and a `TrackingManager` that logs all configuration files and training, validation, and evaluation metrics for rapid and reproducible ML experimentation.
+- Each `TrainingPhase` defines training loop logic with early stopping, validation hooks, loss weighting, and optimizer configs.
 - **Multi-objective loss support** with configurable stage-level targets, sample-based loss functions, and weighted combinations.
 - **Config-driven experiments**: Every experiment is fully seriallizable and reproducible from a single configuration file.
 - **Built-in experiment tracking** via a `TrackingManager`, with optional integration into external managers like MLflow or other logging backends.
