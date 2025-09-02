@@ -8,5 +8,5 @@ from .model_graph import ModelGraph
 
 __all__ = [
     "Activation", "Optimizer", "Loss", "AppliedLoss",
-    "ModelStage", "ModelGraph"
+    "ModelStage", "ModelGraph",
 ]

@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 import pandas as pd
 
-from modularml.core.experiment.phase_result import PhaseResult
 from modularml.core.model_graph import ModelGraph
 from modularml.core.samplers.feature_sampler import FeatureSampler
 from modularml.core.experiment.eval_phase import EvaluationPhase
@@ -154,7 +153,7 @@ class Experiment:
             if epoch % 10 == 0:
                 print(f"    - Epoch {epoch}: Avg. sample loss = {avg_sample_loss:.4f}")
 
-    def run_evaluation_phase(self, phase: EvaluationPhase) -> pd.DataFrame:
+    def run_evaluation_phase(self, phase: EvaluationPhase) -> Dict[str, list]:
         """
         Run a single evaluation phase and collect model outputs for analysis.
 
@@ -167,7 +166,7 @@ class Experiment:
             phase (EvaluationPhase): EvaluationPhase to execute.
 
         Returns:
-            pd.DataFrame: A long-form dataframe with one row per output sample, containing:
+            Dict[str, list]: A dict containing the following keys:
                 - "sample_uuid": Unique identifier of the input sample
                 - "role": Role assigned by the sampler (e.g., 'default', 'anchor', etc.)
                 - "{ModelStage.label}.output": Output from the model stage for this sample
@@ -220,6 +219,6 @@ class Experiment:
                     s_uuids = convert_to_format(b.sample_uuids[role], format=DataFormat.LIST)
                     data['sample_uuid'].extend( s_uuids )
         
-        return convert_to_format(data, format=DataFormat.PANDAS) 
+        return convert_to_format(data, format=DataFormat.DICT_LIST) 
     
 
