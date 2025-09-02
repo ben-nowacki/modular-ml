@@ -1,18 +1,4 @@
 
-
-'''
-DAG of FeatureSets and ModelStages
-
-Responsibilities:
-    Stores all nodes: FeatureSets and ModelStages.
-    Stores all edges: how outputs of one stage feed another.
-    Performs:
-        Topological sorting
-        Lazy build() propagation of shapes
-        Forward pass through the graph
-'''
-
-
 from typing import Any, Dict, List, Optional, Tuple, Union
 from collections import defaultdict, deque
 import warnings
@@ -20,36 +6,38 @@ from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
 
-from modularml.core.data_structures.batch import Batch
+from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.feature_set import FeatureSet
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
-from modularml.core.model_graph.model_stage import ModelStage, StageInput
+from modularml.core.model_graph.loss import AppliedLoss, LossResult
+from modularml.core.model_graph.model_stage import ModelStage
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import get_data_format_for_backend
+from modularml.utils.data_format import DataFormat, convert_to_format
 
 
 
-def make_dummy_data(shape: Tuple[int, ...], batch_size:int=None) -> Data:
+def make_dummy_data(shape: Tuple[int, ...]) -> Data:
     """
-    Creates a dummy Data object. A batch dimension is added if `batch_size` is not None.
+    Creates a dummy Data object
     """
-    
-    # Add batch dimension if specified
-    if batch_size is not None:
-        shape = (batch_size, ) + shape
-        
     # Create dummy data
     d = Data(np.ones(shape=shape))
     
     return d
 
-def make_dummy_batch(feature_shape: Tuple[int, ...], batch_size:int=8) -> Batch:
+def make_dummy_batch(feature_shape: Tuple[int, ...], target_shape: Tuple[int, ...] = (1,1), batch_size:int=8) -> Batch:
     sample_coll = SampleCollection([
         Sample(
-            features={'features_1': make_dummy_data(shape=feature_shape)},
-            targets={'targets_1': make_dummy_data(shape=(1,1))},
+            features={
+                f'features_{x}': make_dummy_data(shape=feature_shape[1:])
+                for x in range(feature_shape[0])
+            },
+            targets={
+                f'targets_{x}': make_dummy_data(shape=target_shape[1:])
+                for x in range(target_shape[0])
+            },
             tags={'tags_1': make_dummy_data(shape=(1,)), 'tags_2': make_dummy_data(shape=(1,))},
         )
         for i in range(batch_size)
@@ -82,7 +70,8 @@ class ModelGraph:
         
         self._validate_graph()
         self._sorted_stage_labels = self._topological_sort()
-    
+        self._built = False
+        
     @property
     def feature_set_labels(self) -> List[str]:
         return list(self._feature_sets.keys())
@@ -91,6 +80,9 @@ class ModelGraph:
     def model_stage_labels(self) -> List[str]:
         return list(self._model_stages.keys())
     
+    @property
+    def is_built(self) -> bool:
+        return self._built
     
     def __repr__(self):
         return self.summary()
@@ -106,7 +98,6 @@ class ModelGraph:
         
         return msg
     
- 
  
     def _validate_graph(self):
         """Check for backend consistency and graph connectivity."""
@@ -124,10 +115,10 @@ class ModelGraph:
         # Check for unreachable stages
         reachable = set()
         frontier = [
-            inp.source
+            inp
             for label, stage in self._model_stages.items()
             for inp in stage.inputs
-            if inp.source not in self._model_stages
+            if inp not in self._model_stages
         ]
         # BFS traversal
         while frontier:
@@ -135,8 +126,8 @@ class ModelGraph:
             if current in reachable: continue	# Ignore if already seen
             reachable.add(current)	
             for label, stage in self._model_stages.items():
-                inputs: List[StageInput] = stage.inputs if isinstance(stage.inputs, list) else [stage.inputs, ]
-                if current in [inp.source for inp in inputs]:
+                inputs: List[str] = stage.inputs if isinstance(stage.inputs, list) else [stage.inputs, ]
+                if current in inputs:
                     frontier.append(label)		# Add next connected stage
 
         unreachable = set(self._model_stages) - reachable
@@ -162,14 +153,14 @@ class ModelGraph:
             parents = stage.inputs if isinstance(stage.inputs, list) else [stage.inputs]
             for p in parents:
                 # If p is a base node (ie, it's name is FeatureSet.label), continue
-                if p.source in self._feature_sets:
+                if p in self._feature_sets:
                     continue
                 # Otherwise, increment the in_degree (how many parents this stage has)
-                if p.source not in self.all_nodes:
+                if p not in self.all_nodes:
                     raise ValueError(
-                        f"Invalid input source '{p.source}' for stage '{stage_name}'.")
+                        f"Invalid input source '{p}' for stage '{stage_name}'.")
                 in_degree[stage_name] += 1
-                children[p.source].append(stage_name)
+                children[p].append(stage_name)
 
         sorted_stage_names = []
         queue = deque([k for k in all_stage_names if in_degree[k] == 0])
@@ -187,7 +178,6 @@ class ModelGraph:
             raise ValueError(f"Cyclic dependency detected in ModelGraph: {unresolved}")
 
         return sorted_stage_names
-    
     
     def build_all(self):
         """Build all ModelStage contain in this ModelGraph"""
@@ -216,13 +206,15 @@ class ModelGraph:
             
             print(f"Inferred shapes for `{node.label}`: ", node.input_shape, "->", node.output_shape)
     
-    def _infer_input_shape(self, inputs: List[StageInput]) -> Tuple[int, ...]:
-        """Attempts to infer the input shape given the StageInput specs"""
+        self._built = True
+            
+    def _infer_input_shape(self, inputs: List[str]) -> Tuple[int, ...]:
+        """Attempts to infer the input shape given the input specs"""
         
         input_shapes = []
         for inp in inputs:
             # Get previous node
-            prev_node = self.all_nodes[inp.source]
+            prev_node = self.all_nodes[inp]
             
             if isinstance(prev_node, FeatureSet):
                 input_shapes.append(tuple(int(d) for d in prev_node.feature_shape))
@@ -254,8 +246,8 @@ class ModelGraph:
         Attempts to infer the output shape of a ModelStage
         Runs a Dummy input with `input_shape` and check outputs size.
         """
-        # Make dummy input for ModelStage with batch_size = 1
-        X: Data = make_dummy_data(shape=input_shape, batch_size=1)
+        # Make dummy input for ModelStage (add batch_dim of 1)
+        X: Data = make_dummy_data(shape=(1, *input_shape))
     
         # Collect model output
         y = node.forward(X)
@@ -264,7 +256,23 @@ class ModelGraph:
         return tuple(int(dim) for dim in y.shape[1:])
 
 
-
+    
+    def dummy_foward(self, batch_size:int = 8) -> Batch:
+        """
+        A foward pass through the entire ModelGraph with a dummy input to test connections.
+        """
+        if len(self._feature_sets.keys()) > 1:
+            raise NotImplementedError(
+                f"`dummy_forward` doesn't currently support ModelGraphs with multiple FeatureSets."
+            )
+        fs = self._feature_sets[self.feature_set_labels[0]]
+        batch = make_dummy_batch(feature_shape=fs.feature_shape, batch_size=batch_size)
+        multi_batch = {self.feature_set_labels[0]: batch}
+        
+        res = self.forward(multi_batch)
+        output : BatchOutput = res[self._sorted_stage_labels[-1]]
+        return convert_to_format(output.features, format=DataFormat.NUMPY).tolist()
+        
     def forward(self, batches: Dict[str, Batch]) -> Dict[str, Batch]:
         
         missing_featuresets = []
@@ -288,34 +296,148 @@ class ModelGraph:
             stage = self._model_stages[label]
             inputs: List[Batch] = []
             for inp in stage.inputs:
-                if inp.source not in cache:
-                    raise ValueError(f"Missing input `{inp.source}` for stage `{label}`")
-                inputs.append(cache[inp.source])
-                
+                if inp not in cache:
+                    raise ValueError(f"Missing input `{inp}` for stage `{label}`")
+                inputs.append(cache[inp])
+            
             # TODO: Combine multiple inputs into one input (e.g., tuple, dict, or concat)
             stage_input = inputs[0] if len(inputs) == 1 else tuple(inputs)
             
             # Model forward pass
-            output: Batch = stage.forward(stage_input)
+            output: BatchOutput = stage.forward(stage_input)
             cache[label] = output
             
         return cache
-    
-    def dummy_foward(self, batch_size:int = 8) -> Batch:
+   
+    def train_step(
+        self,
+        batch_input: Dict[str, Batch],
+        losses: Dict[str, List[AppliedLoss]],
+        trainable_stages: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """
-        A foward pass through the entire ModelGraph with a dummy input to test connections.
+        Performs a full forward and training step using the provided input batches and losses.
+
+        Args:
+            batch_input (Dict[str, Batch]): Input batches keyed by FeatureSet label.
+            losses (Dict[str, List[AppliedLoss]],): A List of AppliedLosses keyed by the ModelStage \
+                on which they should be applied.
+            trainable_stages (List[str], optional): List of stages to train. Others will be frozen.
+
+        Returns:
+            Dict[str, Any]: Dictionary with:
+                - 'total_loss': scalar total loss
+                - 'losses': dict mapping each loss label to scalar value
+                - 'stage_outputs': intermediate outputs from all ModelStages
         """
-        if len(self._feature_sets.keys()) > 1:
-            raise NotImplementedError(
-                f"`dummy_forward` doesn't currently support ModelGraphs with multiple FeatureSets."
-            )
-        fs = self._feature_sets[self.feature_set_labels[0]]
-        batch = make_dummy_batch(feature_shape=fs.feature_shape, batch_size=batch_size)
-        multi_batch = {self.feature_set_labels[0]: batch}
         
-        res = self.forward(multi_batch)
-        output = res[self._sorted_stage_labels[-1]]
-        return output.get_samples('default').get_all_features(format='np').tolist()
+        # Freeze/unfreeze stages
+        for stage_label, stage in self._model_stages.items():
+            stage.freeze = stage_label not in trainable_stages if trainable_stages else True
+                            
+        # Cache all stage outputs
+        cache: Dict[str, Batch] = dict(batch_input)  # start with raw FeatureSet inputs
+        total_loss = 0
+        loss_summary : Dict[str, List[LossResult]]= {}
+        
+        for stage_label in self._sorted_stage_labels:
+            stage = self._model_stages[stage_label]
+            
+            # Get losses for this stage
+            stage_losses = losses.get(stage_label, None)
+            input_data = {k:v for k,v in cache.items()}
+        
+            # Forward pass + loss (+ opt if not frozen)
+            result = None
+            if stage.freeze:
+                if stage_losses:
+                    raise ValueError(
+                        f"`{stage_label}` ModelStage has losses applied but is frozen."
+                    )
+                else:
+                    result = stage.eval_step(
+                        batch_input=input_data,
+                        losses=stage_losses
+                    )
+            else:
+                if stage_losses is None:
+                    raise ValueError(
+                        f"`{stage_label}` ModelStage is set to trainable but has no applied losses."
+                    )
+                else:
+                    result = stage.train_step(
+                        batch_input=input_data,
+                        losses=stage_losses
+                    )
+            
+            # Cache stage outputs
+            cache[stage_label] = result["stage_outputs"][stage_label]
+
+            # Record losses
+            total_loss += float(result["total_loss"])
+            loss_summary[stage_label] = result["loss_results"]
+    
+        return {
+            "total_loss": total_loss,
+            "losses": loss_summary,
+            "stage_outputs": {k: v for k, v in cache.items() if k in self._model_stages}
+        }
+        
+    def eval_step(
+        self,
+        batch_input: Dict[str, Batch],
+        losses: Dict[str, List[AppliedLoss]],
+    ) -> Dict[str, Any]:
+        """
+        Performs a full forward and evaluation step (no optimization).
+
+        Args:
+            batch_input (Dict[str, Batch]): Input batches keyed by FeatureSet label.
+            losses (Dict[str, List[AppliedLoss]],): A List of AppliedLosses keyed by the ModelStage \
+                on which they should be applied.
+
+        Returns:
+            Dict[str, Any]: Dictionary with:
+                - 'total_loss': scalar total loss
+                - 'losses': dict mapping each loss label to scalar value
+                - 'stage_outputs': intermediate outputs from all ModelStages
+        """
+        # Freeze all stages
+        for stage in self._model_stages.values():
+            stage.freeze = True
+                
+        # Cache all stage outputs
+        cache: Dict[str, Batch] = dict(batch_input)  # start with raw FeatureSet inputs
+        total_loss = 0
+        loss_summary : Dict[str, List[LossResult]]= {}
+        
+        for stage_label in self._sorted_stage_labels:
+            stage = self._model_stages[stage_label]
+            
+            # Get losses for this stage
+            stage_losses = losses.get(stage_label, None)
+            input_data = {k:v for k,v in cache.items()}
+        
+            # Forward pass + loss
+            result = stage.eval_step(
+                batch_input=input_data,
+                losses=stage_losses
+            )
+            
+            # Cache stage outputs
+            cache[stage_label] = result["stage_outputs"][stage_label]
+
+            # Record losses
+            total_loss += float(result["total_loss"])
+            loss_summary[stage_label] = result["loss_results"]
+    
+        return {
+            "total_loss": total_loss,
+            "losses": loss_summary,
+            "stage_outputs": {k: v for k, v in cache.items() if k in self._model_stages}
+        }
+        
+  
         
     def visualize(
         self, 
@@ -334,9 +456,9 @@ class ModelGraph:
         graph = nx.DiGraph()
 
         for label, stage in self._model_stages.items():
-            inputs : List[StageInput] = stage.inputs if isinstance(stage.inputs, list) else [stage.inputs]
+            inputs : List[str] = stage.inputs if isinstance(stage.inputs, list) else [stage.inputs, ]
             for inp in inputs:
-                graph.add_edge(inp.source, label,)
+                graph.add_edge(inp, label,)
 
         for layer, nodes in enumerate(nx.topological_generations(graph)):
             for node in nodes:
