@@ -231,6 +231,10 @@ def to_torch(obj: Any, errors: T_ERRORS = 'raise') -> "torch.Tensor": # type: ig
     if torch is None:
         raise ImportError("PyTorch is not installed.")
 
+    # If it's already a Torch Tensor, just return
+    if isinstance(obj, torch.Tensor):
+        return obj
+
     py_obj = to_python(obj)
     try:
         return torch.as_tensor(np.asarray(py_obj), dtype=torch.float32)
@@ -249,6 +253,10 @@ def to_tensorflow(obj: Any, errors: T_ERRORS = 'raise') -> "tf.Tensor": # type: 
     if tf is None:
         raise ImportError("TensorFlow is not installed.")
 
+    # If it's already a Tensforflow Tensor, just return
+    if isinstance(obj, tf.Tensor):
+        return obj
+    
     py_obj = to_python(obj)
     try:
         return tf.convert_to_tensor(np.asarray(py_obj), dtype=tf.float32)
@@ -261,6 +269,7 @@ def to_tensorflow(obj: Any, errors: T_ERRORS = 'raise') -> "tf.Tensor": # type: 
             return tf.convert_to_tensor(np.asarray([py_obj]), dtype=tf.float32)
   
   
+
 def format_has_shape(format: DataFormat) -> bool:
     """Returns True if the specified DataFormat has a shape attribute"""
     return format in [
