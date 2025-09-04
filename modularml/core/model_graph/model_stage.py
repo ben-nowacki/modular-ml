@@ -5,6 +5,7 @@ import tensorflow as tf
 
 from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.data_structures.data import Data
+from modularml.core.data_structures.step_result import StepResult
 from modularml.core.model_graph.loss import AppliedLoss, LossResult
 from modularml.core.model_graph.optimizer import Optimizer
 from modularml.models.base import BaseModel
@@ -14,22 +15,48 @@ from modularml.utils.exceptions import BackendMismatchError, BackendNotSupported
 
 
 class ModelStage:
+    """
+    A modular wrapper around a backend-specific model (e.g., PyTorch, TensorFlow, Scikit-learn),
+    used as a single stage in a ModelGraph.
+
+    A ModelStage can optionally have an optimizer attached. If an optimizer is present,
+    `train_step()` and `eval_step()` can be called directly. If no optimizer is set,
+    the stage is assumed to be trained externally via `ModelGraph`.
+    """
+    
     def __init__(
         self,
         model: BaseModel,
         label: str,
         inputs: Union[str, List[str]],
-        optimizer: Optimizer,
+        optimizer: Optional[Optimizer] = None,
     ):
+        """
+        A modular wrapper around a backend-specific model (e.g., PyTorch, TensorFlow, Scikit-learn),
+        used as a single stage in a ModelGraph.
+
+        A ModelStage can optionally have an optimizer attached. If an optimizer is present,
+        `train_step()` and `eval_step()` can be called directly. If no optimizer is set,
+        the stage is assumed to be trained externally via `ModelGraph`.
+
+        Attributes:
+            label (str): Unique label for the stage within the ModelGraph.
+            model (BaseModel): The underlying model object (Torch/TF/Sklearn compatible).
+            inputs (List[str]): Source stage(s) or FeatureSet(s) this stage depends on.
+            optimizer (Optional[Optimizer]): Optimizer used during training (can be None).
+            freeze (bool): Whether this stage is frozen during training.
+        """
+        
         self.label = label
         self.model = model
         self._freeze = False        # make stage trainable as default
         
         self.inputs: List[str] = [inputs, ] if isinstance(inputs, str) else inputs
         
-        # Error checking on optimzier
-        self.optimizer = optimizer
+        # Error checking on optimizer (can be None)
+        self._optimizer = optimizer
         self._check_valid_optimizer(required=False)
+
             
     def __repr__(self):
         return self.description_long()
@@ -39,7 +66,7 @@ class ModelStage:
             f"ModelStage (label='{self.label}', "
             f"model={self.model.__class__.__name__}, "
             f"inputs={self.input_shape}, "
-            f"optimizer={self.optimizer}, "
+            f"optimizer={self._optimizer}, "
             f"backend={self.backend}, "
         )
         
@@ -48,7 +75,7 @@ class ModelStage:
             f"ModelStage: `{self.label}`\n"
             f" + Model: {self.model.__class__.__name__} ({self.backend})\n"
             f" + Inputs: {self.inputs}\n"
-            f" + Optimizer: {self.optimizer}"
+            f" + Optimizer: {self._optimizer}"
         )
         
     
@@ -73,41 +100,41 @@ class ModelStage:
     
     @property
     def input_shape(self) -> Tuple[int, ...]:
-        inp_shape = convert_to_format(self.model.input_shape, format=DataFormat.LIST)
+        inp_shape : list = convert_to_format(self.model.input_shape, format=DataFormat.LIST)
         if inp_shape is None:
             if self.is_built:
                 raise RuntimeError(f"Input shape is None after model building.")
             else:
                 raise RuntimeError(f"Model must be built before accessing input_shape")
-        return inp_shape  
+        return tuple(inp_shape)  
     
     @property
     def output_shape(self) -> Tuple[int, ...]:
-        out_shape = convert_to_format(self.model.output_shape, format=DataFormat.LIST)
+        out_shape : list = convert_to_format(self.model.output_shape, format=DataFormat.LIST)
         if out_shape is None:
             if self.is_built:
                 raise RuntimeError(f"Output shape is None after model building.")
             else:
                 raise RuntimeError(f"Model must be built before accessing output_shape")
-        return out_shape    
+        return tuple(out_shape)
     
     def build(self, input_shape: Optional[Tuple[int]] = None, output_shape: Optional[Tuple[int]] = None):
         # Build model
         self.model.build(input_shape=input_shape, output_shape=output_shape)
         
         # Build optimizer if defined
-        if self.optimizer is not None:
+        if self._optimizer is not None:
             if self.backend == Backend.TORCH:
-                self.optimizer.build(parameters=self.model.parameters())
+                self._optimizer.build(parameters=self.model.parameters())
             elif self.backend == Backend.TENSORFLOW:
-                self.optimizer.build()
+                self._optimizer.build()
             elif self.backend == Backend.SCIKIT:
                 # Scikit-learn optimizers are typically fit internally
                 pass
             else:
                 raise BackendNotSupportedError(backend=self.backend, message="Unknown backend for optimizer building")
-    
-    
+   
+
     @overload
     def __call__(self, batch:Batch, **kwargs) -> Batch: ...
     @overload
@@ -126,7 +153,18 @@ class ModelStage:
     @overload
     def forward(self, data:Data, **kwargs) -> Data: ...
     def forward(self, x: Union[Data, Batch, BatchOutput], **kwargs) -> Union[Data, BatchOutput]:
-        """Performs a forward pass the model and collects the outputs"""    
+        """
+        Performs a forward pass through the model using inputs from Data, Batch, or BatchOutput.
+
+        This method preserves raw tensor outputs to maintain backend autograd support.
+        It returns a `BatchOutput` or `Data` object containing model predictions.
+
+        Args:
+            x (Union[Data, Batch, BatchOutput]): Input data to the model.
+
+        Returns:
+            Union[Data, BatchOutput]: Outputs from the model.
+        """
                 
         if isinstance(x, Batch):
             all_outputs = {}
@@ -148,7 +186,7 @@ class ModelStage:
             all_outputs = {}
             sample_uuids = {}
             for role in x.available_roles:
-                # Format any-format to this backend
+                # Format any-format to this backend (obj is unchanged if in correct format)
                 features = convert_to_format(x.features[role], format=get_data_format_for_backend(self.backend))
                 all_outputs[role] = self.model(features, **kwargs)
                 sample_uuids[role] = x.sample_uuids[role]
@@ -164,6 +202,7 @@ class ModelStage:
             x = x.to_backend(target=self.backend)
             self.model(x)
             return Data(self.model(x))
+        
         else:
             raise TypeError(f"Input must be of type Data or Batch. Received: {type(x)}")
     
@@ -178,15 +217,19 @@ class ModelStage:
         Args:
             required (bool, optional): Whether Optimizer must be non-None. Defaults to True.
         """
-        if required and self.optimizer is None:
-            raise OptimizerNotSetError(model_stage_name=self.label)
         
-        if not self.optimizer.backend == self.backend:
-            raise BackendMismatchError(
-                expected=self.backend, 
-                received=self.optimizer.backend, 
-                message=f"Optimizer backend does not match model backend: {self.optimizer.backend} != {self.backend}"
-            )
+        if self._optimizer is None:
+            if required:
+                raise OptimizerNotSetError(model_stage_name=self.label)
+        
+        else:
+            if not self._optimizer.backend == self.backend:
+                raise BackendMismatchError(
+                    expected=self.backend, 
+                    received=self._optimizer.backend, 
+                    message=f"Optimizer backend does not match model backend: {self._optimizer.backend} != {self.backend}"
+                )
+    
     
     def _validate_inputs(
         self, 
@@ -228,16 +271,25 @@ class ModelStage:
         
     # ==========================================
     # Train (forward + loss + opt) Methods
-    # ==========================================    
+    # ==========================================
+    def get_input_batch(self, all_batch_data: Dict[str, Batch]) -> Batch:
+        if len(self.inputs) > 1:
+            raise NotImplementedError(
+                f"Multiple inputs for a base ModelStage is not supported. "
+                f"Use a subclass of MergeStage to join multiple input streams."
+            )
+            
+        return all_batch_data[self.inputs[0]]
+     
     def _train_step_torch(
         self,
         batch_input: Dict[str, Batch], 
         losses: List[AppliedLoss]
-    ) -> Dict[str, Any]:
+    ) -> StepResult:
         
         # Set optimizer and train mode
         self.model.train()
-        self.optimizer.zero_grad()
+        self._optimizer.zero_grad()
         
         total_loss = 0  
         loss_results: List[LossResult] = []
@@ -245,12 +297,7 @@ class ModelStage:
         
         # Forward pass
         outputs : Dict[str, BatchOutput] = {}
-        if len(self.inputs) > 1:
-            raise NotImplementedError(
-                f"Multiple inputs for a base ModelStage is not supported. "
-                f"Use a subclass of MergeStage to join multiple input streams."
-            )    
-        outputs[self.label] = self.forward(batch_input[self.inputs[0]])
+        outputs[self.label] = self.forward( self.get_input_batch(batch_input) )
 
         # Compute losses   
         if losses is not None:
@@ -261,22 +308,26 @@ class ModelStage:
                     
         # Backward + opt step
         total_loss.backward()
-        self.optimizer.step()
+        self._optimizer.step()
         
-        return {
-            "total_loss": total_loss.item() if hasattr(total_loss, "item") else total_loss,
-            "loss_results": loss_results,
-            "stage_outputs": outputs
-        }
+        total_loss = total_loss.item() if hasattr(total_loss, "item") else total_loss
+        
+        return StepResult(
+            total_loss=total_loss,
+            total_opt_loss=total_loss,
+            total_non_opt_loss = 0.0,
+            all_loss_results={self.label: loss_results},
+            stage_outputs=outputs,
+        )
         
     def _train_step_tensorflow(
         self,
         batch_input: Dict[str, Batch], 
         losses: List[AppliedLoss]
-    ) -> Dict[str, Any]:
+    ) -> LossResult:
         
         # Zero optimizer gradients
-        self.optimizer.zero_grad()
+        self._optimizer.zero_grad()
         
         total_loss = 0  
         loss_results: List[LossResult] = []
@@ -286,14 +337,9 @@ class ModelStage:
         with tf.GradientTape() as tape:
             # Forward pass (with training=True)
             outputs : Dict[str, BatchOutput] = {}
-            if len(self.inputs) > 1:
-                raise NotImplementedError(
-                    f"Multiple inputs for a base ModelStage is not supported. "
-                    f"Use a subclass of MergeStage to join multiple input streams."
-                )    
-            outputs[self.label] = self.forward(batch_input[self.inputs[0]], training=True)
+            outputs[self.label] = self.forward( self.get_input_batch(batch_input), training=True)
 
-            # Compute losses   
+        # Compute losses   
         if losses is not None:
             for loss in losses:
                 loss_res = loss.compute(batch_input=batch_input, model_outputs=outputs)
@@ -302,38 +348,42 @@ class ModelStage:
                 
         # Backward + opt step
         grads = tape.gradient(total_loss, self.model.trainable_variables)
-        self.optimizer.step(grads=grads, variables=self.model.trainable_variables)
+        self._optimizer.step(grads=grads, variables=self.model.trainable_variables)
 
-        return {
-            "total_loss": float(total_loss),
-            "loss_results": loss_results,
-            "stage_outputs": outputs
-        }
+        total_loss = float(total_loss)
         
+        return StepResult(
+            total_loss=total_loss,
+            total_opt_loss=total_loss,
+            total_non_opt_loss = 0.0,
+            all_loss_results={self.label: loss_results},
+            stage_outputs=outputs,
+        )
+
     def _train_step_scikit(
         self,
         batch_input: Dict[str, Batch], 
         losses: List[AppliedLoss]
-    ) -> Dict[str, Any]:
+    ) -> StepResult:
         raise NotImplementedError(f"Training for scikit model not implemented yet.")
     
     def train_step(
         self,
         batch_input: Dict[str, Batch], 
         losses: List[AppliedLoss]
-    ) -> Dict[str, Any]:
+    ) -> StepResult:
         """
-        Performs forward, loss computation, and optimizer step for this stage.
+        Performs a training step (forward, loss, backward, optimizer step) for this stage.
+
+        Only callable if this stage has an optimizer and is not frozen. Otherwise, training
+        must be delegated to `ModelGraph`.
 
         Args:
-            batch_input (Dict[str, Batch]): Combined outputs and input batches for loss inputs.
-            losses (List[AppliedLoss]): Loss functions to optimize for this stage.
-            
+            batch_input (Dict[str, Batch]): Mapping from upstream sources to input batches.
+            losses (List[AppliedLoss]): List of loss functions to compute and backpropagate.
+
         Returns:
-            Dict[str, Any] including:
-            - "total_loss": float
-            - "loss_results": List[LossResult]
-            - "stage_outputs": Dict[str, BatchOutput]
+            StepResult
         """
         
         # If stage is frozen, raise error
@@ -359,6 +409,7 @@ class ModelStage:
             raise ValueError(f"Unknown backend: {self.backend}")
         
          
+        
     # ==========================================
     # Eval (forward + loss) Methods
     # ========================================== 
@@ -366,7 +417,7 @@ class ModelStage:
         self,
         batch_input: Dict[str, Batch], 
         losses: Optional[List[AppliedLoss]]
-    ) -> Dict[str, Any]:
+    ) -> StepResult:
         
         self.model.eval()
         
@@ -391,17 +442,22 @@ class ModelStage:
                     loss_results.append(loss_res)
                     total_loss += loss_res.value    
                         
-        return {
-            "total_loss": total_loss.item() if hasattr(total_loss, "item") else total_loss,
-            "loss_results": loss_results,
-            "stage_outputs": outputs
-        }
+        total_loss = total_loss.item() if hasattr(total_loss, "item") else total_loss
+        
+        return StepResult(
+            total_loss=total_loss,
+            total_opt_loss=0.0,
+            total_non_opt_loss=total_loss,
+            all_loss_results={self.label: loss_results},
+            stage_outputs=outputs,
+        )
     
     def _eval_step_tensorflow(
         self,
         batch_input: Dict[str, Batch], 
         losses: Optional[List[AppliedLoss]]
-    ) -> Dict[str, Any]:
+    ) -> StepResult:
+        
         self.model.eval()
         
         total_loss = 0  
@@ -416,7 +472,6 @@ class ModelStage:
             )    
         outputs[self.label] = self.forward(batch_input[self.inputs[0]], training=True)
         
-        
         # Compute losses
         loss_results: List[LossResult] = [] 
         if losses is not None:
@@ -424,37 +479,40 @@ class ModelStage:
                 loss_res = loss.compute(batch_input=batch_input, model_outputs=outputs)
                 loss_results.append(loss_res)
                 total_loss += loss_res.value    
-                        
-        return {
-            "total_loss": total_loss.item() if hasattr(total_loss, "item") else total_loss,
-            "loss_results": loss_results,
-            "stage_outputs": outputs
-        }
+
+        total_loss = float(total_loss)
+        
+        return StepResult(
+            total_loss=total_loss,
+            total_opt_loss=0.0,
+            total_non_opt_loss=total_loss,
+            all_loss_results={self.label: loss_results},
+            stage_outputs=outputs,
+        )
         
     def _eval_step_scikit(
         self,
         batch_input: Dict[str, Batch], 
         losses: List[AppliedLoss]
-    ) -> Dict[str, Any]:
+    ) -> StepResult:
         raise NotImplementedError(f"Evaluation for scikit model not implemented yet.")
     
     def eval_step(
         self,
         batch_input: Dict[str, Batch], 
         losses: List[AppliedLoss]
-    ) -> Dict[str, Any]:
+    ) -> StepResult:
         """
-        Performs forward pass and computes loss (no gradient updates).
+        Performs an evaluation step (forward pass and loss computation) for this stage.
+
+        Only callable if this stage is frozen. No gradient tracking is performed.
 
         Args:
-            batch_input (Dict[str, Batch]): Inputs to this stage and any loss dependencies.
-            losses (List[AppliedLoss]): Loss functions to evaluate.
-            
+            batch_input (Dict[str, Batch]): Mapping from upstream sources to input batches.
+            losses (List[AppliedLoss]): List of loss functions to compute.
+
         Returns:
-            Dict[str, Any] including:
-            - "total_loss": float
-            - "loss_results": List[LossResult]
-            - "stage_outputs": Dict[str, BatchOutput]
+            StepResult
         """
         
         # If stage is not frozen, raise error
@@ -476,5 +534,6 @@ class ModelStage:
             raise ValueError(f"Unknown backend: {self.backend}")
         
  
+
         
         

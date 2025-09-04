@@ -138,22 +138,33 @@ class Experiment:
             num_batches = min([len(b) for b in all_batches.values()])
 
             total_loss = 0.0
+            total_opt_loss = 0.0
+            total_non_opt_loss = 0.0
             n_samples = 0
             for i in range(num_batches):
                 n_samples += all_batches[ list(all_batches.keys())[0] ][i].n_samples
                 batch = {k: v[i] for k,v in all_batches.items()}
-                result = self.graph.train_step(
+                step_res = self.graph.train_step(
                     batch_input=batch,
                     losses=phase._loss_mapping,
                     trainable_stages=phase.get_trainable_stages(),
                 )
-                total_loss += result["total_loss"]
+                total_loss += step_res.total_loss
+                total_opt_loss += step_res.total_opt_loss
+                total_non_opt_loss += step_res.total_non_opt_loss
                 
-            avg_sample_loss = total_loss / n_samples
             if epoch % 10 == 0:
-                print(f"    - Epoch {epoch}: Avg. sample loss = {avg_sample_loss:.4f}")
+                msg = (
+                    f"    - Epoch {epoch}: "
+                    f"Avg. sample loss = {total_loss / n_samples:.4f} "
+                    f"[Opt={total_opt_loss / n_samples:.4f}, "
+                    f"Non-Opt={total_non_opt_loss / n_samples:.4f}]"
+                )
+                print(msg)
 
-    def run_evaluation_phase(self, phase: EvaluationPhase) -> Dict[str, list]:
+
+
+    def run_evaluation_phase(self, phase: EvaluationPhase) -> pd.DataFrame:
         """
         Run a single evaluation phase and collect model outputs for analysis.
 
@@ -184,41 +195,58 @@ class Experiment:
         all_batches = phase.get_batches(self.graph._feature_sets)
         num_batches = min([len(b) for b in all_batches.values()])
         total_loss = 0.0
+        total_opt_loss = 0.0
+        total_non_opt_loss = 0.0
         n_samples = 0
         model_outputs = defaultdict(list)
         for i in range(num_batches):
             n_samples += all_batches[ list(all_batches.keys())[0] ][i].n_samples
             
             batch = {k: v[i] for k,v in all_batches.items()}
-            result = self.graph.eval_step(
+            step_res = self.graph.eval_step(
                 batch_input=batch,
                 losses=phase._loss_mapping,
             )
             
-            total_loss += result["total_loss"]
-            for k in result['stage_outputs'].keys():
-                model_outputs[k].append( result['stage_outputs'][k] )
-            
-        avg_sample_loss = total_loss / n_samples
-        print(f"    - Avg. sample loss = {avg_sample_loss:.4f}")
+            total_loss += step_res.total_loss
+            total_opt_loss += step_res.total_opt_loss
+            total_non_opt_loss += step_res.total_non_opt_loss
+            for k in step_res.stage_outputs.keys():
+                model_outputs[k].append( step_res.stage_outputs[k] )
+    
+        msg = (
+            f"    - Avg. sample loss = {total_loss / n_samples:.4f} "
+            f"[Opt={total_opt_loss / n_samples:.4f}, "
+            f"Non-Opt={total_non_opt_loss / n_samples:.4f}]"
+        )
+        print(msg)
 
 
-        # Convert all output data to single dict
-        data : Dict[str, list] = defaultdict(list)
+        # One row per sample UUID per stage output
+        rows = []
         for stage_label, batches in model_outputs.items():
             for b in batches:
                 for role in b.available_roles:
-                    # Record model outputs
                     outputs = convert_to_format(b.features[role], format=DataFormat.LIST)
-                    data[f"{stage_label}.output"].extend(outputs)
-                    
-                    # Record role labels
-                    data['role'].extend( [role, ] * len(outputs) )
-                    
-                    # Record sample uuids
                     s_uuids = convert_to_format(b.sample_uuids[role], format=DataFormat.LIST)
-                    data['sample_uuid'].extend( s_uuids )
-        
-        return convert_to_format(data, format=DataFormat.DICT_LIST) 
+
+                    for uuid, output in zip(s_uuids, outputs):
+                        rows.append({
+                            "stage": f"{stage_label}.output",
+                            "role": role,
+                            "sample_uuid": uuid,
+                            "output": output
+                        })
+
+        # Conver to wide-format dataframe (each model output is a column)
+        df = pd.DataFrame(rows)
+        df_wide = df.pivot_table(
+            index=["sample_uuid", "role"],
+            columns="stage",
+            values="output",
+            aggfunc="first"
+        ).reset_index()
+
+        return df_wide
     
 

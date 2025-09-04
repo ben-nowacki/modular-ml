@@ -76,6 +76,62 @@ def normalize_format(fmt: Union[str, DataFormat]) -> DataFormat:
 
 T_ERRORS = Literal["raise", "coerce", "ignore"]
 
+ 
+def to_python(obj):
+    """
+    Recursively converts an object into its native Python equivalent.
+
+    Supported conversions:
+    - NumPy scalars    -> Python scalars
+    - NumPy arrays     -> Python lists
+    - PyTorch tensors  -> Python scalars or lists
+    - TensorFlow tensors -> Python scalars or lists
+    - Dicts, tuples, and lists -> Recursively converted
+
+    Args:
+        obj: Any object to convert.
+
+    Returns:
+        Python-native object.
+    """
+    from modularml.core.data_structures.data import Data
+    
+    # NumPy
+    if isinstance(obj, np.generic):           # np.int64, np.float64, etc.
+        return obj.item()
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    
+    # Pandas
+    if isinstance(obj, pd.Series):
+        return to_python(obj.values)
+
+    # PyTorch
+    if torch is not None and isinstance(obj, torch.Tensor):
+        # Move to CPU, detach from graph if needed, convert to list or scalar
+        if obj.ndim == 0:
+            return obj.item()
+        return obj.detach().cpu().tolist()
+
+    # TensorFlow
+    if tf is not None and isinstance(obj, tf.Tensor):
+        # Use .numpy() safely, then convert like numpy arrays
+        np_obj = obj.numpy()
+        if np_obj.ndim == 0:
+            return np_obj.item()
+        return np_obj.tolist()
+
+    # Containers
+    if isinstance(obj, dict):
+        return {k: to_python(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return type(obj)(to_python(v) for v in obj)
+    elif isinstance(obj, Data):
+        return to_python(obj.value)
+
+    # Base case
+    return obj
+
 def to_list(obj: Any, errors: T_ERRORS = 'raise'):
     """
     Converts any object into a Python list.
@@ -129,58 +185,7 @@ def to_list(obj: Any, errors: T_ERRORS = 'raise'):
             return py_obj
         elif errors == "coerce":
             return [py_obj, ]
-    
-def to_python(obj):
-    """
-    Recursively converts an object into its native Python equivalent.
-
-    Supported conversions:
-    - NumPy scalars    -> Python scalars
-    - NumPy arrays     -> Python lists
-    - PyTorch tensors  -> Python scalars or lists
-    - TensorFlow tensors -> Python scalars or lists
-    - Dicts, tuples, and lists -> Recursively converted
-
-    Args:
-        obj: Any object to convert.
-
-    Returns:
-        Python-native object.
-    """
-    from modularml.core.data_structures.data import Data
-    
-    # NumPy
-    if isinstance(obj, np.generic):           # np.int64, np.float64, etc.
-        return obj.item()
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-
-    # PyTorch
-    if torch is not None and isinstance(obj, torch.Tensor):
-        # Move to CPU, detach from graph if needed, convert to list or scalar
-        if obj.ndim == 0:
-            return obj.item()
-        return obj.detach().cpu().tolist()
-
-    # TensorFlow
-    if tf is not None and isinstance(obj, tf.Tensor):
-        # Use .numpy() safely, then convert like numpy arrays
-        np_obj = obj.numpy()
-        if np_obj.ndim == 0:
-            return np_obj.item()
-        return np_obj.tolist()
-
-    # Containers
-    if isinstance(obj, dict):
-        return {k: to_python(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
-        return type(obj)(to_python(v) for v in obj)
-    elif isinstance(obj, Data):
-        return to_python(obj.value)
-
-    # Base case
-    return obj
-
+   
 def to_numpy(obj: Any, errors: T_ERRORS = 'raise') -> np.ndarray:
     """
     Converts any object into a NumPy array.
@@ -204,6 +209,7 @@ def to_numpy(obj: Any, errors: T_ERRORS = 'raise') -> np.ndarray:
     if isinstance(py_obj, (list, tuple)):
         try:
             return np.asarray(py_obj)
+        
         except Exception:
             if errors == "raise":
                 raise TypeError(f"Cannot convert sequence of type {type(py_obj)} to NumPy array.")
@@ -215,7 +221,7 @@ def to_numpy(obj: Any, errors: T_ERRORS = 'raise') -> np.ndarray:
     # Scalars -> wrap into a 0-D array
     if np.isscalar(py_obj):
         return np.asarray(py_obj)
-    
+        
     # Unsupported type
     if errors == "raise":
         raise TypeError(f"Cannot convert object of type {type(py_obj)} to NumPy array.")
