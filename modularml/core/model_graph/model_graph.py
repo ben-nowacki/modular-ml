@@ -316,6 +316,211 @@ class ModelGraph:
                 raise BackendNotSupportedError(backend=self._optimizer.backend, message="Unknown backend for optimizer building")
    
         self._built = True
+    
+    
+    def copy(self) -> "ModelGraph":
+        """
+        Returns a deep copy of the ModelGraph, including all nodes and optimizer if defined.
+        All internal connections and properties are preserved, but the graph is rebuilt from scratch.
+        """
+        import copy
+
+        # Deep copy all nodes (ModelStages + FeatureSets)
+        copied_nodes = [
+            copy.deepcopy(node)
+            for node in self.all_nodes.values()
+        ]
+        
+        # Deep copy optimizer if it exists
+        copied_optimizer = copy.deepcopy(self._optimizer) if self._optimizer is not None else None
+
+        # Create new ModelGraph from copied components
+        new_graph = ModelGraph(
+            nodes=copied_nodes,
+            optimizer=copied_optimizer
+        )
+    
+        return new_graph
+
+    def add(self, node: Union[FeatureSet, ModelStage], inplace: bool = True) -> Optional["ModelGraph"]:
+        if not inplace:
+            new_graph = self.copy()
+            new_graph.add(node, inplace=True)
+            return new_graph
+        
+        if node.label in self.all_nodes:
+            raise ValueError(
+                f"Node already exists with label: `{node.label}`. "
+                f"Use `replace` to replace it with a new node."
+            )
+        
+        self.all_nodes[node.label] = node
+        self.build_all(reset=True)
+        
+    def insert(
+        self,
+        node: Union[FeatureSet, ModelStage], 
+        before: Optional[str] = None, 
+        after: Optional[str] = None,
+        inplace: bool = True,
+    ) -> Optional["ModelGraph"]:
+        """
+        Insert a stage into the ModelGraph. 
+        Subsequent nodes with have their inputs changed to this node.
+
+        Args:
+            node (Union[FeatureSet, ModelStage]): New FeatureSet or ModelStage to add.
+            before (Optional[str], optional): Name of preceding ModelStage. Defaults to None.
+            after (Optional[str], optional): Name of subsequent node (FeatureSet or ModelStage). Defaults to None.
+        """
+        
+        # To insert between two specific node, before & after must be specified
+        # To insert between a node and all prior outputs, only after should be used
+        # To insert a node before a node, only before should be used
+        
+        def replace_all_strings(lst: List[str], old:str, new:str) -> List[str]:
+            """Replace all occurences of `old` in `lst` with `new`."""
+            return [new if x == old else x for x in lst]
+        
+        if not isinstance(node, (FeatureSet, ModelStage)):
+            raise TypeError(f"Node must be of type FeatureSet or ModelStage. Received: {node}")
+        if after is not None and after not in self.all_nodes:
+            raise ValueError(f"No existing node with label `{after}`")
+        if before is not None and before not in self.all_nodes:
+            raise ValueError(f"No existing node with label `{before}`")
+        
+        if not inplace:
+            new_graph = self.copy()
+            new_graph.insert(
+                node=node, 
+                after=after,
+                before=before,
+                inplace=True,
+            )
+            return new_graph
+
+        if before is not None and after is not None:
+            if isinstance(node, FeatureSet):
+                raise ValueError(
+                    f"FeatureSet has no input property. It cannot be inserted after a node. "
+                    f"Use `add` to just add it to the ModelGraph."
+                )
+                
+            # Update downstream nodes to input from new node
+            next_node = self.all_nodes[before]
+            if isinstance(next_node, FeatureSet):
+                raise ValueError(f"Nodes cannot preceed a FeatureSet.")
+            
+            # Add new node to inputs of next_node (does not overwrite existing inputs)
+            next_node.inputs.append(node.label)
+            
+            # Get prev node
+            prev_node = self.all_nodes[after] 
+            
+            # Update new node to input from prev_node
+            node.inputs = [prev_node.label, ]
+        
+        elif before is not None:
+            # Update downstream nodes to input from new node
+            next_node = self.all_nodes[before]
+            if isinstance(next_node, FeatureSet):
+                raise ValueError(f"Nodes cannot preceed a FeatureSet.")
+            
+            # Add new node to inputs of next_node (does not overwrite existing inputs)
+            next_node.inputs.append(node.label)
+        
+        elif after is not None:
+            if isinstance(node, FeatureSet):
+                raise ValueError(
+                    f"FeatureSet has no input property. It cannot be inserted after a node. "
+                    f"Use `add` to just add it to the ModelGraph."
+                )
+            # Get prev node
+            prev_node = self.all_nodes[after] 
+            
+            # Update new node to input from prev_node
+            node.inputs = [prev_node.label, ]
+            
+            # Update all nodes that used to input from prev_node to now input from this node
+            x = self._sorted_stage_labels.index(after)
+            for l in self._sorted_stage_labels[x:]:
+                n = self.all_nodes[l]
+                if prev_node.label in n.inputs:
+                    # Replace prev_node with new node
+                    n.inputs = replace_all_strings(n.inputs, prev_node.label, node.label)
+            
+        # Add new node
+        self.add(node=node, inplace=True)
+
+    def insert_between(
+        self,
+        node: ModelStage, 
+        before: str, 
+        after: str,
+        inplace: bool = True,
+    ) -> Optional["ModelGraph"]:
+        """
+        Inserts a new node between `before` and `after` nodes, replacing the existing connection 
+        between them.
+        An error will be raised if no previous connection exists between `before` and `after`.
+        To insert a new node between stage regardless of an existing connection, use `.insert()`
+        """
+        if not isinstance(node, ModelStage):
+            raise TypeError(f"Only ModelStages can be inserted between nodes. Received: {node}")
+        
+        if not inplace:
+            new_graph = self.copy()
+            new_graph.insert_between(
+                node=node, 
+                after=after,
+                before=before,
+                inplace=True,
+            )
+            return new_graph
+        
+        for x in [after, before]:
+            if x not in self.all_nodes:
+                raise ValueError(f"No node exists with label: {x}")
+        
+        # Ensure prev_node in is inputs but don't replace other user-defined inputs
+        prev_node = self.all_nodes[after]
+        node.inputs.append(prev_node.label)
+        node.inputs = list(set(node.inputs))
+        
+        # Replace next_node's previous connection with prev_node to this node
+        next_node = self.all_nodes[before]
+        next_node.inputs = [node.label if x == prev_node.label else x for x in next_node.inputs]
+
+        self.add(node=node, inplace=inplace)
+        
+    def remove(self, node:str, inplace:bool = True):
+        """Remove a node from ModelGraph"""
+        
+        if not node in self.all_nodes:
+            raise ValueError(f"No node exists with label `{node}`")
+        
+        if not inplace:
+            new_graph = self.copy()
+            new_graph.remove(
+                node=node, 
+                inplace=True,
+            )
+            return new_graph
+        
+        node_to_remove = self.all_nodes[node]
+        prev_inputs = node_to_remove.inputs
+        
+        # Replace all reference to node_to_remove with node before node_to_remove
+        for l,n in self.all_nodes.items():
+            if isinstance(n, ModelStage) and node in n.inputs:
+                n.inputs = [inp for inp in n.inputs if not inp == node]
+                n.inputs.extend(prev_inputs)
+            
+        self.all_nodes.pop(node)
+        self.build_all(reset=True)
+
+        
+        
             
     def _infer_input_shape(self, inputs: List[str]) -> Tuple[int, ...]:
         """Attempts to infer the input shape given the input specs"""
