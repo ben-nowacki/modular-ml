@@ -965,94 +965,13 @@ class ModelGraph:
         )
         
 
- 
-    def visualize(
-        self, 
-        save_path: Optional[str] = None,
-    ) -> Tuple[plt.Figure, plt.Axes]:
-        """Visualize the structure of the model graph.
 
-        Args:
-            save_path (str, optional): If provided, saves the figure to this path.
-
-        Returns:
-            Tuple[plt.Figure, plt.Axes]: matplotlib.pyplot Figure and Axes.
+    def visualize(self):
         """
-        import networkx as nx
+        Plots a flowchart of the internal connection of this ModelGraph using Mermaid.js.
+        **Note that a compatible Markdown extension is needed to support the Mermaid syntax.**
+        """
+        from modularml.visualization import Visualizer
         
-        graph = nx.DiGraph()
-
-        for label, stage in self._model_stages.items():
-            inputs : List[str] = stage.inputs if isinstance(stage.inputs, list) else [stage.inputs, ]
-            for inp in inputs:
-                graph.add_edge(inp, label,)
-
-        for layer, nodes in enumerate(nx.topological_generations(graph)):
-            for node in nodes:
-                graph.nodes[node]["layer"] = layer
-
-        pos = nx.multipartite_layout(graph, subset_key="layer")
-
-        # Assign numeric IDs and build label map
-        node_to_id = {node: idx for idx, node in enumerate(graph.nodes())}
-        id_to_node = {v: k for k, v in node_to_id.items()}
-        labels = {node: str(idx) for node, idx in node_to_id.items()}
-
-        # Identify feature nodes vs stage nodes
-        feature_nodes = [n for n in graph.nodes if n not in self._model_stages]
-        stage_nodes = [n for n in graph.nodes if n in self._model_stages]
-
-
-        fig, ax = plt.subplots(figsize=(6, 3))
-
-        # Draw features as squares
-        nx.draw_networkx_nodes(
-            graph, pos, ax=ax, nodelist=feature_nodes,
-            node_shape='s', node_color='lightgray',
-            edgecolors='black', linewidths=2, node_size=2000
-        )
-
-        # Draw stages as circles
-        nx.draw_networkx_nodes(
-            graph, pos, ax=ax, nodelist=stage_nodes,
-            node_shape='o', node_color='skyblue',
-            edgecolors='black', linewidths=2, node_size=2000
-        )
-
-        # Draw edges
-        nx.draw_networkx_edges(
-            graph, pos, ax=ax, 
-            width=2, 
-            style='solid',
-            arrows=True,             # Enable arrows
-            arrowstyle='-|>',         # Style of the arrow
-            arrowsize=20,            # Size of the arrow head
-            node_size=2200
-            )
-
-        # Draw labels (all)
-        nx.draw_networkx_labels(graph, pos, labels=labels, font_size=12)
-
-        # Add legend mapping node ID to stage name
-        legend_elements = [
-            Line2D(
-                [0], [0], 
-                marker='s' if name in feature_nodes else 'o', 
-                color='w', 
-                label=f"{idx}: {'FeatureSet' if name in feature_nodes else 'ModelStage'} `{name}`",
-                markerfacecolor='lightgray' if name in feature_nodes else 'skyblue', 
-                markersize=10, 
-                markeredgecolor='black')
-            for idx, name in id_to_node.items()
-        ]
-        ax.legend(handles=legend_elements, title="ModelGraph Legend", bbox_to_anchor=(1, 0.5), loc='center left')
-
-        ax.margins(0.20)
-        ax.axis('off')
-        if save_path:
-            fig.savefig(save_path)
-        return fig, ax
-
-    
-    
-    
+        viz = Visualizer(self)
+        return viz.display(backend='mermaid')
