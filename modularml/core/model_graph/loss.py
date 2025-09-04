@@ -290,7 +290,6 @@ class AppliedLoss:
                 
                 # Get sample data
                 sample_coll = batch_input[node].role_samples[role]
-                n_samples = len(sample_coll)
                 sample_weights[k] = batch_input[node].role_sample_weights[role]
                 if attribute == 'features':
                     kwargs[k] = sample_coll.get_all_features(
