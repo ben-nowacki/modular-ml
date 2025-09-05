@@ -13,7 +13,6 @@ from modularml.utils.backend import Backend
 from modularml.utils.data_format import DataFormat, convert_dict_to_format, convert_to_format, enforce_numpy_shape, format_has_shape
 
 
-@dataclass
 class SampleCollection:
     """
     A lightweight container for a list of Sample instances.
@@ -22,30 +21,24 @@ class SampleCollection:
         samples (List[Sample]): A list of Sample instances.
     """
     
-    samples: List[Sample]
-    
-    def __post_init__(self):
-        if not all(isinstance(s, Sample) for s in self.samples):
+    def __init__(self, samples: List[Sample]):
+        if not all(isinstance(s, Sample) for s in samples):
             raise TypeError("All elements in `samples` must be of type Sample.")
-        if len(self.samples) == 0:
+        if len(samples) == 0:
             raise ValueError("SampleCollection must contain at least one Sample.")
 
-        self._uuid_sample_map: Dict[str, Sample] = {
-            s.uuid: s for s in self.samples
-        }
-        self._label_sample_map: Dict[str, Sample] = {
-            s.label: s for s in self.samples
-        }
-        
+        self.samples: List[Sample] = samples
+        self._uuid_sample_map: Dict[str, Sample] = {s.uuid: s for s in samples}
+        self._label_sample_map: Dict[str, Sample] = {s.label: s for s in samples}
+
         # Enforce consistent shapes
-        f_shapes = list(set([s.feature_shape for s in self.samples]))
-        if not len(f_shapes) == 1:
+        f_shapes = list(set([s.feature_shape for s in samples]))
+        if len(f_shapes) != 1:
             raise ValueError(f"Inconsistent SampleCollection feature shapes: {f_shapes}.")
-            
-        t_shapes = list(set([s.target_shape for s in self.samples]))
-        if not len(t_shapes) == 1:
-            raise ValueError(f"Inconsistent SampleCollection target sizes: {t_shapes}.")
-        
+        t_shapes = list(set([s.target_shape for s in samples]))
+        if len(t_shapes) != 1:
+            raise ValueError(f"Inconsistent SampleCollection target shapes: {t_shapes}.")
+
     
     def __len__(self) -> int:
         return len(self.samples)
