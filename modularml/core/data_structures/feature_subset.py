@@ -1,32 +1,57 @@
+
 import weakref
-from typing import List, Dict, Any, Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, List, Dict, Any, Optional, Tuple
 
 from modularml.core.data_structures.sample_collection import SampleCollection
+from modularml.core.model_graph.graph_node import GraphNode
 from modularml.core.splitters.splitter import BaseSplitter
 
 if TYPE_CHECKING:
     from modularml.core.data_structures.feature_set import FeatureSet
-    from modularml.core.data_structures.sample import Sample
 
 
-class FeatureSubset(SampleCollection):
+class FeatureSubset(SampleCollection, GraphNode):
     """
     A filtered subset of samples from a parent FeatureSet.
     Holds weak reference to parent FeatureSet to avoid circular memory references.
     """
     
     def __init__(self, label: str, parent: "FeatureSet", sample_uuids: List[str], ):
-        self.label = label 
+        GraphNode.__init__(self, label=label, inputs=parent.label)
         self._parent_ref = weakref.ref(parent)  # weak ref of parent FeatureSet
         self._sample_uuids = set(sample_uuids)
         
         subset_samples = [s for s in parent.samples if s.uuid in self._sample_uuids]
-        super().__init__(samples=subset_samples)
+        SampleCollection.__init__(self, samples=subset_samples)
 
         invalid_uuids = [s_uuid for s_uuid in self._sample_uuids if s_uuid not in parent.sample_uuids]
         if invalid_uuids:
             raise ValueError(f"Invalid `Sample.uuid` found in subset: {invalid_uuids}")
     
+    # ==========================================
+    # GraphNode Methods
+    # ==========================================
+    @property
+    def allows_input_connections(self) -> bool:
+        return True  # FeatureSubsets accept only the parent FeatureSet input
+    @property
+    def allows_output_connections(self) -> bool:
+        return True  # FeatureSubsets can feed into downstream nodes
+    @property
+    def input_shape(self) -> Optional[Tuple[int, ...]]:
+        return self.feature_shape  # Not applicable
+    @property
+    def output_shape(self) -> Optional[Tuple[int, ...]]:
+        # Return shape based on features if available
+        return self.feature_shape
+    @property
+    def max_inputs(self) -> Optional[int]:
+        return 1
+
+    
+    # ==========================================
+    # FeatureSubset Properties & Dunders
+    # ==========================================
     @property
     def parent(self) -> 'FeatureSet':
         """Access the parent FeatureSet. Raises error if parent is no longer alive."""
@@ -39,6 +64,9 @@ class FeatureSubset(SampleCollection):
         return f"FeatureSubset(label='{self.label}', n_samples={len(self)})"
 
 
+    # ==========================================
+    # Utilities / Convenience Methods
+    # ==========================================
     def is_disjoint_with(self, other: "FeatureSubset") -> bool:
         """
         Checks whether this subset is disjoint from another (i.e., no overlapping samples).
@@ -50,7 +78,6 @@ class FeatureSubset(SampleCollection):
             bool: True if the subsets are disjoint (no shared samples), False otherwise.
         """
         return set(self._sample_uuids).isdisjoint(set(other._sample_uuids))
-    
     
     
     # ================================================================================
@@ -79,9 +106,9 @@ class FeatureSubset(SampleCollection):
             )
             self.parent.add_subset(subset)
             new_subsets.append(subset)
-            
+        
+        self.parent._add_split_config(splitter=splitter, label=self.label)
         return new_subsets
-
     
     def split_random(self, ratios: Dict[str, float], seed: int = 42) -> List["FeatureSubset"]:
         """
@@ -156,4 +183,5 @@ class FeatureSubset(SampleCollection):
             sample_uuids=config["sample_uuids"],
             parent=parent
         )
+
 

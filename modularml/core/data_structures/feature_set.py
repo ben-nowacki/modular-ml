@@ -2,11 +2,10 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 import warnings, pickle
 from collections import defaultdict
 import joblib
-from matplotlib import pyplot as plt
 import pandas as pd
 import numpy as np
 import copy
@@ -15,6 +14,7 @@ from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
 
+from modularml.core.model_graph.graph_node import GraphNode
 from modularml.core.splitters.splitter import BaseSplitter
 from modularml.core.data_structures.feature_subset import FeatureSubset
 from modularml.core.feature_transforms.feature_transform import FeatureTransform
@@ -107,16 +107,20 @@ class TransformRecord:
         data = joblib.load(path)
         return cls.from_serializable(data)
 
+@dataclass
+class SplitterRecord:
+    applied_to: str                 # FeatureSet.label or Subset
+    split_config: Dict[str, Any]    # splitter config
+    
 
-
-class FeatureSet(SampleCollection):
+class FeatureSet(SampleCollection, GraphNode):
     """
     Container for structured data. 
     
     Organizes any raw data into a standardized format.
     """
    
-    def __init__(self, label:str, samples: List[Sample]):
+    def __init__(self, label:str, samples: List[Sample], ):
         """
         Initiallize a new FeatureSet.
 
@@ -124,11 +128,38 @@ class FeatureSet(SampleCollection):
             label (str): Name to assign to this FeatureSet
             samples (List[Sample]): List of samples
         """
-        super().__init__(samples=samples)
-        self.label = str(label)
+        SampleCollection.__init__(self, samples=samples)
+        GraphNode.__init__(self, label=label, inputs=None, outputs=None)
+    
         self.subsets : Dict[str, FeatureSubset] = {}
+    
+        self._split_configs : List[SplitterRecord] = []
         self._transform_logs : Dict[str, List[TransformRecord]] = {'features':[], 'targets':[]}
         
+    # ==========================================
+    # GraphNode Methods
+    # ==========================================
+    @property
+    def allows_input_connections(self) -> bool:
+        return False  # FeatureSets do not accept inputs
+    @property
+    def allows_output_connections(self) -> bool:
+        return True  # FeatureSets can feed into downstream nodes
+    @property
+    def input_shape(self) -> Optional[Tuple[int, ...]]:
+        return None  # Not applicable
+    @property
+    def output_shape(self) -> Optional[Tuple[int, ...]]:
+        # Return shape based on features if available
+        return self.feature_shape
+    @property
+    def max_inputs(self) -> Optional[int]:
+        return 0
+
+
+    # ==========================================
+    # FeatureSet Properties & Dunders
+    # ==========================================
     @property
     def available_subsets(self) -> List[str]:
         return list(self.subsets.keys())
@@ -137,17 +168,13 @@ class FeatureSet(SampleCollection):
     def n_subsets(self) -> int:
         return len(self.available_subsets)
     
-    def set_label(self, label:str):
-        """Sets FeatureSet.label"""
-        if not isinstance(label, str):
-            raise TypeError(f"`label` must be a string, not: {label}")
-        self.label = label
-    
-    
     def __repr__(self):
         return f"FeatureSet(label='{self.label}', n_samples={len(self)})"
     
 
+    # ==========================================
+    # Subset Utilities
+    # ==========================================
     def get_subset(self, name: str) -> "FeatureSubset":
         """
         Returns the specified subset of this FeatureSet.
@@ -187,40 +214,51 @@ class FeatureSet(SampleCollection):
                 
         self.subsets[subset.label] = subset
     
-    def pop_subset(self, name: str) -> "FeatureSubset":
-        """
-        Pops the specified subset (removed from FeatureSet and returned).
+    # def pop_subset(self, name: str) -> "FeatureSubset":
+    #     """
+    #     Pops the specified subset (removed from FeatureSet and returned).
         
-        Args:
-            name (str): Subset name to pop 
+    #     Args:
+    #         name (str): Subset name to pop 
 
-        Returns:
-            FeatureSubset: The removed subset.
-        """
+    #     Returns:
+    #         FeatureSubset: The removed subset.
+    #     """
         
-        if not name in self.subsets:
-            raise ValueError(f"`{name}` is not a valid subset. Use `FeatureSet.available_subsets` to view available subset names.")
+    #     if not name in self.subsets:
+    #         raise ValueError(f"`{name}` is not a valid subset. Use `FeatureSet.available_subsets` to view available subset names.")
         
-        return self.subsets.pop(name)
+    #     return self.subsets.pop(name)
     
-    def remove_subset(self, name: str) -> None:
-        """
-        Deletes the specified subset from this FeatureSet.
+    # def remove_subset(self, name: str, force:bool = False) -> None:
+    #     """
+    #     Deletes the specified subset from this FeatureSet.
         
-        Args:
-            name (str): Subset name to remove.s 
-        """
+    #     Args:
+    #         name (str): Subset name to remove.
+    #         force (bool, optional): Overrides any errors raised during removal.
+    #     """
         
-        if not name in self.subsets:
-            raise ValueError(f"`{name}` is not a valid subset. Use `FeatureSet.available_subsets` to view available subset names.")
+    #     if not name in self.subsets:
+    #         raise ValueError(f"`{name}` is not a valid subset. Use `FeatureSet.available_subsets` to view available subset names.")
         
-        del self.subsets[name]
+    #     for sr in self._split_configs:
+    #         if sr.applied_to == name:
+    #             raise RuntimeError(
+    #                 f"You are removing a subset on which a prior split was applied. "
+    #                 f"This removes serializability of the applied splitters. "
+    #                 f"If this is intentional, set `force=True`."
+    #             )
+    #         HOW TO CHECK IF SUBSET WAS CREATED WITH OTHER SIBLING SUBSET IN SAME SPLIT?
+    #           - this should raise a similar warning as above
+    
+    #     del self.subsets[name]
     
     def clear_subsets(self) -> None:
         """Remove all previously defined subsets."""
         self.subsets.clear()
+        self._split_configs = []
         
-
     def filter(self, **conditions: Dict[str, Union[Any, List[Any], Callable]]) -> Optional["FeatureSet"]:
         """
         Filter samples using conditions applied to `tags`, `features`, or `targets`.
@@ -428,8 +466,16 @@ class FeatureSet(SampleCollection):
 
 
     # ================================================================================
-    # Subset Splitting Methods
+    # Splitting Methods
     # ================================================================================
+    def _add_split_config(self, splitter: BaseSplitter, label: str):
+        self._split_configs.append(
+            SplitterRecord(
+                applied_to=label, 
+                split_config=splitter.get_config()
+            )
+        ) 
+    
     def split(self, splitter:BaseSplitter) -> List["FeatureSubset"]:
         """
         Split the current FeatureSet into multiple FeatureSubsets. 
@@ -453,7 +499,8 @@ class FeatureSet(SampleCollection):
             )
             self.add_subset(subset)
             new_subsets.append(subset)
-            
+        
+        self._add_split_config(splitter=splitter, label=self.label)
         return new_subsets
     
     def split_random(self, ratios: Dict[str, float], group_by: Union[str, List[str]] = None, seed: int = 42) -> List["FeatureSubset"]:
@@ -722,7 +769,6 @@ class FeatureSet(SampleCollection):
                 self.inverse_transform(on=o)
 
 
-
     # ==========================================
     # State/Config Management Methods
     # ==========================================	
@@ -764,6 +810,7 @@ class FeatureSet(SampleCollection):
                 k: [tr.get_config() for tr in v]
                 for k, v in self._transform_logs.items()
             },
+            "split_logs": self._split_configs,
         }
     
     @classmethod
@@ -787,6 +834,9 @@ class FeatureSet(SampleCollection):
         for k, log in config.get("transform_logs", {}).items():
             fs._transform_logs[k] = [TransformRecord.from_config(d) for d in log]
 
+        # Restore splitters (we don't need to reapply them since subsets are already restored)
+        fs._split_configs = config.get('split_logs', [])
+        
         return fs
 
     def to_serializable(self) -> dict:
@@ -803,6 +853,7 @@ class FeatureSet(SampleCollection):
                 k: [tr.to_serializable() for tr in v]
                 for k, v in self._transform_logs.items()
             },
+            "split_logs": self._split_configs,
         }
 
     @classmethod
@@ -821,6 +872,10 @@ class FeatureSet(SampleCollection):
             k: [TransformRecord.from_serializable(tr) for tr in logs]
             for k, logs in obj.get("transform_logs", {}).items()
         }
+        
+        # Restore splitters (we don't need to reapply them since subsets are already restored)
+        fs._split_configs = obj.get('split_logs', [])
+        
         return fs
 
     def save(self, path: Union[str, Path], overwrite_existing:bool=False):
