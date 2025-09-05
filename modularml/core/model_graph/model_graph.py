@@ -21,36 +21,6 @@ from modularml.utils.exceptions import BackendNotSupportedError
 
 
 
-def make_dummy_data(shape: Tuple[int, ...]) -> Data:
-    """
-    Creates a dummy Data object
-    """
-    # Create dummy data
-    d = Data(np.ones(shape=shape))
-    
-    return d
-
-def make_dummy_batch(feature_shape: Tuple[int, ...], target_shape: Tuple[int, ...] = (1,1), batch_size:int=8) -> Batch:
-    sample_coll = SampleCollection([
-        Sample(
-            features={
-                f'features_{x}': make_dummy_data(shape=feature_shape[1:])
-                for x in range(feature_shape[0])
-            },
-            targets={
-                f'targets_{x}': make_dummy_data(shape=target_shape[1:])
-                for x in range(target_shape[0])
-            },
-            tags={'tags_1': make_dummy_data(shape=(1,)), 'tags_2': make_dummy_data(shape=(1,))},
-        )
-        for i in range(batch_size)
-    ])
-    return Batch(
-        role_samples = {'default': sample_coll}, 
-        label='dummy', 
-    )    
-    
-
 
 class ModelGraph:
     def __init__(
