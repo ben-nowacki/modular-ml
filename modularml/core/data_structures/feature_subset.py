@@ -1,59 +1,70 @@
+from __future__ import annotations
 
 import weakref
-from typing import TYPE_CHECKING, List, Dict, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from modularml.core.data_structures.sample_collection import SampleCollection
-from modularml.core.model_graph.graph_node import GraphNode
-from modularml.core.splitters.splitter import BaseSplitter
+from modularml.core.graph.graph_node import GraphNode
 
 if TYPE_CHECKING:
     from modularml.core.data_structures.feature_set import FeatureSet
+    from modularml.core.splitters.splitter import BaseSplitter
 
 
 class FeatureSubset(SampleCollection, GraphNode):
     """
     A filtered subset of samples from a parent FeatureSet.
+
     Holds weak reference to parent FeatureSet to avoid circular memory references.
     """
-    
-    def __init__(self, label: str, parent: "FeatureSet", sample_uuids: List[str], ):
+
+    def __init__(
+        self,
+        label: str,
+        parent: FeatureSet,
+        sample_uuids: list[str],
+    ):
         GraphNode.__init__(self, label=label, inputs=parent.label)
         self._parent_ref = weakref.ref(parent)  # weak ref of parent FeatureSet
         self._sample_uuids = set(sample_uuids)
-        
+
         subset_samples = [s for s in parent.samples if s.uuid in self._sample_uuids]
         SampleCollection.__init__(self, samples=subset_samples)
 
         invalid_uuids = [s_uuid for s_uuid in self._sample_uuids if s_uuid not in parent.sample_uuids]
         if invalid_uuids:
-            raise ValueError(f"Invalid `Sample.uuid` found in subset: {invalid_uuids}")
-    
+            msg = f"Invalid `Sample.uuid` found in subset: {invalid_uuids}"
+            raise ValueError(msg)
+
     # ==========================================
     # GraphNode Methods
     # ==========================================
     @property
     def allows_input_connections(self) -> bool:
         return True  # FeatureSubsets accept only the parent FeatureSet input
+
     @property
     def allows_output_connections(self) -> bool:
         return True  # FeatureSubsets can feed into downstream nodes
+
     @property
-    def input_shape(self) -> Optional[Tuple[int, ...]]:
+    def input_shape(self) -> tuple[int, ...] | None:
         return self.feature_shape  # Not applicable
+
     @property
-    def output_shape(self) -> Optional[Tuple[int, ...]]:
+    def output_shape(self) -> tuple[int, ...] | None:
         # Return shape based on features if available
         return self.feature_shape
+
     @property
-    def max_inputs(self) -> Optional[int]:
+    def max_inputs(self) -> int | None:
         return 1
 
-    
     # ==========================================
     # FeatureSubset Properties & Dunders
     # ==========================================
     @property
-    def parent(self) -> 'FeatureSet':
+    def parent(self) -> FeatureSet:
         """Access the parent FeatureSet. Raises error if parent is no longer alive."""
         parent = self._parent_ref()
         if parent is None:
@@ -63,11 +74,10 @@ class FeatureSubset(SampleCollection, GraphNode):
     def __repr__(self) -> str:
         return f"FeatureSubset(label='{self.label}', n_samples={len(self)})"
 
-
     # ==========================================
     # Utilities / Convenience Methods
     # ==========================================
-    def is_disjoint_with(self, other: "FeatureSubset") -> bool:
+    def is_disjoint_with(self, other: FeatureSubset) -> bool:
         """
         Checks whether this subset is disjoint from another (i.e., no overlapping samples).
 
@@ -76,64 +86,65 @@ class FeatureSubset(SampleCollection, GraphNode):
 
         Returns:
             bool: True if the subsets are disjoint (no shared samples), False otherwise.
+
         """
         return set(self._sample_uuids).isdisjoint(set(other._sample_uuids))
-    
-    
+
     # ================================================================================
     # Subset Splitting Methods
     # ================================================================================
-    def split(self, splitter:BaseSplitter) -> List["FeatureSubset"]:
+    def split(self, splitter: BaseSplitter) -> list[FeatureSubset]:
         """
-        Split the current FeatureSubset into multiple FeatureSubsets. 
-        *The created splits are automatically added to the parent `FeatureSet.subsets`, \
-        in addition to being returned.*
+        Split the current FeatureSubset into multiple FeatureSubsets.
+
+        The created splits are automatically added to the parent `FeatureSet.subsets`, \
+        in addition to being returned.
 
         Args:
             splitter (BaseSplitter): The splitting method.
-            
+
         Returns:
-            List[FeatureSubset]: The created subsets.
+            list[FeatureSubset]: The created subsets.
+
         """
-        
-        new_subsets: List[FeatureSubset] = []
+        new_subsets: list[FeatureSubset] = []
         splits = splitter.split(samples=self.samples)
         for k, s_uuids in splits.items():
-            subset = FeatureSubset(
-                label=k,
-                sample_uuids=s_uuids,
-                parent=self
-            )
+            subset = FeatureSubset(label=k, sample_uuids=s_uuids, parent=self)
             self.parent.add_subset(subset)
             new_subsets.append(subset)
-        
+
         self.parent._add_split_config(splitter=splitter, label=self.label)
         return new_subsets
-    
-    def split_random(self, ratios: Dict[str, float], seed: int = 42) -> List["FeatureSubset"]:
+
+    def split_random(self, ratios: dict[str, float], seed: int = 42) -> list[FeatureSubset]:
         """
         Convenience method to split samples randomly based on given ratios.
+
         This is equivalent to calling `FeatureSet.split(splitter=RandomSplitter(...))`.
 
         Args:
-            ratios (Dict[str, float]): Dictionary mapping subset names to their respective \
+            ratios (dict[str, float]): dictionary mapping subset names to their respective \
                 split ratios. E.g., `ratios={'train':0.5, 'test':0.5)`. All values must add \
                 to exactly 1.0.
             seed (int, optional): Random seed for reproducibility. Defaults to 42.
 
         Returns:
-            List[FeatureSubset]: The created subsets.
+            list[FeatureSubset]: The created subsets.
+
         """
-        from modularml.core.splitters.random_splitter import RandomSplitter
+        from modularml.core.splitters.random_splitter import RandomSplitter  # noqa: PLC0415
+
         return self.split(splitter=RandomSplitter(ratios=ratios, seed=seed))
 
-    def split_by_condition(self, **conditions: Dict[str, Dict[str, Any]]) -> List["FeatureSubset"]:
+    def split_by_condition(self, **conditions: dict[str, dict[str, Any]]) -> list[FeatureSubset]:
         """
         Convenience method to split samples using condition-based rules.
+
         This is equivalent to calling `FeatureSet.split(splitter=ConditionSplitter(...))`.
-        
+
         Args:
-            **conditions (Dict[str, Dict[str, Any]]): Keyword arguments where each key \
+            **conditions (dict[str, dict[str, Any]]): Keyword arguments where each key \
                 is a subset name and each value is a dictionary of filter conditions. \
                 The filter conditions use the same format as `.filter()` method.
 
@@ -144,7 +155,7 @@ class FeatureSubset(SampleCollection, GraphNode):
         where cell_id is 5.
         **Note that subsets can have overlapping samples if the split conditions are not carefully**
         **defined. A UserWarning will be raised when this happens, **
-        
+
         ``` python
             FeatureSet.split_by_condition(
                 low_temp={'temperature': lambda x: x < 20},
@@ -154,34 +165,30 @@ class FeatureSubset(SampleCollection, GraphNode):
         ```
 
         Returns:
-            List[FeatureSubset]: The created subsets.
+            list[FeatureSubset]: The created subsets.
+
         """
-        from modularml.core.splitters.conditon_splitter import ConditionSplitter
+        from modularml.core.splitters.conditon_splitter import ConditionSplitter  # noqa: PLC0415
+
         return self.split(splitter=ConditionSplitter(**conditions))
-    
-        
+
     # ==========================================
     # State/Config Management Methods
-    # ==========================================	
-    def get_config(self) -> Dict[str, Any]:
+    # ==========================================
+    def get_config(self) -> dict[str, Any]:
         return {
             "label": self.label,
             "sample_uuids": self._sample_uuids,
-            "parent_label": self.parent.label if self.parent else None
+            "parent_label": self.parent.label if self.parent else None,
         }
-            
+
     @classmethod
-    def from_config(cls, config: Dict[str, Any], parent:"FeatureSet") -> "FeatureSubset":
-        if not parent.label == config['parent_label']:
-            raise ValueError(
+    def from_config(cls, config: dict[str, Any], parent: FeatureSet) -> FeatureSubset:
+        if parent.label != config["parent_label"]:
+            msg = (
                 f"The provided parent ({parent}) does not match the config definition: "
                 f"{parent.label} != {config['parent_label']}."
             )
-        
-        return cls(
-            label=config["label"],
-            sample_uuids=config["sample_uuids"],
-            parent=parent
-        )
+            raise ValueError(msg)
 
-
+        return cls(label=config["label"], sample_uuids=config["sample_uuids"], parent=parent)

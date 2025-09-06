@@ -1,7 +1,8 @@
-from typing import Any, Tuple, List, Optional
+from typing import Any
+
 import numpy as np
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.preprocessing import MinMaxScaler
 
 
 class SegmentedScaler(BaseEstimator, TransformerMixin):
@@ -15,16 +16,18 @@ class SegmentedScaler(BaseEstimator, TransformerMixin):
             - feature[:, 40:60]
             - feature[:, 60:100]
 
-    Parameters:
-        boundaries (tuple): List of segment boundary indices.
+    Arguments:
+        boundaries (tuple): list of segment boundary indices.
         scaler (sklearn transformer): A scaler class or instance (e.g., MinMaxScaler). A new copy will be created per segment.
+
     """
-    def __init__(self, boundaries: Tuple[int], scaler: Optional[Any] = None):
+
+    def __init__(self, boundaries: tuple[int], scaler: Any | None = None):
         self.boundaries = boundaries
         self.scaler = scaler if scaler is not None else MinMaxScaler()
-        self._segment_scalers: List[Any] = []
+        self._segment_scalers: list[Any] = []
 
-    def fit(self, X: np.ndarray, y: Optional[np.ndarray] = None):
+    def fit(self, X: np.ndarray, y: np.ndarray | None = None):
         self._segment_scalers.clear()
 
         for i in range(len(self.boundaries) - 1):
@@ -57,5 +60,3 @@ class SegmentedScaler(BaseEstimator, TransformerMixin):
     def _clone_scaler(self):
         """Clone the scaler instance."""
         return self.scaler.__class__(**self.scaler.get_params())
-    
-    

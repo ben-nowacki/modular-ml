@@ -1,25 +1,24 @@
-
 import warnings
-import torch
+from typing import Any, Dict, Optional, Tuple
+
 import numpy as np
-from typing import Tuple, Dict, Any, Optional
+import torch
 
-
+from modularml.core.activation.activation import Activation
 from modularml.models.base import BaseModel
 from modularml.utils.backend import Backend
-from modularml.core.model_graph.activation import Activation
 
 
 class SequentialMLP(BaseModel, torch.nn.Module):
     def __init__(
-        self, 
-        input_shape: Optional[Tuple[int]] = None,
-        output_shape: Optional[Tuple[int]] = None,
+        self,
+        input_shape: tuple[int] | None = None,
+        output_shape: tuple[int] | None = None,
         n_layers: int = 2,
         hidden_dim: int = 32,
-        activation: str = 'relu',
+        activation: str = "relu",
         dropout: float = 0.0,
-        backend: Optional[Backend] = Backend.TORCH
+        backend: Optional[Backend] = Backend.TORCH,
     ):
         """
         Initializes a sequential MLP model using PyTorch backend.
@@ -47,13 +46,17 @@ class SequentialMLP(BaseModel, torch.nn.Module):
 
         self.input_shape = input_shape
         self.output_shape = output_shape
-        self.fc = None          # Will be created in build()
+        self.fc = None  # Will be created in build()
 
         # Build immediately if shape is specified
         if self.input_shape is not None and self.output_shape is not None:
             self.build()
 
-    def build(self, input_shape: Optional[Tuple[int]] = None, output_shape: Optional[Tuple[int]] = None):
+    def build(
+        self,
+        input_shape: Optional[Tuple[int]] = None,
+        output_shape: Optional[Tuple[int]] = None,
+    ):
         """
         Constructs the internal sequential layers. Called lazily when input/output shape is known.
         
@@ -63,8 +66,9 @@ class SequentialMLP(BaseModel, torch.nn.Module):
             output_shape (Optional[Tuple[int]], optional): Used if model not built (num_targets, target_len). \
                 Defaults to None.
         """
-        if self.is_built(): return
-        
+        if self.is_built():
+            return
+
         # Set input and output shapes
         if input_shape is not None:
             if self.input_shape is not None and not self.input_shape == input_shape:
@@ -74,7 +78,7 @@ class SequentialMLP(BaseModel, torch.nn.Module):
             self.input_shape = input_shape
         if self.input_shape is None:
             raise ValueError("Input shape must be provided to build the model.")
-        
+
         if output_shape is not None:
             if self.output_shape is not None and not self.output_shape == output_shape:
                 raise ValueError(
@@ -85,10 +89,10 @@ class SequentialMLP(BaseModel, torch.nn.Module):
             warnings.warn(
                 f"No output shape was provided. The shape of (1, `hidden_dim`) will be used.",
                 category=UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
-            self.output_shape = (1, self.config['hidden_dim'])
-            
+            self.output_shape = (1, self.config["hidden_dim"])
+
         # Instantiate activation
         act_fnc = Activation(name=self.config["activation"], backend=self.backend)
 
@@ -99,10 +103,7 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         layers = []
         for i in range(self.config["n_layers"] - 1):
             in_dim = flat_input_dim if i == 0 else self.config["hidden_dim"]
-            layers.append(torch.nn.Linear(
-                in_features=in_dim, 
-                out_features=self.config["hidden_dim"]
-            ))
+            layers.append(torch.nn.Linear(in_features=in_dim, out_features=self.config["hidden_dim"]))
             layers.append(act_fnc.get_layer())
             if self.config["dropout"] > 0:
                 layers.append(torch.nn.Dropout(self.config["dropout"]))
@@ -125,7 +126,7 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         """
         if not self.is_built():
             self.build(input_shape=tuple(x.shape[1:]))  # input_shape = (n_features, feature_len)
-        
+
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x.view(x.size(0), *self.output_shape)
@@ -145,7 +146,7 @@ class SequentialMLP(BaseModel, torch.nn.Module):
 
 class SequentialCNN(BaseModel, torch.nn.Module):
     def __init__(
-        self, 
+        self,
         input_shape: Optional[Tuple[int]] = None,
         output_shape: Optional[Tuple[int]] = None,
         n_layers: int = 2,
@@ -153,7 +154,7 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         kernel_size: int = 3,
         padding: int = 1,
         stride: int = 1,
-        activation: str = 'relu',
+        activation: str = "relu",
         dropout: float = 0.0,
         pooling: int = 1,
         flatten_output: bool = True,
@@ -197,13 +198,17 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         self.flatten = flatten_output
 
         self.conv_layers = None  # Built in build()
-        self.fc = None           # Final linear layer if flatten=True
+        self.fc = None  # Final linear layer if flatten=True
 
         # Build immediately if shape is specified
         if self.input_shape is not None and self.output_shape is not None:
             self.build()
 
-    def build(self, input_shape: Optional[Tuple[int]] = None, output_shape: Optional[Tuple[int]] = None):
+    def build(
+        self,
+        input_shape: Optional[Tuple[int]] = None,
+        output_shape: Optional[Tuple[int]] = None,
+    ):
         """
         Builds convolutional layers and final FC layer if needed.
 
@@ -213,8 +218,9 @@ class SequentialCNN(BaseModel, torch.nn.Module):
             output_shape (Optional[Tuple[int]], optional): Used if model not built (num_targets, target_len). \
                 Defaults to None.
         """
-        if self.is_built(): return
-        
+        if self.is_built():
+            return
+
         # Set input and output shapes
         if input_shape is not None:
             if self.input_shape is not None and not self.input_shape == input_shape:
@@ -224,7 +230,7 @@ class SequentialCNN(BaseModel, torch.nn.Module):
             self.input_shape = input_shape
         if self.input_shape is None:
             raise ValueError("Input shape must be provided to build the model.")
-        
+
         if output_shape is not None:
             if self.output_shape is not None and not self.output_shape == output_shape:
                 raise ValueError(
@@ -235,23 +241,25 @@ class SequentialCNN(BaseModel, torch.nn.Module):
             warnings.warn(
                 f"No output shape was provided. The shape of (1, `hidden_dim`) will be used.",
                 category=UserWarning,
-                stacklevel=2
+                stacklevel=2,
             )
-            self.output_shape = (1, self.config['hidden_dim'])
-            
+            self.output_shape = (1, self.config["hidden_dim"])
+
         # Instantiate activation
         act_fnc = Activation(name=self.config["activation"], backend=self.backend)
 
         num_features, feature_len = input_shape
         layers = []
         for _ in range(self.config["n_layers"]):
-            layers.append(torch.nn.Conv1d(
-                in_channels=num_features,
-                out_channels=self.config["hidden_dim"],
-                kernel_size=self.config["kernel_size"],
-                stride=self.config["stride"],
-                padding=self.config["padding"],
-            ))
+            layers.append(
+                torch.nn.Conv1d(
+                    in_channels=num_features,
+                    out_channels=self.config["hidden_dim"],
+                    kernel_size=self.config["kernel_size"],
+                    stride=self.config["stride"],
+                    padding=self.config["padding"],
+                )
+            )
             layers.append(act_fnc.get_layer())
 
             if self.config["dropout"] > 0:
@@ -291,7 +299,7 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         """
         if not self.is_built():
             self.build(input_shape=x.shape[1:])  # input_shape = (n_features, feature_len)
-        
+
         x = self.conv_layers(x)
         if self.flatten:
             x = x.view(x.size(0), -1)
@@ -310,4 +318,3 @@ class SequentialCNN(BaseModel, torch.nn.Module):
             torch.Tensor: Output tensor of shape (batch_size, *output_shape)
         """
         return self.forward(x)
-

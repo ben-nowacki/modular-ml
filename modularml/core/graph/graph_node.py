@@ -49,15 +49,9 @@ class GraphNode(ABC):
             raise TypeError(msg)
 
         # Enforce max_upstream_nodes
-        if (
-            self.max_upstream_nodes is not None
-            and len(self._upstream_nodes) > self.max_upstream_nodes
-        ):
+        if self.max_upstream_nodes is not None and len(self._upstream_nodes) > self.max_upstream_nodes:
             msg = f"{len(self._upstream_nodes)} upstream_nodes provided, but max_upstream_nodes = {self.max_upstream_nodes}"
-            if (
-                self._handle_fatal_error(GraphNodeInputError, msg, ErrorMode.RAISE)
-                is False
-            ):
+            if self._handle_fatal_error(GraphNodeInputError, msg, ErrorMode.RAISE) is False:
                 self._upstream_nodes = self._upstream_nodes[: self.max_upstream_nodes]
 
         # Normalize downstream_nodes
@@ -72,18 +66,10 @@ class GraphNode(ABC):
             raise TypeError(msg)
 
         # Enforce max_downstream_nodes
-        if (
-            self.max_downstream_nodes is not None
-            and len(self._downstream_nodes) > self.max_downstream_nodes
-        ):
+        if self.max_downstream_nodes is not None and len(self._downstream_nodes) > self.max_downstream_nodes:
             msg = f"{len(self._downstream_nodes)} downstream_nodes provided, but max_downstream_nodes = {self.max_downstream_nodes}"
-            if (
-                self._handle_fatal_error(GraphNodeOutputError, msg, ErrorMode.RAISE)
-                is False
-            ):
-                self._downstream_nodes = self._downstream_nodes[
-                    : self.max_downstream_nodes
-                ]
+            if self._handle_fatal_error(GraphNodeOutputError, msg, ErrorMode.RAISE) is False:
+                self._downstream_nodes = self._downstream_nodes[: self.max_downstream_nodes]
 
     def __repr__(self):
         return f"GraphNode(label='{self.label}', upstream_nodes={self._upstream_nodes}, downstream_nodes={self._downstream_nodes})"

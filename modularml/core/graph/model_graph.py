@@ -10,10 +10,10 @@ import torch
 
 from modularml.core.data_structures.feature_set import FeatureSet
 from modularml.core.data_structures.step_result import StepResult
-from modularml.core.model_graph.computation_node import ComputationNode
-from modularml.core.model_graph.graph_node import GraphNode
-from modularml.core.model_graph.mixins import EvaluableMixin, TrainableMixin
-from modularml.core.model_graph.model_stage import ModelStage
+from modularml.core.graph.computation_node import ComputationNode
+from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
+from modularml.core.graph.model_stage import ModelStage
 from modularml.utils.backend import Backend, backend_requires_optimizer
 from modularml.utils.data_format import to_python
 from modularml.utils.error_handling import ErrorMode
@@ -22,8 +22,9 @@ from modularml.utils.modeling import make_dummy_batch
 
 if TYPE_CHECKING:
     from modularml.core.data_structures.batch import Batch, BatchOutput
-    from modularml.core.model_graph.loss import AppliedLoss, LossResult
-    from modularml.core.model_graph.optimizer import Optimizer
+    from modularml.core.loss.applied_loss import AppliedLoss
+    from modularml.core.loss.loss_result import LossResult
+    from modularml.core.optimizer.optimizer import Optimizer
 
 
 class ModelGraph:

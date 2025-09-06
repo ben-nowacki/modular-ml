@@ -2,7 +2,7 @@ from abc import abstractmethod
 from typing import Any
 
 from modularml.core.data_structures.batch import Batch
-from modularml.core.model_graph.graph_node import GraphNode
+from modularml.core.graph.graph_node import GraphNode
 
 
 class ComputationNode(GraphNode):

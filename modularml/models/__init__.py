@@ -1,5 +1,9 @@
+from modularml.models.sequential import SequentialCNN, SequentialMLP
 
-from modularml.models.sequential import SequentialMLP, SequentialCNN
+from .merge_stages import ConcatStage
 
-
-__all__ = ["SequentialMLP", "SequentialCNN"]
+__all__ = [
+    "ConcatStage",
+    "SequentialCNN",
+    "SequentialMLP",
+]

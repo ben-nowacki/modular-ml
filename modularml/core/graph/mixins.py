@@ -5,7 +5,7 @@ if TYPE_CHECKING:
 
 from modularml.core.data_structures.batch import Batch
 from modularml.core.data_structures.step_result import StepResult
-from modularml.core.model_graph.loss import AppliedLoss
+from modularml.core.loss.applied_loss import AppliedLoss
 from modularml.utils.backend import Backend
 
 

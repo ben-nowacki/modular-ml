@@ -7,11 +7,10 @@ import torch
 
 from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.data_structures.data import Data
-from modularml.core.data_structures.feature_set import FeatureSet
 from modularml.core.data_structures.step_result import StepResult
-from modularml.core.model_graph.computation_node import ComputationNode
-from modularml.core.model_graph.graph_node import GraphNode
-from modularml.core.model_graph.mixins import EvaluableMixin, TrainableMixin
+from modularml.core.graph.computation_node import ComputationNode
+from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
 from modularml.models.wrappers import wrap_model
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import (
@@ -25,9 +24,9 @@ from modularml.utils.exceptions import (
 )
 
 if TYPE_CHECKING:
-    from modularml.core.data_structures.feature_set import FeatureSet
-    from modularml.core.model_graph.loss import AppliedLoss, LossResult
-    from modularml.core.model_graph.optimizer import Optimizer
+    from modularml.core.loss.applied_loss import AppliedLoss
+    from modularml.core.loss.loss_result import LossResult
+    from modularml.core.optimizer.optimizer import Optimizer
     from modularml.models.base import BaseModel
 
 

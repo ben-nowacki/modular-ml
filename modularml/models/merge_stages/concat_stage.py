@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 import torch
 
-from modularml.core.model_graph.merge_stages.merge_stage import MergeStage
+from modularml.core.graph.merge_stage import MergeStage
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import convert_to_format, get_data_format_for_backend
 

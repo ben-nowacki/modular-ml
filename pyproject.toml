@@ -14,7 +14,7 @@ authors = [
     {name = "Chao Hu", email = "chao.hu@uconn.edu"}
 ]
 
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 keywords = [
     "Machine learning",
     "Deep learning",
