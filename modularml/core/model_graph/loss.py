@@ -1,68 +1,99 @@
-
-
-from abc import ABC
+import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Any
+
 import numpy as np
 import tensorflow as tf
-import torch as torch
-import inspect
+import torch
 
 from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import DataFormat, convert_dict_to_format, get_data_format_for_backend, to_numpy
+from modularml.utils.data_format import get_data_format_for_backend, to_numpy
 from modularml.utils.exceptions import BackendNotSupportedError, LossError
 
 
 class Loss:
+    """
+    A backend-agnostic wrapper around loss functions used in model training.
+
+    This class allows the use of built-in loss functions from supported backends (PyTorch, TensorFlow)
+    or custom-defined loss functions (e.g., scikit-learn, numpy-based) and ensures compatibility with
+    the modular training workflow.
+    """
+
     def __init__(
         self,
-        name: Optional[str] = None,
-        backend: Optional[Backend] = None,
-        loss_function: Optional[Callable] = None,
-        reduction: str = 'none',
+        name: str | None = None,
+        backend: Backend | None = None,
+        loss_function: Callable | None = None,
+        reduction: str = "none",
     ):
         """
-        Initiallizes a new Loss term. Loss objects must be defined with \
-        either a custom `loss_function` or both a `name` and `backend`.
+        A backend-agnostic wrapper around loss functions used in model training.
+
+        This class allows the use of built-in loss functions from supported backends (PyTorch, TensorFlow)
+        or custom-defined loss functions (e.g., scikit-learn, numpy-based) and ensures compatibility with
+        the modular training workflow.
 
         Args:
-            name (optional, str): Name of the loss function to use (e.g., "mse")
-            backend (optional, Backend): The backend to use (e.g., Backend.TORCH)
-            loss_function (optional, Callable): A custom loss function.
-            reduction (optional, str): Defaults to 'none'.
-            
+            name (str | None): Name of the built-in loss function (e.g., "mse", "mae").
+            backend (Backend | None): Backend to use (e.g., Backend.TORCH or Backend.TENSORFLOW).
+            loss_function (Callable | None): A custom user-defined loss function.
+            reduction (str): Reduction strategy (e.g., "mean", "sum", "none"). Defaults to "none".
+
+        Raises:
+            LossError: If neither `loss_function` nor both `name` and `backend` are provided.
+            BackendNotSupportedError: If backend resolution is attempted on an unsupported backend.
+
         Examples:
-            ``` python
-            from sklearn.metrics import mean_squared_error 
-            from modularml import Backend
-            loss1 = Loss(loss_function = mean_squared_error)
-            loss2 = Loss(name='mse', backend=Backend.TORCH)
+            ```python
+            # Using built-in loss
+            loss1 = Loss(name="mse", backend=Backend.TORCH)
+
+            # Using custom loss function
+            from sklearn.metrics import mean_squared_error
+
+            loss2 = Loss(loss_function=mean_squared_error)
             ```
+
         """
         self.name = name.lower() if name else None
         self.backend = backend
         self.reduction = reduction
-        
+
         if loss_function is not None:
             self.loss_function: Callable = loss_function
             mod = inspect.getmodule(loss_function)
-            if self.name is None: self.name = mod.__name__
-            
+            if self.name is None:
+                self.name = mod.__name__
+
             # TODO: how to infer backend?
-            if 'torch' in mod.__name__:
+            if "torch" in mod.__name__:
                 self.backend = Backend.TORCH
-            elif 'tensorflow' in mod.__name__:
+            elif "tensorflow" in mod.__name__:
                 self.backend = Backend.TENSORFLOW
             else:
                 self.backend = Backend.NONE
-                
+
         elif name and backend:
             self.loss_function: Callable = self._resolve()
         else:
-            raise LossError(f"Loss cannot be initiallized. You must specify either `loss_function` or both `name` and `backend`.")
-        
+            msg = "Loss cannot be initiallized. You must specify either `loss_function` or both `name` and `backend`."
+            raise LossError(msg)
+
     def _resolve(self) -> Callable:
+        """
+        Resolves the appropriate loss function object from the selected backend using the given name.
+
+        Returns:
+            Callable: A callable loss function.
+
+        Raises:
+            BackendNotSupportedError: If the backend is not supported.
+            LossError: If the loss name is not recognized.
+
+        """
         avail_losses = {}
         if self.backend == Backend.TORCH:
             avail_losses = {
@@ -81,259 +112,293 @@ class Loss:
             }
         else:
             raise BackendNotSupportedError(backend=self.backend, method="Loss._resolve()")
-            
+
         loss = avail_losses.get(self.name)
         if loss is None:
-            raise LossError(
+            msg = (
                 f"Unknown loss name (`{self.name}`) for `{self.backend}` backend."
                 f"Available losses: {avail_losses.keys()}"
             )
+            raise LossError(msg)
         return loss
-    
+
     @property
-    def allowed_keywords(self) -> List[str]:
+    def allowed_keywords(self) -> list[str]:
+        """
+        Returns the list of valid keyword arguments for the current loss function.
+
+        Returns:
+            List[str]: A list of argument names accepted by the loss function.
+
+        """
         # Get the signature object
         sig = inspect.signature(self.loss_function)
         # Iterate through the parameters in the signature
         arg_names = [param.name for param in sig.parameters.values()]
         return arg_names
-    
+
     def __call__(self, *args, **kwargs):
+        """
+        Invokes the underlying loss function with the provided arguments.
+
+        Returns:
+            Any: Output of the loss function.
+
+        Raises:
+            LossError: If the loss function fails during execution.
+
+        """
         try:
             return self.loss_function(*args, **kwargs)
         except Exception as e:
-            raise LossError(f"Failed to call loss function: {e}")
-        
+            raise LossError("Failed to call loss function.") from e
+
     def __repr__(self):
         if self.name:
             return f"Loss(name='{self.name}', backend='{self.backend.name}', reduction='{self.reduction}')"
         return f"Loss(custom_function={self.loss_function})"
-    
 
 
 @dataclass
 class LossResult:
-    label: str              # for logging (e.g. 'mse_regression')
-    value: Any              # raw loss tensor or float (backend-dependent)
-    # weight: float           # scalar weight
-    # n_samples: int          # number of samples used in loss calc
+    """
+    A container for storing the result of computing a loss value.
+
+    Attributes:
+        label (str): Identifier for the loss (e.g., "mse_loss", "triplet_margin").
+        value (Any): Computed loss value (typically a backend-specific tensor or scalar).
+
+    """
+
+    label: str
+    value: Any
+
 
 class AppliedLoss:
-    def __init__(
-        self,
-        loss: Loss,
-        inputs: Dict[str, str],
-        weight: float = 1.0,
-        label: Optional[str] = None
-    ):
+    """
+    Encapsulates a loss function with explicit data mappings from the model graph.
+
+    Description:
+        `AppliedLoss` binds a `Loss` function to specific inputs from a modular model graph.
+        Each input to the loss function is defined as a string reference of the form
+        `"Node.attribute"` or `"Node.attribute.role"`, where:
+
+        - `Node` is a FeatureSet or ModelStage label
+        - `attribute` is one of: 'features', 'targets', 'output'
+        - `role` is optional (defaults to "default")
+
+        This enables flexible training configurations (e.g., supervised, multitask, contrastive)
+        across any backend (Torch, TensorFlow, NumPy).
+
+    Example:
+        ```python
+        AppliedLoss(
+            loss=Loss(name="mse", backend=Backend.TORCH),
+            all_inputs={"pred": "Regressor.output", "true": "Inputs.targets"},
+        )
+        ```
+
+    """
+
+    def __init__(self, loss: Loss, all_inputs: dict[str, str], weight: float = 1.0, label: str | None = None):
         """
-        An applied loss term that maps data from the ModelGraph to keyword arguments of a `Loss` function.
+        Initialize an AppliedLoss instance.
 
         Args:
-            loss (Loss): A loss function wrapper (e.g., MSE, triplet, cross-entropy).
-            inputs (Dict[str, str]): Maps each argument of the loss function to a specific data source. \
-                Keys are the expected loss argument names (e.g., "true", "pred", "anchor", etc). Positional \
-                arguments are supported via "0" or "1" keys. 
-                Values are dot-strings of the form:
-                
-                - "FeatureSet.targets"          # use `targets` from a FeatureSet batch (default role)
-                - "FeatureSet.features.anchor"  # use `features` from a FeatureSet batch with role="anchor"
-                - "Encoder.output.pos"          # use `output` from a ModelStage with role="pos"
+            loss (Loss): Loss function object, including backend and callable.
+            all_inputs (dict[str, str]): Dictionary mapping loss argument names (e.g., "pred", "true") \
+                to graph references like "Node.attribute" or "Node.attribute.role".
+            weight (float, optional): Scalar multiplier applied to the loss result. Defaults to 1.0.
+            label (str, optional): Custom name for this loss. Defaults to the loss's name.
 
-                The three components are always:
-                - source node (FeatureSet or ModelStage)
-                - attribute: "features", "targets", or "output"
-                - role: optional; defaults to "default" if not specified.
-
-            weight (float, optional): A scalar weight to apply to the final loss value. \
-                Useful when combining multiple loss terms. Default is 1.0.
-
-            label (str, optional): Optional name to assign to this loss for logging or visualization. \
-                If not provided, defaults to the `Loss.name`.
-
-        Example:
-            For a triplet loss requiring `anchor`, `positive`, and `negative`:
-            ```python
-            AppliedLoss(
-                loss=triplet_loss,
-                inputs={
-                    "anchor": "Encoder.output.anchor",
-                    "positive": "Encoder.output.pos",
-                    "negative": "Encoder.output.neg"
-                }
-            )
-            ```
-
-            For an MSE loss requiring `pred` and `true`:
-            ```python
-            AppliedLoss(
-                loss=triplet_loss,
-                inputs={
-                    "pred": "Encoder.output",
-                    "true": "PulseFeatures.features",
-                }
-            )
-            ```
         """
-        
-        self.loss : Loss = loss
-        self.inputs : Dict[str, Tuple[str, str, str]] = {
-            str(k): self._parse_input_spec(p) 
-            for k,p in inputs.items()
+        self.loss: Loss = loss
+        self.all_inputs: dict[str, tuple[str, str, str]] = {
+            str(k): self._parse_input_spec(p) for k, p in all_inputs.items()
         }
         self.weight = float(weight)
         self.label = label if label is not None else loss.name
-        
+
     @property
     def backend(self) -> Backend:
+        """
+        Backend of the underlying loss function.
+
+        Returns:
+            Backend: The backend (Torch, TF, NumPy) used by the loss function.
+
+        """
         return self.loss.backend
-    
+
     @property
-    def parsed_inputs(self) -> Dict[str, Tuple[str, str, str]]:
+    def parsed_inputs(self) -> dict[str, tuple[str, str, str]]:
         """
-        Returns the required Loss input specs. Returned list could include:
-            - "pred": (Encoder, output, default)
-            - "true": (PulseFeatures, features, default)
-            - "anchor": (Encoder, output, anchor)
+        Get the parsed input mappings for this AppliedLoss instance.
+
+        Description:
+            This property returns the dictionary of parsed loss input mappings.
+            Each entry maps a loss argument (e.g., "pred", "true", "anchor") to a
+            3-tuple of the form:
+
+                (node_label, attribute_name, role_name)
+
+            Where:
+                - `node_label` is the label of a FeatureSet or ModelStage in the model graph.
+                - `attribute_name` is one of: "features", "targets", or "output".
+                - `role_name` is a string indicating the input role (e.g., "default", "anchor").
+
+            These mappings are used internally by the `compute()` method to extract the appropriate
+            tensors from input batches or model outputs and pass them to the loss function.
+
+        Example:
+            ```python
+            {
+                "pred":   ("Encoder", "output", "default"),
+                "true":   ("InputFeatures", "targets", "default"),
+                "anchor": ("Encoder", "output", "anchor")
+            }
+            ```
 
         Returns:
-            Dict[str, Tuple[str, str, str]]
-        """
-        return self.inputs
-    
-    def _parse_input_spec(self, spec: str) -> Tuple[str, str, str]:
-        """
-        Parses a string specifying a data source for a loss argument.
+            dict[str, tuple[str, str, str]]: Dictionary mapping loss argument names to \
+            (node_label, attribute_name, role_name) tuples.
 
-        Accepted formats:
-            - "Node.attribute"         # role defaults to "default"
-            - "Node.attribute.role"    # explicitly specify the role
+        """
+        return self.all_inputs
 
-        Where:
-            - Node: name of the FeatureSet or ModelStage
-            - Attribute: one of "features", "targets", or "output"
-            - Role: (optional) name of the role (e.g., "anchor", "pos")
+    def _parse_input_spec(self, spec: str) -> tuple[str, str, str]:
+        """
+        Parse a dot-separated input spec into components.
+
+        Args:
+            spec (str): A string in the form "Node.attribute" or "Node.attribute.role".
 
         Returns:
-            Tuple[str, str, str]: (node, attribute, role)
+            tuple[str, str, str]: Parsed (node, attribute, role) tuple.
+
+        Raises:
+            ValueError: If the input is malformed or contains invalid attributes.
+
         """
-        
         node, attribute, role = None, None, None
-        
+
         parts = spec.split(".")
         if len(parts) < 2:
-            raise ValueError(f"Invalid `AppliedLoss.inputs` spec: {spec}")
-        elif len(parts) == 2:
+            msg = f"Invalid `AppliedLoss.inputs` spec: {spec}"
+            raise ValueError(msg)
+        if len(parts) == 2:
             node, attribute = parts
-            role = 'default'        # use default role if not specified
+            role = "default"  # use default role if not specified
         elif len(parts) == 3:
             node, attribute, role = parts
         else:
-            raise ValueError(f"Invalid `AppliedLoss.inputs` spec: {spec}")
+            msg = f"Invalid `AppliedLoss.inputs` spec: {spec}"
+            raise ValueError(msg)
 
-        allowed_attrs = ['features', "targets", "output"]
-        if not attribute in allowed_attrs:
-            raise ValueError(
+        allowed_attrs = ["features", "targets", "output"]
+        if attribute not in allowed_attrs:
+            msg = (
                 f"Invalid `AppliedLoss.inputs` spec: {spec}. "
                 f"Attribute must be one of the following: {allowed_attrs}. "
                 f"Received: {attribute}"
             )
+            raise ValueError(msg)
 
         return node, attribute, role
-        
-    def compute(self, batch_input: Dict[str, Batch], model_outputs: Dict[str, BatchOutput]) -> LossResult:
+
+    def compute(self, batch_input: dict[str, Batch], model_outputs: dict[str, BatchOutput]) -> LossResult:
         """
-        Computes the loss value using the specified input mappings and provided data.
+        Compute the loss value given input batches and model outputs.
 
         Args:
-            batch_input (Dict[str, Batch]):
-                A dictionary of FeatureSet batch_input keyed by FeatureSet label.
-                Each Batch contains samples and per-role sample weights.
-
-            model_outputs (Dict[str, BatchOutput]):
-                A dictionary of ModelStage outputs keyed by ModelStage label.
-                Each output is treated as a BatchOutput where `.features` holds the model output values.
+            batch_input (dict[str, Batch]): Mapping of FeatureSet label to input batch.
+            model_outputs (dict[str, BatchOutput]): Mapping of ModelStage label to output.
 
         Returns:
-            LossResult:
-                Contains:
-                    - label (str): loss name for logging
-                    - value (Any): backend-dependent scalar or tensor (raw loss output)
-                    - weight (float): scalar weight applied to the loss
-                    - sample_weights (np.ndarray): shape (n_samples,), averaged across inputs
-                    - inputs (Dict[str, Any]): raw tensors passed to the loss function (for debugging)
+            LossResult: Contains the computed loss value and metadata (label, weight).
+
+        Raises:
+            ValueError: If input spec references unknown nodes or missing roles.
 
         Notes:
-            - If multiple roles are mapped to the loss function (e.g., "anchor", "pos", "neg"),
-              the sample weights from each input are averaged per sample.
-            - Loss inputs are converted to the appropriate backend format before evaluation.
+            - Each loss argument (e.g., "pred", "true", "anchor") is fetched from either batch_input \
+              or model_outputs depending on its node label.
+            - All sample weights are averaged across inputs for per-sample weighting.
+            - Loss function is called with raw backend tensors (not Data or Batch).
+
         """
-        
         kwargs = {}
         sample_weights = {}
-        for k,input in self.inputs.items():
-            # Ex. values of input: ('PulseFeatures', 'targets', 'default')
-            node, attribute, role = input
-            
-            # Get FeatureSet data 
-            if attribute in ['features', 'targets']:
-                # Check that node label exists in batches (eg, "PulseFeatures" or "Encoder")
-                if node not in batch_input.keys():
-                    raise ValueError(
-                        f"Required AppliedLoss input (`{node}`) is missing from batch data: {batch_input.keys()}"
-                    )
-                # Check that role exists in batch (eg, "default" or "anchor")
+        for k, parsed_input in self.all_inputs.items():
+            # Ex. values of input: ('PulseFeatures', 'targets', 'default') or ('Encoder', 'output', 'default')
+            node, attribute, role = parsed_input
+
+            # ComputationNodes support the following attributes:
+            # - 'features' or 'output': gets the BatchOutput.features data
+            # - 'targets': gets the BatchOutput.targets data
+
+            # FeatureSets support the following attributes:
+            # - 'features': gets the FeatureSet.features data
+            # - 'targets': gets the BatchOutput.targets data
+
+            # Check the loss spec only maps to either the input data or model outputs, but not both
+            if node in batch_input and node in model_outputs:
+                msg = (
+                    f"Ambiguous AppliedLoss definition. Input key exists in both batch_input and model_outputs: {node}"
+                )
+                raise ValueError(msg)
+
+            # Collect input data
+            if node in batch_input:
+                # Ensure that role exists in batch (eg, "default" or "anchor")
                 if role not in batch_input[node].available_roles:
-                    raise ValueError(
-                        f"Required AppliedLoss input (`{role}`) is missing from batch data: {batch_input[node].available_roles}"
-                    )
-                
-                # Get sample data
+                    msg = f"Required AppliedLoss role (`{role}`) is missing from batch_input: {batch_input[node].available_roles}"
+                    raise ValueError(msg)
+
                 sample_coll = batch_input[node].role_samples[role]
                 sample_weights[k] = batch_input[node].role_sample_weights[role]
-                if attribute == 'features':
-                    kwargs[k] = sample_coll.get_all_features(
-                        format=get_data_format_for_backend(backend=self.backend)
-                    )
+                if attribute == "features":
+                    kwargs[k] = sample_coll.get_all_features(format=get_data_format_for_backend(backend=self.backend))
+                elif attribute == "targets":
+                    kwargs[k] = sample_coll.get_all_targets(format=get_data_format_for_backend(backend=self.backend))
                 else:
-                    kwargs[k] = sample_coll.get_all_targets(
-                        format=get_data_format_for_backend(backend=self.backend)
-                    )
-            
-            # Get model output data
-            elif attribute == 'output':
-                # Check that node label exists in model output (eg, "Encoder")
-                if node not in model_outputs.keys():
-                    raise ValueError(
-                        f"Required AppliedLoss input (`{node}`) is missing from model_outputs data: {model_outputs.keys()}"
-                    )
-                # Check that role exists in model_outputs (eg, "default" or "anchor")
+                    msg = f"Invalid AppliedLoss input attribute for batch_input: {attribute}"
+                    raise ValueError(msg)
+
+            # Collect output data
+            elif node in model_outputs:
+                # Ensure that role exists in batch (eg, "default" or "anchor")
                 if role not in model_outputs[node].available_roles:
-                    raise ValueError(
-                        f"Required AppliedLoss input (`{role}`) is missing from model_outputs data: {model_outputs[node].available_roles}"
-                    )
-                    
-                # Get sample data (don't convert data formats - will break pytorch autograd)
-                kwargs[k] = model_outputs[node].features[role]
-                
+                    msg = f"Required AppliedLoss role (`{role}`) is missing from model_outputs: {model_outputs[node].available_roles}"
+                    raise ValueError(msg)
+
+                # Get attribute data (don't convert data format, will break pytorch autograd)
+                if attribute in ["features", "output"]:
+                    kwargs[k] = model_outputs[node].features[role]
+                elif attribute == "targets":
+                    kwargs[k] = model_outputs[node].targets[role]
+                else:
+                    msg = f"Invalid AppliedLoss input attribute for model_outputs: {attribute}"
+                    raise ValueError(msg)
+
             else:
-                raise ValueError(f"Unsupported attribute value: {attribute}")
-        
+                msg = f"AppliedLoss input key does not exist in batch_input or model_outputs: {node}"
+                raise ValueError(msg)
+
         # Average all sample weights (per-sample weights across all inputs)
         mean_weights = None
         if sample_weights:
             sample_weights = [to_numpy(v) for v in sample_weights.values()]
             # Avg across roles (retain len = len(samples))
-            mean_weights = np.mean(np.stack(sample_weights, axis=0), axis=0).reshape(-1)    # shape: (n_samples, )
-            
+            mean_weights = np.mean(np.stack(sample_weights, axis=0), axis=0).reshape(-1)  # shape: (n_samples, )
+
         # Call loss function (convert to positional args if needed)
-        if all(k.isdigit() for k in kwargs.keys()):
+        if all(k.isdigit() for k in kwargs):
             args = [kwargs[str(i)] for i in range(len(kwargs))]
             loss_res = self.loss(*args)
         else:
             loss_res = self.loss(**kwargs)
-        
-        
+
         # Apply sample weighting
         # Convert mean_weights to correct backend tensor
         weighted_loss = None
@@ -343,31 +408,25 @@ class AppliedLoss:
             mean_weights_tensor = torch.as_tensor(mean_weights, device=loss_res.device)
             weighted_loss = torch.sum(loss_res * mean_weights_tensor) * self.weight
 
-
         elif self.backend == Backend.TENSORFLOW:
             # Ensure loss has shape (batch_size, )
             loss_res = tf.reshape(loss_res, [-1])
             mean_weights_tensor = tf.convert_to_tensor(mean_weights, dtype=loss_res.dtype)
             weighted_loss = tf.reduce_sum(loss_res * mean_weights_tensor) * self.weight
-            
+
         else:
             # Assume NumPy
             loss_res = np.reshape(loss_res, (-1,))
             mean_weights = np.reshape(mean_weights, (-1,))
             weighted_loss = np.sum(loss_res * mean_weights) * self.weight
-        
+
         return LossResult(
             label=self.label,
             value=weighted_loss,
         )
-    
-    
 
     def __repr__(self) -> str:
-        return (
-            f"AppliedLoss("
-            f"label={self.label}, "
-            # f"loss={self.loss}, "
-            # f"inputs={self.inputs}, "
-            f"weight={self.weight})"
-        )
+        return f"AppliedLoss(label={self.label}, loss={self.loss}, all_inputs={self.all_inputs}, weight={self.weight})"
+
+    def __str__(self):
+        return f"AppliedLoss ('{self.label}')"
