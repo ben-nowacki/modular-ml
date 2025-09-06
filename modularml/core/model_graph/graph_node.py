@@ -438,7 +438,7 @@ class GraphNode(ABC):
     # ==========================================
     @property
     @abstractmethod
-    def allows_input_connections(self) -> bool:
+    def allows_upstream_connections(self) -> bool:
         """
         Whether this node allows incoming (upstream) connections.
 
@@ -449,7 +449,7 @@ class GraphNode(ABC):
 
     @property
     @abstractmethod
-    def allows_output_connections(self) -> bool:
+    def allows_downstream_connections(self) -> bool:
         """
         Whether this node allows outgoing (downstream) connections.
 
