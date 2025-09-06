@@ -173,7 +173,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
 
         # Return output_shape is already known
         if self.output_shape is not None:
-            return self.output_shape
+            return [self.output_shape]
 
         # Pass inferencing task to BaseModel (if supports it)
         if hasattr(self._model, "infer_output_shapes"):

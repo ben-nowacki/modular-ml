@@ -93,20 +93,23 @@ class ComputationNode(GraphNode):
 
         """
 
+    # ==========================================
+    # ComputationNode Interface
+    # ==========================================
     @abstractmethod
-    def infer_output_shape(
+    def infer_output_shapes(
         self,
         input_shapes: list[tuple[int, ...]],
-    ) -> tuple[int, ...]:
+    ) -> list[tuple[int, ...]]:
         """
-        Infer the output shape of this node based on the given input shapes.
+        Infer the output shapes of this node based on the given input shapes.
 
         Args:
             input_shapes (list[tuple[int, ...]]): List of input shapes feeding into this node.
                 I.e., a list of upstream node output shapes.
 
         Returns:
-            tuple[int, ...]: Inferred output shape.
+            list[tuple[int, ...]]: Inferred output shapes.
 
         Raises:
             NotImplementedError: If the node cannot infer the shape without being built.
@@ -114,9 +117,6 @@ class ComputationNode(GraphNode):
         """
         raise NotImplementedError
 
-    # ==========================================
-    # ComputationNode Interface
-    # ==========================================
     @abstractmethod
     def get_input_batch(self, all_batch_data: dict[str, Batch]) -> Batch:
         """
@@ -148,6 +148,7 @@ class ComputationNode(GraphNode):
         self,
         input_shapes: list[tuple[int, ...]] | None = None,
         output_shapes: list[tuple[int, ...]] | None = None,
+        **kwargs,
     ):
         """
         Construct the internal logic of this node using the provided input and output shapes.
@@ -157,6 +158,7 @@ class ComputationNode(GraphNode):
                 Used to initialize models or internal transformation logic.
             output_shapes (list[tuple[int, ...]] | None): Optional list of expected output shapes.
                 May be used to constrain or validate internal shape inference.
+            **kwargs: Additional key-word arguments specific to each subclass.
 
         Notes:
             - Nodes with only a single input/output can simplify this logic.
