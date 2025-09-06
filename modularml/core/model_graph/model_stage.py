@@ -47,7 +47,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         self,
         label: str,
         model: BaseModel | Any,
-        upstream_node: str | FeatureSet | ModelStage,
+        upstream_node: str | GraphNode,
         optimizer: Optimizer | None = None,
     ):
         """
@@ -62,7 +62,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         """
         ups_node = None
         if isinstance(input, str):
-            ups_node: str | FeatureSet | ModelStage = upstream_node
+            ups_node: str | GraphNode = upstream_node
         elif isinstance(input, GraphNode):
             ups_node = upstream_node.label
         else:
@@ -135,10 +135,10 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         """
         return self._model.is_built
 
-    def infer_output_shape(
+    def infer_output_shapes(
         self,
         input_shapes: list[tuple[int, ...]],
-    ) -> tuple[int, ...]:
+    ) -> list[tuple[int, ...]]:
         """
         Infer the expected output shape of this ModelStage without building the backend model.
 
@@ -161,7 +161,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 Must contain exactly one element for ModelStage.
 
         Returns:
-            tuple[int, ...]: The inferred output shape.
+            list[tuple[int, ...]]: The inferred output shapes.
 
         Raises:
             ValueError: If multiple input shapes are provided or output shape cannot be inferred.
@@ -175,9 +175,11 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         if self.output_shape is not None:
             return self.output_shape
 
-        # Pass inference to BaseModel, if it can
+        # Pass inferencing task to BaseModel (if supports it)
+        if hasattr(self._model, "infer_output_shapes"):
+            return self._model.infer_output_shapes(input_shapes[0])
         if hasattr(self._model, "infer_output_shape"):
-            return self._model.infer_output_shape(input_shapes[0])
+            return [self._model.infer_output_shape(input_shapes[0])]
 
         # Otherwise, raise error
         msg = f"Cannot infer output shape for ModelStage `{self.label}`."
@@ -272,6 +274,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         """
         if isinstance(x, Batch):
             all_outputs = {}
+            all_targets = {}
             sample_uuids = {}
             for role, samples in x.role_samples.items():
                 # Format features for this backend
@@ -279,12 +282,14 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                     format=get_data_format_for_backend(self.backend),
                 )
                 all_outputs[role] = self._model(features, **kwargs)
+                all_targets[role] = samples.get_all_targets()
                 sample_uuids[role] = samples.sample_uuids
 
             # In order to preserve auto-grad for pytorch, we cannot modify underlying
             # data format until after loss computation and optimizer stepping
             return BatchOutput(
-                features=all_outputs,  # Preserves tensors
+                features=all_outputs,  # preserve backend-specific tensors
+                targets=all_targets,  # pass targets unmodified
                 sample_uuids=sample_uuids,
             )
 
@@ -303,13 +308,13 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             # In order to preserve auto-grad for pytorch, we cannot modify underlying
             # data format until after loss computation and optimizer stepping
             return BatchOutput(
-                features=all_outputs,  # Preserves tensors
+                features=all_outputs,  # preserve backend-specific tensors
+                targets=x.targets,  # pass targets unmodified
                 sample_uuids=sample_uuids,
             )
 
         if isinstance(x, Data):
             x = x.to_backend(target=self.backend)
-            self._model(x)
             return Data(self._model(x))
 
         msg = f"Input must be of type Data or Batch. Received: {type(x)}"
