@@ -27,3 +27,8 @@ ignore = [
     "TD003", "PLR0913", "C901", "TD002", "SLF001", "PD002", 
     "PLR2004", "PLR0912", "PLR0915", "S301",
 ]
+
+
+[lint.per-file-ignores]
+"examples/*.ipynb" = ["S310", "N803", ]
+"tests/*" = ["INP001", "S101", ]
