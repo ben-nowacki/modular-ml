@@ -4,9 +4,11 @@ from typing import Any
 
 from IPython.display import Markdown, display
 
-from modularml.core.data_structures.feature_set import FeatureSet
+from modularml.core.graph.feature_set import FeatureSet
+from modularml.core.graph.merge_stages.merge_stage import MergeStage
 from modularml.core.graph.model_graph import ModelGraph
 from modularml.core.graph.model_stage import ModelStage
+from modularml.utils.error_handling import ErrorMode
 
 
 @dataclass
@@ -72,6 +74,14 @@ MODEL_STAGE = NodeSpec(
     fill="#BBDEFB",
     stroke="#2962FF",
     header="ModelStage",
+    shape="rect",
+)
+MERGE_STAGE = NodeSpec(
+    class_name="MergeStage",
+    color="#000000",
+    fill="#B1B1B1",
+    stroke="#565656",
+    header="MergeStage",
     shape="rect",
 )
 APPLIED_LOSS = NodeSpec(
@@ -242,54 +252,57 @@ class GraphIR:
 
         n_id_ctr = 0
         e_id_ctr = 0
-        for k, v in mg._nodes.items():
-            if isinstance(v, ModelStage):
-                nodes.append(NodeIR(id=f"n{n_id_ctr}", spec=MODEL_STAGE, label=k))
+        for node_lbl, node in mg._nodes.items():
+            if isinstance(node, ModelStage):
+                nodes.append(NodeIR(id=f"n{n_id_ctr}", spec=MODEL_STAGE, label=node_lbl))
                 n_id_ctr += 1
 
-            elif isinstance(v, FeatureSet):
-                nodes.append(NodeIR(id=f"n{n_id_ctr}", spec=FEATURE_SET, label=k))
+            elif isinstance(node, MergeStage):
+                nodes.append(NodeIR(id=f"n{n_id_ctr}", spec=MERGE_STAGE, label=node_lbl))
+                n_id_ctr += 1
+
+            elif isinstance(node, FeatureSet):
+                nodes.append(NodeIR(id=f"n{n_id_ctr}", spec=FEATURE_SET, label=node_lbl))
                 n_id_ctr += 1
 
             else:
-                msg = f"Unkown node type in ModelGraph: {v}"
+                msg = f"Unkown node type in ModelGraph: {node}"
                 raise TypeError(msg)
 
-        for k, v in mg._nodes.items():
-            if isinstance(v, FeatureSet):
-                continue
-
-            for inp in v.allows_upstream_connections:
+        # Go through all non-source nodes
+        for node_lbl in mg.connected_node_labels:
+            # Create all upstream edge connections (src -> dst)
+            for ups_node_lbl in mg._nodes[node_lbl].get_upstream_nodes(error_mode=ErrorMode.COERCE):
                 src: NodeIR = None
                 dst: NodeIR = None
                 for n in nodes:
-                    if n.label == inp:
+                    if n.label == ups_node_lbl:
                         src = n
-                    if n.label == v.label:
+                    if n.label == node_lbl:
                         dst = n
+
                 if src is None:
-                    msg = f"Failed to find source node for input: {inp}. All nodes: {[n.label in nodes]}"
+                    msg = f"Failed to find source node for input: {ups_node_lbl}. All nodes: {[n.label in nodes]}"
                     raise RuntimeError(msg)
                 if dst is None:
-                    msg = f"Failed to find destination node for {v.label}."
+                    msg = f"Failed to find destination node for {node_lbl}."
                     raise RuntimeError(msg)
-                src_shape = None
                 try:
                     if isinstance(mg._nodes[src.label], FeatureSet):
                         src_shape = str(mg._nodes[src.label].feature_shape)
-                    elif isinstance(mg._nodes[src.label], ModelStage):
+                    elif isinstance(mg._nodes[src.label], ModelStage | MergeStage):
                         src_shape = str(mg._nodes[src.label].output_shape)
                 except:
-                    pass
-                edges.append(
-                    EdgeIR(
-                        id=f"e{e_id_ctr}",
-                        src=src,
-                        dst=dst,
-                        conn_spec=EdgeConnectionSpec(style="-->", label=src_shape),
-                        anim_spec=EDGE_ANIMATION_DASH_MEDIUM,  # EDGE_ANIMATION_NONE,
-                    )
+                    src_shape = None
+
+                e = EdgeIR(
+                    id=f"e{e_id_ctr}",
+                    src=src,
+                    dst=dst,
+                    conn_spec=EdgeConnectionSpec(style="-->", label=src_shape),
+                    anim_spec=EDGE_ANIMATION_DASH_MEDIUM,  # EDGE_ANIMATION_NONE,
                 )
+                edges.append(e)
                 e_id_ctr += 1
 
         return cls(nodes=nodes, edges=edges)
@@ -302,6 +315,7 @@ class GraphIR:
 
         Returns:
             str: Mermaid flowchart syntax.
+
         """
         connections: list[str] = []  # connections statments (eg, 'n1 e1@-> n2')
         node_class_link: list[str] = []  # node --> classDef link (each element is single line)
