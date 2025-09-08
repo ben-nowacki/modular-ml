@@ -1,14 +1,11 @@
-
-
-from typing import TYPE_CHECKING, Any
-
-from modularml.utils.backend import Backend, infer_backend
+from typing import Any
 
 from modularml.models.base import BaseModel
-from .torch_wrapper import TorchModelWrapper
-from .tensorflow_wrapper import TensorflowModelWrapper
-from .scikit_wrapper import ScikitModelWrapper
+from modularml.utils.backend import Backend, infer_backend
 
+from .scikit_wrapper import ScikitModelWrapper
+from .tensorflow_wrapper import TensorflowModelWrapper
+from .torch_wrapper import TorchModelWrapper
 
 
 def wrap_model(model: Any) -> BaseModel:
@@ -38,40 +35,38 @@ def wrap_model(model: Any) -> BaseModel:
 
     Raises:
         NotImplementedError: If the model's backend is unsupported or cannot be inferred.
+
     """
-    
     # If already a BaseModel, can just return
     if isinstance(model, BaseModel):
         return model
-    
+
     # Otherwise, try to infer backend and cast appropriately
     backend = infer_backend(model)
-    
+
     if backend == Backend.TORCH:
-        import torch as torch
+        import torch  # noqa: PLC0415
+
         if issubclass(model, torch.nn.Module) or isinstance(model, torch.nn.Module):
             return TorchModelWrapper(model)
-        raise ValueError(
-            f"Received PyTorch backend but model is not a subclass or instance of `torch.nn.Module`."
-        )
-    
-    elif backend == Backend.TENSORFLOW:
-        import tensorflow as tf
+        msg = "Received PyTorch backend but model is not a subclass or instance of `torch.nn.Module`."
+        raise ValueError(msg)
+
+    if backend == Backend.TENSORFLOW:
+        import tensorflow as tf  # noqa: PLC0415
+
         if issubclass(model, tf.keras.Model) or isinstance(model, tf.keras.Model):
             return TensorflowModelWrapper(model)
-        raise ValueError(
-            f"Received Tensorflow backend but model is not a subclass or instance of `tf.keras.Model`."
-        )
-        
-    elif backend == Backend.SCIKIT:
-        from sklearn.base import BaseEstimator
+        msg = "Received Tensorflow backend but model is not a subclass or instance of `tf.keras.Model`."
+        raise ValueError(msg)
+
+    if backend == Backend.SCIKIT:
+        from sklearn.base import BaseEstimator  # noqa: PLC0415
+
         if issubclass(model, BaseEstimator) or isinstance(model, BaseEstimator):
             return ScikitModelWrapper(model)
-        raise ValueError(
-            f"Received Scikit backend but model is not a subclass or instance of `sklearn.base.BaseEstimator`."
-        )
-        
-    else:
-        raise NotImplementedError(f"No wrapper available for inferred backend: {backend}")
+        msg = "Received Scikit backend but model is not a subclass or instance of `sklearn.base.BaseEstimator`."
+        raise ValueError(msg)
 
-
+    msg = f"No wrapper available for inferred backend: {backend}"
+    raise NotImplementedError(msg)

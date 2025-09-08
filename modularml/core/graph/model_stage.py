@@ -14,6 +14,7 @@ from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
 from modularml.models.wrappers import wrap_model
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import (
+    DataFormat,
     convert_to_format,
     get_data_format_for_backend,
 )
@@ -60,10 +61,13 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
 
         """
         ups_node = None
-        if isinstance(input, str):
+        if isinstance(upstream_node, str):
             ups_node: str | GraphNode = upstream_node
-        elif isinstance(input, GraphNode):
+        elif isinstance(upstream_node, GraphNode):
             ups_node = upstream_node.label
+        elif isinstance(upstream_node, list | tuple):
+            msg = f"ModelStage only accepts a single input. Received: {upstream_node}"
+            raise TypeError(msg)
         else:
             msg = f"Unknown input: {upstream_node}"
             raise TypeError(msg)
@@ -73,9 +77,8 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             )
 
         super().__init__(
-            self,
             label=label,
-            upstream_nodes=upstream_node,
+            upstream_nodes=ups_node,
         )
 
         # Set model (cast to BaseModel if explicit subclass not provided)
@@ -166,7 +169,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             ValueError: If multiple input shapes are provided or output shape cannot be inferred.
 
         """
-        if len(input_shapes) > self.max_upstream_nodes:
+        if self.max_upstream_nodes is not None and len(input_shapes) > self.max_upstream_nodes:
             msg = f"ModelStage only support a single input. Received: {input_shapes}"
             raise ValueError(msg)
 
@@ -217,12 +220,16 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
               been resolved upstream by the ModelGraph.
 
         """
-        if len(input_shapes) > self.max_upstream_nodes:
+        if self.max_upstream_nodes is not None and len(input_shapes) > self.max_upstream_nodes:
             msg = f"ModelStage only support a single input. Received: {input_shapes}"
             raise ValueError(msg)
         input_shape = input_shapes[0]
 
-        if output_shapes is not None and len(output_shapes) > self.max_downstream_nodes:
+        if (
+            output_shapes is not None
+            and self.max_downstream_nodes is not None
+            and len(output_shapes) > self.max_downstream_nodes
+        ):
             msg = f"ModelStage only supports a single output. Received: {output_shapes}"
             raise ValueError(msg)
         output_shape = output_shapes[0] if output_shapes is not None else None
@@ -278,10 +285,10 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             for role, samples in x.role_samples.items():
                 # Format features for this backend
                 features = samples.get_all_features(
-                    format=get_data_format_for_backend(self.backend),
+                    fmt=get_data_format_for_backend(self.backend),
                 )
                 all_outputs[role] = self._model(features, **kwargs)
-                all_targets[role] = samples.get_all_targets()
+                all_targets[role] = samples.get_all_targets(fmt=DataFormat.NUMPY)
                 sample_uuids[role] = samples.sample_uuids
 
             # In order to preserve auto-grad for pytorch, we cannot modify underlying
@@ -299,7 +306,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 # Format any-format to this backend (obj is unchanged if in correct format)
                 features = convert_to_format(
                     x.features[role],
-                    format=get_data_format_for_backend(self.backend),
+                    fmt=get_data_format_for_backend(self.backend),
                 )
                 all_outputs[role] = self._model(features, **kwargs)
                 sample_uuids[role] = x.sample_uuids[role]
