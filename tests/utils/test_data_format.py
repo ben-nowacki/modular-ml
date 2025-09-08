@@ -57,6 +57,8 @@ def test_to_python_torch_tensor():
     assert to_python(t) == [1, 2]
     scalar_t = torch.tensor(42)
     assert to_python(scalar_t) == 42
+    
+    assert t is to_torch(t)
 
 @pytest.mark.skipif(tf is None, reason="TensorFlow not installed")
 def test_to_python_tf_tensor():
@@ -64,6 +66,8 @@ def test_to_python_tf_tensor():
     assert to_python(t) == [1, 2]
     scalar_t = tf.constant(42)
     assert to_python(scalar_t) == 42
+    
+    assert t is to_tensorflow(t)
 
 def test_to_python_nested_structures():
     obj = {"a": np.array([1, 2]), "b": [np.float32(3), 4]}

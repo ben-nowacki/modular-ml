@@ -1,21 +1,13 @@
-
-
-
-
 from collections import defaultdict
-from typing import Dict, List, Optional, Union
 
-import numpy as np
 import pandas as pd
 
-from modularml.core.model_graph import ModelGraph
-from modularml.core.samplers.feature_sampler import FeatureSampler
 from modularml.core.experiment.eval_phase import EvaluationPhase
 from modularml.core.experiment.training_phase import TrainingPhase
+from modularml.core.graph import ModelGraph
 from modularml.utils.data_format import DataFormat, convert_to_format
 
-
-'''
+"""
 Top-level orchestrator
 
 Responsibilities:
@@ -27,7 +19,7 @@ Responsibilities:
     Manages:
         .run(): executes all TrainingPhases in order.
         .evaluate(): runs evaluations on designated stages.
-        
+
 Example:
     Experiment.run()
     │
@@ -44,7 +36,7 @@ Example:
     │   └── Optimizer step(s)
     │
     └── Done!
-'''
+"""
 
 
 # TODO: all callbacks in BasePhase to run custom scipts after each phase
@@ -52,8 +44,7 @@ Example:
 
 class Experiment:
     """
-    The `Experiment` class coordinates the training and evaluation of a modular model graph
-    across one or more `TrainingPhase` and `EvaluationPhase` configurations.
+    The `Experiment` class coordinates the training and evaluation of a ModelGraph.
 
     It handles:
     - Building the model graph (if not already built)
@@ -65,30 +56,29 @@ class Experiment:
         graph (ModelGraph): The model graph containing all stages and data sources.
         phases (List[Union[TrainingPhase, EvaluationPhase]]): List of phases to run (can include pretraining, fine-tuning, evaluation, etc).
         tracking (TrackingManager, optional): Optional tracker for logging metrics, artifacts, or experiment metadata.
+
     """
-    
+
     def __init__(
         self,
         graph: ModelGraph,
-        phases: List[Union[TrainingPhase, EvaluationPhase]],
-        tracking: Optional["TrackingManager"] = None,                   # type: ignore
+        phases: list[TrainingPhase | EvaluationPhase],
+        # tracking: "TrackingManager" | None = None,
     ):
         """
         Initialize an Experiment with a model graph and a list of training and/or evaluation phases.
-        
+
         Args:
             graph (ModelGraph): The modular computation graph containing model stages and feature sets.
             phases (List[Union[TrainingPhase, EvaluationPhase]]): Ordered list of training and evaluation phases
                 that define the experiment procedure.
-            tracking (Optional[TrackingManager]): Optional tracking manager for logging metrics, parameters,
-                and outputs. Can be used to connect with MLflow or local logging tools.
+            # tracking (Optional[TrackingManager]): Optional tracking manager for logging metrics, parameters,
+            #     and outputs. Can be used to connect with MLflow or local logging tools.
+
         """
-        
         self.graph = graph
-        self.phases = (
-            [phases] if isinstance(phases, TrainingPhase) else phases
-        )
-        self.tracking = tracking
+        self.phases = [phases] if isinstance(phases, TrainingPhase) else phases
+        # self.tracking = tracking
 
         # Build graph (required before .run())
         if not self.graph.is_built:
@@ -97,8 +87,7 @@ class Experiment:
         # Resolve losses for each training phase
         for phase in self.phases:
             phase.resolve_loss_inputs_and_roles(self.graph)
-    
-        
+
     def run(self):
         """
         Run all training and evaluation phases in order.
@@ -112,8 +101,9 @@ class Experiment:
             elif isinstance(phase, EvaluationPhase):
                 self.run_evaluation_phase(phase)
             else:
-                raise TypeError(f"Unknown phase type: {phase}")
-    
+                msg = f"Unknown phase type: {phase}"
+                raise TypeError(msg)
+
     def run_training_phase(self, phase: TrainingPhase):
         """
         Run a single training phase over a fixed number of epochs.
@@ -126,34 +116,44 @@ class Experiment:
         Args:
             phase (TrainingPhase): Training phase object that defines samplers, loss functions,
             number of epochs, and which model stages are trainable.
+
         """
-        
         if not phase.is_resolved:
             _ = phase.resolve_loss_inputs_and_roles(self.graph)
-        
+
         print(f"Executing TrainingPhase: {phase.label}")
-        print(f"  > Training")
+        print("  > Training")
         for epoch in range(phase.n_epochs):
-            all_batches = phase.get_batches(self.graph._feature_sets)
+            all_batches = phase.get_batches({k: self.graph._nodes[k] for k in self.graph.source_node_labels})
             num_batches = min([len(b) for b in all_batches.values()])
 
             total_loss = 0.0
+            total_opt_loss = 0.0
+            total_non_opt_loss = 0.0
             n_samples = 0
             for i in range(num_batches):
-                n_samples += all_batches[ list(all_batches.keys())[0] ][i].n_samples
-                batch = {k: v[i] for k,v in all_batches.items()}
-                result = self.graph.train_step(
+                ref_key = next(iter(all_batches.keys()))
+                n_samples += all_batches[ref_key][i].n_samples
+                batch = {k: v[i] for k, v in all_batches.items()}
+                step_res = self.graph.train_step(
                     batch_input=batch,
                     losses=phase._loss_mapping,
                     trainable_stages=phase.get_trainable_stages(),
                 )
-                total_loss += result["total_loss"]
-                
-            avg_sample_loss = total_loss / n_samples
-            if epoch % 10 == 0:
-                print(f"    - Epoch {epoch}: Avg. sample loss = {avg_sample_loss:.4f}")
+                total_loss += step_res.total_loss
+                total_opt_loss += step_res.total_opt_loss
+                total_non_opt_loss += step_res.total_non_opt_loss
 
-    def run_evaluation_phase(self, phase: EvaluationPhase) -> Dict[str, list]:
+            if epoch % 10 == 0:
+                msg = (
+                    f"    - Epoch {epoch}: "
+                    f"Avg. sample loss = {total_loss / n_samples:.4f} "
+                    f"[Opt={total_opt_loss / n_samples:.4f}, "
+                    f"Non-Opt={total_non_opt_loss / n_samples:.4f}]"
+                )
+                print(msg)
+
+    def run_evaluation_phase(self, phase: EvaluationPhase) -> pd.DataFrame:
         """
         Run a single evaluation phase and collect model outputs for analysis.
 
@@ -173,52 +173,64 @@ class Experiment:
 
         This output can be used for downstream visualization, metric computation,
         t-SNE plots, scatter comparisons, and more.
-        """
 
+        """
         if not phase.is_resolved:
             phase.resolve_loss_inputs_and_roles(self.graph)
-            
+
         print(f"Executing EvaluationPhase: {phase.label}")
-        print(f"  > Evaluating")
-        
-        all_batches = phase.get_batches(self.graph._feature_sets)
+        print("  > Evaluating")
+
+        all_batches = phase.get_batches({k: self.graph._nodes[k] for k in self.graph.source_node_labels})
         num_batches = min([len(b) for b in all_batches.values()])
+
         total_loss = 0.0
+        total_opt_loss = 0.0
+        total_non_opt_loss = 0.0
         n_samples = 0
         model_outputs = defaultdict(list)
         for i in range(num_batches):
-            n_samples += all_batches[ list(all_batches.keys())[0] ][i].n_samples
-            
-            batch = {k: v[i] for k,v in all_batches.items()}
-            result = self.graph.eval_step(
+            n_samples += all_batches[next(iter(all_batches.keys()))][i].n_samples
+
+            batch = {k: v[i] for k, v in all_batches.items()}
+            step_res = self.graph.eval_step(
                 batch_input=batch,
                 losses=phase._loss_mapping,
             )
-            
-            total_loss += result["total_loss"]
-            for k in result['stage_outputs'].keys():
-                model_outputs[k].append( result['stage_outputs'][k] )
-            
-        avg_sample_loss = total_loss / n_samples
-        print(f"    - Avg. sample loss = {avg_sample_loss:.4f}")
 
+            total_loss += step_res.total_loss
+            total_opt_loss += step_res.total_opt_loss
+            total_non_opt_loss += step_res.total_non_opt_loss
+            for k in step_res.node_outputs:
+                model_outputs[k].append(step_res.node_outputs[k])
 
-        # Convert all output data to single dict
-        data : Dict[str, list] = defaultdict(list)
+        msg = (
+            f"    - Avg. sample loss = {total_loss / n_samples:.4f} "
+            f"[Opt={total_opt_loss / n_samples:.4f}, "
+            f"Non-Opt={total_non_opt_loss / n_samples:.4f}]"
+        )
+        print(msg)
+
+        # One row per sample UUID per stage output
+        rows = []
         for stage_label, batches in model_outputs.items():
             for b in batches:
                 for role in b.available_roles:
-                    # Record model outputs
-                    outputs = convert_to_format(b.features[role], format=DataFormat.LIST)
-                    data[f"{stage_label}.output"].extend(outputs)
-                    
-                    # Record role labels
-                    data['role'].extend( [role, ] * len(outputs) )
-                    
-                    # Record sample uuids
-                    s_uuids = convert_to_format(b.sample_uuids[role], format=DataFormat.LIST)
-                    data['sample_uuid'].extend( s_uuids )
-        
-        return convert_to_format(data, format=DataFormat.DICT_LIST) 
-    
+                    outputs = convert_to_format(b.features[role], fmt=DataFormat.LIST)
+                    s_uuids = convert_to_format(b.sample_uuids[role], fmt=DataFormat.LIST)
 
+                    for uuid, output in zip(s_uuids, outputs, strict=True):
+                        rows.append(
+                            {"stage": f"{stage_label}.output", "role": role, "sample_uuid": uuid, "output": output},
+                        )
+
+        # Conver to wide-format dataframe (each model output is a column)
+        df_rows = pd.DataFrame(rows)
+        df_wide = df_rows.pivot_table(
+            index=["sample_uuid", "role"],
+            columns="stage",
+            values="output",
+            aggfunc="first",
+        ).reset_index()
+
+        return df_wide

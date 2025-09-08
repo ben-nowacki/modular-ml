@@ -1,10 +1,5 @@
-
-
-from .splitter import BaseSplitter
-from .random_splitter import RandomSplitter
 from .conditon_splitter import ConditionSplitter
+from .random_splitter import RandomSplitter
+from .splitter import BaseSplitter
 
-
-__all__ = [
-    "BaseSplitter", "RandomSplitter", "ConditionSplitter"
-]
+__all__ = ["BaseSplitter", "ConditionSplitter", "RandomSplitter"]
