@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Any
 
 from modularml.core.data_structures.batch import Batch
-from modularml.core.data_structures.feature_set import FeatureSet
+from modularml.core.graph.feature_set import FeatureSet
 from modularml.core.graph.model_graph import ModelGraph
 from modularml.core.loss.applied_loss import AppliedLoss
 from modularml.core.samplers.feature_sampler import FeatureSampler

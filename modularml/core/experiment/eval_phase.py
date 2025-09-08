@@ -1,5 +1,3 @@
-from typing import Any
-
 from modularml.core.experiment.base_phase import BasePhase
 from modularml.core.loss.applied_loss import AppliedLoss
 from modularml.core.samplers.feature_sampler import FeatureSampler

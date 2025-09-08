@@ -183,6 +183,7 @@ class Experiment:
 
         all_batches = phase.get_batches({k: self.graph._nodes[k] for k in self.graph.source_node_labels})
         num_batches = min([len(b) for b in all_batches.values()])
+
         total_loss = 0.0
         total_opt_loss = 0.0
         total_non_opt_loss = 0.0
@@ -215,8 +216,8 @@ class Experiment:
         for stage_label, batches in model_outputs.items():
             for b in batches:
                 for role in b.available_roles:
-                    outputs = convert_to_format(b.features[role], format=DataFormat.LIST)
-                    s_uuids = convert_to_format(b.sample_uuids[role], format=DataFormat.LIST)
+                    outputs = convert_to_format(b.features[role], fmt=DataFormat.LIST)
+                    s_uuids = convert_to_format(b.sample_uuids[role], fmt=DataFormat.LIST)
 
                     for uuid, output in zip(s_uuids, outputs, strict=True):
                         rows.append(
