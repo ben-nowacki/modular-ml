@@ -90,7 +90,7 @@ class RandomSplitter(BaseSplitter):
             return split_result
 
         # Group by tags
-        df_tags = sample_coll.get_all_tags(format=DataFormat.PANDAS)
+        df_tags = sample_coll.get_all_tags(fmt=DataFormat.PANDAS)
         df_tags["uuid"] = [s.uuid for s in samples]
         grouped = df_tags.groupby(self.group_by)
 

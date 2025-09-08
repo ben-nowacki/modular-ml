@@ -153,7 +153,7 @@ class GraphNode(ABC):
             list[str]: List of node labels connected upstream.
 
         """
-        if not self.allows_input_connections:
+        if not self.allows_upstream_connections:
             handled = self._handle_fatal_error(
                 GraphNodeInputError,
                 "This node does not allow upstream connections.",
@@ -176,7 +176,7 @@ class GraphNode(ABC):
             list[str]: List of node labels connected downstream.
 
         """
-        if not self.allows_output_connections:
+        if not self.allows_downstream_connections:
             handled = self._handle_fatal_error(
                 GraphNodeOutputError,
                 "This node does not allow downstream connections.",
@@ -195,7 +195,7 @@ class GraphNode(ABC):
 
         """
         if (
-            not self.allows_input_connections
+            not self.allows_upstream_connections
             and self._handle_fatal_error(
                 GraphNodeInputError,
                 "Upstream connections not allowed.",
@@ -240,7 +240,7 @@ class GraphNode(ABC):
 
         """
         if (
-            not self.allows_input_connections
+            not self.allows_upstream_connections
             and self._handle_benign_error(
                 GraphNodeInputError,
                 "Upstream connections not allowed.",
@@ -272,7 +272,7 @@ class GraphNode(ABC):
 
         """
         if (
-            not self.allows_input_connections
+            not self.allows_upstream_connections
             and self._handle_benign_error(
                 GraphNodeInputError,
                 "Upstream connections not allowed.",
@@ -310,7 +310,7 @@ class GraphNode(ABC):
 
         """
         if (
-            not self.allows_output_connections
+            not self.allows_downstream_connections
             and self._handle_fatal_error(
                 GraphNodeOutputError,
                 "Downstream connections not allowed.",
@@ -359,7 +359,7 @@ class GraphNode(ABC):
 
         """
         if (
-            not self.allows_output_connections
+            not self.allows_downstream_connections
             and self._handle_benign_error(
                 GraphNodeOutputError,
                 "Downstream connections not allowed.",
@@ -391,7 +391,7 @@ class GraphNode(ABC):
 
         """
         if (
-            not self.allows_output_connections
+            not self.allows_downstream_connections
             and self._handle_benign_error(
                 GraphNodeOutputError,
                 "Downstream connections not allowed.",

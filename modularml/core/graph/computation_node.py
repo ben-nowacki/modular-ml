@@ -118,7 +118,7 @@ class ComputationNode(GraphNode):
         raise NotImplementedError
 
     @abstractmethod
-    def get_input_batch(self, all_batch_data: dict[str, Batch]) -> Batch:
+    def get_input_batch(self, all_batch_data: dict[str, Batch]) -> Batch | list[Batch]:
         """
         Retrieve and construct this node's input batch from all upstream batches.
 
@@ -126,7 +126,7 @@ class ComputationNode(GraphNode):
             all_batch_data (dict[str, Batch]): Dictionary mapping node labels to Batch objects.
 
         Returns:
-            Batch: The combined or transformed input batch for this node.
+            Batch | list[Batch]: The combined or transformed input batch for this node.
 
         """
 

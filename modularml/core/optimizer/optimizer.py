@@ -2,8 +2,7 @@ from collections.abc import Callable
 from typing import Any
 
 import tensorflow as tf
-import tensorflow.keras.optimizers as tf_optim
-from torch import optim as torch_optim
+import torch
 
 from modularml.utils.backend import Backend
 from modularml.utils.exceptions import BackendNotSupportedError, OptimizerError, OptimizerNotSetError
@@ -31,19 +30,19 @@ class Optimizer:
         avail_opts = {}
         if self.backend == Backend.TORCH:
             avail_opts = {
-                "adam": torch_optim.Adam,
-                "adamw": torch_optim.AdamW,
-                "sgd": torch_optim.SGD,
-                "rmsprop": torch_optim.RMSprop,
-                "adagrad": torch_optim.Adagrad,
+                "adam": torch.optim.Adam,
+                "adamw": torch.optim.AdamW,
+                "sgd": torch.optim.SGD,
+                "rmsprop": torch.optim.RMSprop,
+                "adagrad": torch.optim.Adagrad,
             }
         elif self.backend == Backend.TENSORFLOW:
             avail_opts = {
-                "adam": tf_optim.Adam,
-                "adamw": tf_optim.AdamW,
-                "sgd": tf_optim.SGD,
-                "rmsprop": tf_optim.RMSprop,
-                "adagrad": tf_optim.Adagrad,
+                "adam": tf.keras.optimizers.Adam,
+                "adamw": tf.keras.optimizers.AdamW,
+                "sgd": tf.keras.optimizers.SGD,
+                "rmsprop": tf.keras.optimizers.RMSprop,
+                "adagrad": tf.keras.optimizers.Adagrad,
             }
         else:
             raise BackendNotSupportedError(backend=self.backend, method="Optimizer._resolve()")

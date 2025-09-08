@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING
 import tensorflow as tf
 import torch
 
-from modularml.core.data_structures.feature_set import FeatureSet
 from modularml.core.data_structures.step_result import StepResult
 from modularml.core.graph.computation_node import ComputationNode
+from modularml.core.graph.feature_set import FeatureSet
 from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.merge_stages.merge_stage import MergeStage
 from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
 from modularml.core.graph.model_stage import ModelStage
 from modularml.utils.backend import Backend, backend_requires_optimizer
@@ -104,8 +105,8 @@ class ModelGraph:
 
         Call this whenever nodes are added/removed or connections change.
         """
-        self._source_node_labels: dict[str, GraphNode] = {}
-        self._connected_node_labels: dict[str, GraphNode] = {}
+        self._source_node_labels: list[str] = []
+        self._connected_node_labels: list[str] = []
 
     def _update_node_label_cache(self):
         """Recompute and cache the lists of source and connected node labels."""
@@ -113,9 +114,9 @@ class ModelGraph:
 
         for label, node in self._nodes.items():
             if node.allows_upstream_connections:
-                self._connected_node_labels[label] = node
+                self._connected_node_labels.append(label)
             else:
-                self._source_node_labels[label] = node
+                self._source_node_labels.append(label)
 
     @property
     def source_node_labels(self) -> list[str]:
@@ -126,7 +127,7 @@ class ModelGraph:
             list[str]: Node labels that have no upstream dependencies.
 
         """
-        if self._source_node_labels is None:
+        if self._source_node_labels is None or len(self._source_node_labels) == 0:
             self._update_node_label_cache()
         return self._source_node_labels
 
@@ -139,7 +140,7 @@ class ModelGraph:
             list[str]: Node labels that depend on one or more upstream nodes.
 
         """
-        if self._connected_node_labels is None:
+        if self._connected_node_labels is None or len(self._connected_node_labels) == 0:
             self._update_node_label_cache()
         return self._connected_node_labels
 
@@ -188,7 +189,7 @@ class ModelGraph:
 
             # Record backend for later checking
             if isinstance(node, ModelStage):
-                used_backends = node.backend
+                used_backends.append(node.backend)
 
             # Record base nodes (ie, featuresets)
             if not node.allows_upstream_connections:
@@ -755,8 +756,8 @@ class ModelGraph:
 
         # Ensure all nodes are built
         cache: dict[str, Batch | BatchOutput] = {}
-        for label in self._sorted_node_labels:
-            node: GraphNode = self._nodes[label]
+        for lbl in self._sorted_node_labels:
+            node: GraphNode = self._nodes[lbl]
 
             # If a source node (ie, FeatureSet), just record input data
             if lbl in self.source_node_labels:
@@ -767,24 +768,31 @@ class ModelGraph:
             if isinstance(node, ComputationNode) and not node.is_built:
                 # Get all inputs feeding into this node
                 input_shapes: list[tuple[int, ...]] = self._get_input_shapes(node)
-                # Try to get the nodes output shape (only succeeds if BaseModel defines it)
-                try:
-                    output_shapes: list[tuple[int, ...]] = node.infer_output_shapes(input_shapes)
-                except ValueError:
-                    output_shapes = None
-                # If a leaf ModelStage and failed to infer output_shapes,
-                # force output_shapes to be the accumulated FeatureSet.target_shape
-                if output_shapes is None and isinstance(node, ModelStage):
-                    output_shapes = [cache[node.upstream_node].target_shape]
 
-                # Build node
-                node.build(input_shapes=input_shapes, output_shapes=output_shapes)
+                # ModelStage support output shape inferrence
+                if isinstance(node, ModelStage):
+                    try:
+                        output_shapes: list[tuple[int, ...]] = node.infer_output_shapes(input_shapes)
+                    except ValueError:
+                        output_shapes = None
+                    # If a leaf ModelStage and failed to infer output_shapes,
+                    # force output_shapes to be the accumulated FeatureSet.target_shape
+                    if output_shapes is None and isinstance(node, ModelStage):
+                        output_shapes = [cache[node.upstream_node].target_shape]
+
+                    # Build node
+                    node.build(input_shapes=input_shapes, output_shapes=output_shapes)
+                    print(f"Built node `{lbl}` with shapes: {node.input_shape} -> {node.output_shape}")
+
+                # MergeStage only accepts an input_shape, but also requires a backend
+                elif isinstance(node, MergeStage):
+                    backend = Backend.SCIKIT if self._optimizer is None else self._optimizer.backend
+                    node.build(input_shapes=input_shapes, backend=backend)
+                    print(f"Built node `{lbl}` with merged shape: {node.merged_shape}")
 
                 # Cache outputs of this newly built node
-                output: BatchOutput = node.forward(inputs=[cache[inp] for inp in node.get_upstream_nodes()])
+                output: BatchOutput = node.forward(node.get_input_batch(cache))
                 cache[lbl] = output
-
-                print(f"Built node `{label}` with shapes: {node.input_shape} -> {node.output_shape}")
 
         # Build global optimizer if defined
         if self._optimizer is not None:
@@ -842,7 +850,7 @@ class ModelGraph:
                 batch = make_dummy_batch(feature_shape=node.feature_shape, batch_size=batch_size)
                 batches[lbl] = batch
 
-        res = self.forward(batches=batches)
+        res = self.forward(batches)
         return res
 
     def forward(self, batches: dict[str, Batch]) -> dict[str, Batch | BatchOutput]:
@@ -891,7 +899,7 @@ class ModelGraph:
                     if ups_node not in cache:
                         msg = f"Missing upstream node `{ups_node}` for node `{lbl}`"
                         raise ValueError(msg)
-                output: BatchOutput = node.forward(inputs=[cache[inp] for inp in node.get_upstream_nodes()])
+                output: BatchOutput = node.forward(node.get_input_batch(cache))
                 cache[lbl] = output
 
             else:

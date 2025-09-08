@@ -1,7 +1,7 @@
 from .activation import Activation
-from .data_structures import Batch, Data, FeatureSet, FeatureSubset, Sample, SampleCollection
+from .data_structures import Batch, Data, Sample, SampleCollection
 from .experiment import EvaluationPhase, Experiment, TrainingPhase
-from .graph import GraphNode, ModelGraph, ModelStage
+from .graph import ConcatStage, FeatureSet, FeatureSubset, GraphNode, ModelGraph, ModelStage
 from .loss import AppliedLoss, Loss, LossResult
 from .optimizer import Optimizer
 from .samplers import FeatureSampler
@@ -12,6 +12,7 @@ __all__ = [
     "Activation",
     "AppliedLoss",
     "Batch",
+    "ConcatStage",
     "ConditionSplitter",
     "Data",
     "EvaluationPhase",

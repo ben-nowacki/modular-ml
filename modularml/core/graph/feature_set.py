@@ -11,9 +11,9 @@ import joblib
 import numpy as np
 
 from modularml.core.data_structures.data import Data
-from modularml.core.data_structures.feature_subset import FeatureSubset
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
+from modularml.core.graph.feature_subset import FeatureSubset
 from modularml.core.graph.graph_node import GraphNode
 from modularml.core.transforms.feature_transform import FeatureTransform
 from modularml.utils.data_format import DataFormat
@@ -140,7 +140,7 @@ class FeatureSet(SampleCollection, GraphNode):
 
         """
         SampleCollection.__init__(self, samples=samples)
-        GraphNode.__init__(self, label=label, inputs=None, outputs=None)
+        GraphNode.__init__(self, label=label, upstream_nodes=None, downstream_nodes=None)
 
         self.subsets: dict[str, FeatureSubset] = {}
 
@@ -151,11 +151,11 @@ class FeatureSet(SampleCollection, GraphNode):
     # GraphNode Methods
     # ==========================================
     @property
-    def allows_input_connections(self) -> bool:
+    def allows_upstream_connections(self) -> bool:
         return False  # FeatureSets do not accept inputs
 
     @property
-    def allows_output_connections(self) -> bool:
+    def allows_downstream_connections(self) -> bool:
         return True  # FeatureSets can feed into downstream nodes
 
     @property
@@ -629,14 +629,14 @@ class FeatureSet(SampleCollection, GraphNode):
         x_fit = None
         if fit_component == "features":
             if fit_key is not None:
-                x_fit = SampleCollection(fit_samples).get_all_features(format=DataFormat.DICT_NUMPY)[fit_key]
+                x_fit = SampleCollection(fit_samples).get_all_features(fmt=DataFormat.DICT_NUMPY)[fit_key]
             else:
-                x_fit = SampleCollection(fit_samples).get_all_features(format=DataFormat.NUMPY)
+                x_fit = SampleCollection(fit_samples).get_all_features(fmt=DataFormat.NUMPY)
         elif fit_component == "targets":
             if fit_key is not None:
-                x_fit = SampleCollection(fit_samples).get_all_targets(format=DataFormat.DICT_NUMPY)[fit_key]
+                x_fit = SampleCollection(fit_samples).get_all_targets(fmt=DataFormat.DICT_NUMPY)[fit_key]
             else:
-                x_fit = SampleCollection(fit_samples).get_all_targets(format=DataFormat.NUMPY)
+                x_fit = SampleCollection(fit_samples).get_all_targets(fmt=DataFormat.NUMPY)
         else:
             msg = f"Invalid fit_component: {fit_component}"
             raise ValueError(msg)

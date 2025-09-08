@@ -92,29 +92,29 @@ class SampleCollection:
     def sample_labels(self) -> list[str]:
         return list(self._label_sample_map.keys())
 
-    def get_all_features(self, format: str | DataFormat = DataFormat.DICT_NUMPY) -> Any:
+    def get_all_features(self, fmt: str | DataFormat = DataFormat.DICT_NUMPY) -> Any:
         """Returns all features across all samples in the specified format."""
         raw = {k: [s.features[k].value for s in self.samples] for k in self.feature_keys}
-        if format_has_shape(format=format):
+        if format_has_shape(fmt=fmt):
             # force proper shape: conver to np, force shape, then convert to specific format
-            np_data = convert_dict_to_format(raw, format=DataFormat.NUMPY)
+            np_data = convert_dict_to_format(raw, fmt=DataFormat.NUMPY)
             np_data = enforce_numpy_shape(arr=np_data, target_shape=(len(self), *self.feature_shape))
-            return convert_to_format(np_data, format=format)
+            return convert_to_format(np_data, fmt=fmt)
 
-        return convert_dict_to_format(raw, format=format)
+        return convert_dict_to_format(raw, fmt=fmt)
 
-    def get_all_targets(self, format: str | DataFormat = DataFormat.DICT_NUMPY) -> Any:
+    def get_all_targets(self, fmt: str | DataFormat = DataFormat.DICT_NUMPY) -> Any:
         """Returns all targets across all samples in the specified format."""
         raw = {k: [s.targets[k].value for s in self.samples] for k in self.target_keys}
-        if format_has_shape(format=format):
+        if format_has_shape(fmt=fmt):
             # force proper shape: conver to np, force shape, then convert to specific format
-            np_data = convert_dict_to_format(raw, format=DataFormat.NUMPY)
+            np_data = convert_dict_to_format(raw, fmt=DataFormat.NUMPY)
             np_data = enforce_numpy_shape(arr=np_data, target_shape=(len(self), *self.target_shape))
-            return convert_to_format(np_data, format=format)
+            return convert_to_format(np_data, fmt=fmt)
 
-        return convert_dict_to_format(raw, format=format)
+        return convert_dict_to_format(raw, fmt=fmt)
 
-    def get_all_tags(self, format: str | DataFormat = DataFormat.DICT_NUMPY) -> Any:
+    def get_all_tags(self, fmt: str | DataFormat = DataFormat.DICT_NUMPY) -> Any:
         """
         Returns all tags across all samples in the specified format.
 
@@ -122,7 +122,7 @@ class SampleCollection:
         The format argument controls the output structure.
         """
         raw = {k: [s.tags[k].value for s in self.samples] for k in self.tag_keys}
-        return convert_dict_to_format(raw, format=format)
+        return convert_dict_to_format(raw, fmt=fmt)
 
     def to_backend(self, backend: str | Backend) -> "SampleCollection":
         """Returns a new SampleCollection with all Data objects converted to the specified backend."""

@@ -9,8 +9,8 @@ if TYPE_CHECKING:
     from modularml.core.data_structures.sample import Sample
 
 from modularml.core.data_structures.batch import Batch
-from modularml.core.data_structures.feature_set import FeatureSet
-from modularml.core.data_structures.feature_subset import FeatureSubset
+from modularml.core.graph.feature_set import FeatureSet
+from modularml.core.graph.feature_subset import FeatureSubset
 
 
 class FeatureSampler:

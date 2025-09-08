@@ -32,18 +32,28 @@ class MergeStage(ComputationNode, ABC):
     def __init__(
         self,
         label: str,
-        upstream_nodes: list[str | GraphNode] | None = None,
+        upstream_nodes: list[str | GraphNode],
     ):
         """
         Initialize a MergeStage.
 
         Args:
             label (str): Unique identifier for this node.
-            upstream_nodes (list[str | GraphNode] | None): Optional list of upstream
+            upstream_nodes (list[str | GraphNode]): Optional list of upstream
                 node labels or references from which inputs will be received.
 
         """
-        super().__init__(label=label, upstream_nodes=upstream_nodes)
+        upstream_nodes = upstream_nodes if isinstance(upstream_nodes, list) else [upstream_nodes]
+        ups_node_lbls = []
+        for n in upstream_nodes:
+            if isinstance(n, str):
+                ups_node_lbls.append(n)
+            elif isinstance(n, GraphNode):
+                ups_node_lbls.append(n.label)
+            else:
+                msg = f"Upstream nodes must be node labels or the nodes themselves. Received: {n}"
+                raise TypeError(msg)
+        super().__init__(label=label, upstream_nodes=ups_node_lbls)
         self._merged_shape: tuple[int, ...] | None = None
         self._built = False
         self._backend = Backend.NONE
@@ -127,6 +137,9 @@ class MergeStage(ComputationNode, ABC):
 
         """
 
+    def get_input_batch(self, all_batch_data: dict[str, Batch]) -> Batch | list[Batch]:
+        return [all_batch_data[ups_node_lbl] for ups_node_lbl in self.get_upstream_nodes()]
+
     def infer_output_shapes(
         self,
         input_shapes: list[tuple[int, ...]],
@@ -150,7 +163,7 @@ class MergeStage(ComputationNode, ABC):
         merged_data = self.apply_merge(values=[np.ones(shape=x) for x in input_shapes])
         if isinstance(merged_data, list):
             return [x.shape for x in merged_data]
-        return [convert_to_format(merged_data, format=DataFormat.NUMPY).shape]
+        return [convert_to_format(merged_data, fmt=DataFormat.NUMPY).shape]
 
     def build(
         self,
@@ -241,10 +254,10 @@ class MergeStage(ComputationNode, ABC):
                 for x in all_inputs:
                     if isinstance(x, Batch):
                         features.append(
-                            x.get_samples(role=r).get_all_features(format=get_data_format_for_backend(self._backend)),
+                            x.get_samples(role=r).get_all_features(fmt=get_data_format_for_backend(self._backend)),
                         )
                         targets.append(
-                            x.get_samples(role=r).get_all_targets(format=get_data_format_for_backend(self._backend)),
+                            x.get_samples(role=r).get_all_targets(fmt=get_data_format_for_backend(self._backend)),
                         )
                         sample_uuids.append(
                             x.get_samples(role=r).sample_uuids,
@@ -253,13 +266,13 @@ class MergeStage(ComputationNode, ABC):
                         features.append(
                             convert_to_format(
                                 x.features[r],
-                                format=get_data_format_for_backend(self._backend),
+                                fmt=get_data_format_for_backend(self._backend),
                             )  # noqa: COM812
                         )
                         targets.append(
                             convert_to_format(
                                 x.targets[r],
-                                format=get_data_format_for_backend(self._backend),
+                                fmt=get_data_format_for_backend(self._backend),
                             )  # noqa: COM812
                         )
                         sample_uuids.append(x.sample_uuids[r])

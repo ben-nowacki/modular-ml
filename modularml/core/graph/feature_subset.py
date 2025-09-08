@@ -7,7 +7,7 @@ from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.graph.graph_node import GraphNode
 
 if TYPE_CHECKING:
-    from modularml.core.data_structures.feature_set import FeatureSet
+    from modularml.core.graph.feature_set import FeatureSet
     from modularml.core.splitters.splitter import BaseSplitter
 
 
@@ -24,7 +24,7 @@ class FeatureSubset(SampleCollection, GraphNode):
         parent: FeatureSet,
         sample_uuids: list[str],
     ):
-        GraphNode.__init__(self, label=label, inputs=parent.label)
+        GraphNode.__init__(self, label=label, upstream_nodes=parent.label)
         self._parent_ref = weakref.ref(parent)  # weak ref of parent FeatureSet
         self._sample_uuids = set(sample_uuids)
 
@@ -40,11 +40,11 @@ class FeatureSubset(SampleCollection, GraphNode):
     # GraphNode Methods
     # ==========================================
     @property
-    def allows_input_connections(self) -> bool:
+    def allows_upstream_connections(self) -> bool:
         return True  # FeatureSubsets accept only the parent FeatureSet input
 
     @property
-    def allows_output_connections(self) -> bool:
+    def allows_downstream_connections(self) -> bool:
         return True  # FeatureSubsets can feed into downstream nodes
 
     @property
