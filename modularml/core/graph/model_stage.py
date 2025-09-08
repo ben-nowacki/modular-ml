@@ -241,9 +241,12 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         # Build optimizer if defined
         if self._optimizer is not None:
             if self.backend == Backend.TORCH:
-                self._optimizer.build(parameters=self._model.parameters())
+                self._optimizer.build(
+                    parameters=self._model.parameters(),
+                    backend=self.backend,
+                )
             elif self.backend == Backend.TENSORFLOW:
-                self._optimizer.build()
+                self._optimizer.build(backend=self.backend)
             elif self.backend == Backend.SCIKIT:
                 # Scikit-learn optimizers are typically fit internally
                 pass
@@ -377,16 +380,18 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             BackendMismatchError: If optimizer and model backends differ.
 
         """
-        if self._optimizer is None:
-            if required:
-                raise OptimizerNotSetError(model_stage_name=self.label)
+        if self._optimizer is None and required:
+            raise OptimizerNotSetError(model_stage_name=self.label)
 
-        elif self._optimizer.backend != self.backend:
-            raise BackendMismatchError(
-                expected=self.backend,
-                received=self._optimizer.backend,
-                message=f"Optimizer backend does not match model backend: {self._optimizer.backend} != {self.backend}",
-            )
+        if self._optimizer is not None:
+            if self._optimizer.backend is None:
+                self._optimizer.backend = self.backend
+            elif self._optimizer.backend != self.backend:
+                raise BackendMismatchError(
+                    expected=self.backend,
+                    received=self._optimizer.backend,
+                    message=f"Optimizer backend does not match model backend: {self._optimizer.backend} != {self.backend}",
+                )
 
     def _validate_source(
         self,
@@ -521,7 +526,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             total_opt_loss=total_loss,
             total_non_opt_loss=0.0,
             all_loss_results={self.label: loss_results},
-            stage_outputs=outputs,
+            node_outputs=outputs,
         )
 
     def _train_step_tensorflow(
@@ -574,7 +579,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             total_opt_loss=total_loss,
             total_non_opt_loss=0.0,
             all_loss_results={self.label: loss_results},
-            stage_outputs=outputs,
+            node_outputs=outputs,
         )
 
     def _train_step_scikit(
@@ -678,7 +683,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             total_opt_loss=0.0,
             total_non_opt_loss=total_loss,
             all_loss_results={self.label: loss_results},
-            stage_outputs=outputs,
+            node_outputs=outputs,
         )
 
     def _eval_step_tensorflow(
@@ -724,7 +729,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             total_opt_loss=0.0,
             total_non_opt_loss=total_loss,
             all_loss_results={self.label: loss_results},
-            stage_outputs=outputs,
+            node_outputs=outputs,
         )
 
     def _eval_step_scikit(

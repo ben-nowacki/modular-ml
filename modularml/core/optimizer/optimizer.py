@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Type
 
 import tensorflow as tf
 import torch
@@ -9,22 +9,50 @@ from modularml.utils.exceptions import BackendNotSupportedError, OptimizerError,
 
 
 class Optimizer:
-    def __init__(self, name: str, backend: Backend, **optimizer_kwargs):
-        """
-        Initiallizes an Optimizer.
+    """
+    Backend-agnostic optimizer wrapper.
 
-        Args:
-            name (str): Name of the optimizer to use (e.g., "adam")
-            backend (Backend): The backend to use (e.g., Backend.TORCH)
-            **optimizer_kwargs: Additional keyword arguments to pass to optimizer
+    Description:
+        Encapsulates optimizer creation logic with support for lazy construction,
+        backend inference, and config-based serialization.
 
-        """
-        self.name = name.lower()
-        self.backend = backend
-        self.opt_cls = self._resolve()
-        self.parameters = optimizer_kwargs.pop("model_parameters", None)
-        self.opt_kwargs = optimizer_kwargs
-        self.optimizer = None
+    Initialization Options:
+        - From backend and name: `Optimizer(name="adam", lr=1e-3)`
+        - From class + kwargs:   `Optimizer(cls=torch.optim.Adam, lr=...)`
+    """
+
+    def __init__(
+        self,
+        name: str | None = None,
+        cls: type | None = None,
+        backend: Backend | None = None,
+        **kwargs,
+    ):
+        if name is not None and cls is not None:
+            msg = (
+                "Optimizer can be set with either an optimzier name (eg, 'relu') "
+                "or a class (eg, `toch.optim.Adam`), but not both."
+            )
+            raise ValueError(msg)
+
+        self.cls = None
+        self.kwargs = kwargs
+        if name is not None:
+            self.name = name.lower()
+            self._backend = backend
+            if self._backend is not None:
+                self.cls = self._resolve()  # set optimizer cls
+        elif cls is not None:
+            self.cls = cls
+
+        self.instance = None
+        self._backend = backend  # If not provided, inferred later
+
+    def __repr__(self):
+        msg_kwargs = ""
+        for k, v in self.kwargs.items():
+            msg_kwargs += f", {k}={v}"
+        return f"Optimizer('{self.name}'{msg_kwargs})"
 
     def _resolve(self) -> Callable:
         avail_opts = {}
@@ -56,13 +84,58 @@ class Optimizer:
             raise OptimizerError(msg)
         return opt
 
-    def __call__(self, *, force_rebuild: bool = False, parameters: Any | None = None, **kwargs):
+    @property
+    def is_built(self) -> bool:
+        return self.instance is not None
+
+    @property
+    def backend(self) -> Backend:
+        return self._backend
+
+    @backend.setter
+    def backend(self, value: Backend):
+        self._backend = value
+
+    def build(
+        self,
+        *,
+        force_rebuild: bool = False,
+        parameters: Any | None = None,
+        backend: Backend | None = None,
+        **kwargs,
+    ):
+        """
+        Constructs the optimizer if not already provided.
+
+        Args:
+            force_rebuild (bool, optional): Whether to force rebuild optimizer.
+            parameters (any, optional): Trainable parameters of the model (required for PyTorch).
+            backend (Backend | None): Backend to use for optimizer, if not already set.
+            **kwargs: Kwargs to pass to optimizer
+
+        """
+        self.__call__(
+            force_rebuild=force_rebuild,
+            parameters=parameters,
+            backend=backend,
+            **kwargs,
+        )
+
+    def __call__(
+        self,
+        *,
+        force_rebuild: bool = False,
+        parameters: Any | None = None,
+        backend: Backend | None = None,
+        **kwargs,
+    ):
         """
         Instantiate the optimizer if not already provided.
 
         Args:
             force_rebuild (bool, optional): Whether to force rebuild optimizer.
             parameters (any, optional): Trainable parameters of the model (required for PyTorch).
+            backend (Backend | None): Backend to use for optimizer, if not already set.
             **kwargs: Kwargs to pass to optimizer
 
         """
@@ -74,59 +147,33 @@ class Optimizer:
                 ),
             )
 
-        self.opt_kwargs |= kwargs
+        # Set backend if not already set
+        if backend is not None and self._backend is not None:
+            if backend != self._backend:
+                msg = f"Backend passed to Optimizer.build differs from backend at init: {backend} != {self._backend}"
+                raise ValueError(msg)
+        elif self._backend is None:
+            self._backend = backend
+        if self._backend is None:
+            raise ValueError("Backend must be provided during init or build.")
 
-        if self.backend == Backend.TORCH:
+        # Set optimizer class if not already set
+        if self.cls is None:
+            self.cls = self._resolve()
+
+        self.kwargs |= kwargs
+
+        if self._backend == Backend.TORCH:
             self.parameters = parameters
             if self.parameters is None:
                 raise ValueError("Optimizer requires model parameters for the PyTorch backend.")
-            self.optimizer = self.opt_cls(self.parameters, **self.opt_kwargs)
+            self.instance = self.cls(self.parameters, **self.kwargs)
 
-        elif self.backend == Backend.TENSORFLOW:
-            self.optimizer = self.opt_cls(**self.opt_kwargs)
+        elif self._backend == Backend.TENSORFLOW:
+            self.instance = self.cls(**self.kwargs)
 
         else:
-            raise BackendNotSupportedError(backend=self.backend, method="Optimzer.__call__()")
-
-    def __repr__(self):
-        msg_kwargs = ""
-        for k, v in self.opt_kwargs.items():
-            msg_kwargs += f", {k}={v}"
-        return f"Optimizer('{self.name}'{msg_kwargs})"
-
-    @property
-    def is_built(self) -> bool:
-        return self.optimizer is not None
-
-    def build(self, *, force_rebuild: bool = False, parameters: Any | None = None, **kwargs):
-        """
-        Constructs the optimizer if not already provided.
-
-        Args:
-            force_rebuild (bool, optional): Whether to force rebuild optimizer.
-            parameters (any, optional): Trainable parameters of the model (required for PyTorch).
-            **kwargs: Kwargs to pass to optimizer
-
-        """
-        self.__call__(force_rebuild=force_rebuild, parameters=parameters, **kwargs)
-
-    # ==========================================
-    #   State/Config Management Methods
-    # ==========================================
-    def get_config(self) -> dict[str, Any]:
-        return {
-            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
-            "name": self.name,
-            "backend": str(self.backend.value),
-            "opt_kwargs": {
-                **self.opt_kwargs,
-                "model_parameters": self.parameters,
-            },
-        }
-
-    @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "Optimizer":
-        return cls(name=config["name"], backend=Backend(config["backend"]), **config["opt_kwargs"])
+            raise BackendNotSupportedError(backend=self._backend, method="Optimzer.__call__()")
 
     # ==========================================
     #   Error Checking Methods
@@ -151,29 +198,47 @@ class Optimizer:
         """
         self._check_optimizer()
 
-        if self.backend == Backend.TORCH:
-            self.optimizer.step()
+        if self._backend == Backend.TORCH:
+            self.instance.step()
 
-        elif self.backend == Backend.TENSORFLOW:
+        elif self._backend == Backend.TENSORFLOW:
             if grads is None or variables is None:
                 raise ValueError(
                     "Tensorflow backend requires both `grads` and `variables` to be set in Optimizer.step()"
                 )
-            self.optimizer.apply_gradients(zip(grads, variables, strict=True))
+            self.instance.apply_gradients(zip(grads, variables, strict=True))
 
         else:
-            raise BackendNotSupportedError(backend=self.backend, method="Optimizer.step()")
+            raise BackendNotSupportedError(backend=self._backend, method="Optimizer.step()")
 
     def zero_grad(self):
         """Resets the optimizer gradients."""
         self._check_optimizer()
 
-        if self.backend == Backend.TORCH:
-            self.optimizer.zero_grad()
+        if self._backend == Backend.TORCH:
+            self.instance.zero_grad()
 
-        elif self.backend == Backend.TENSORFLOW:
-            for var in self.optimizer.variables():
+        elif self._backend == Backend.TENSORFLOW:
+            for var in self.instance.variables():
                 var.assign(tf.zeros_like(var))
 
         else:
-            raise BackendNotSupportedError(backend=self.backend, method="Optimizer.zero_grad()")
+            raise BackendNotSupportedError(backend=self._backend, method="Optimizer.zero_grad()")
+
+    # # ==========================================
+    # #   State/Config Management Methods
+    # # ==========================================
+    # def get_config(self) -> dict[str, Any]:
+    #     return {
+    #         "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+    #         "name": self.name,
+    #         "backend": str(self.backend.value),
+    #         "opt_kwargs": {
+    #             **self.opt_kwargs,
+    #             "model_parameters": self.parameters,
+    #         },
+    #     }
+
+    # @classmethod
+    # def from_config(cls, config: dict[str, Any]) -> "Optimizer":
+    #     return cls(name=config["name"], backend=Backend(config["backend"]), **config["opt_kwargs"])

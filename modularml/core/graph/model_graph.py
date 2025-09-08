@@ -368,9 +368,11 @@ class ModelGraph:
 
         # Ensure all stages have the same backend
         else:
-            for label, stage in self._nodes_req_opt.items():
+            used_backends = []
+            for label, node in self._nodes_req_opt.items():
+                used_backends.append(node.backend)
                 # Overwrite existing optimizers at stage-level (and warn)
-                if stage._optimizer is not None:
+                if node._optimizer is not None:
                     warnings.warn(
                         (
                             f"Optimizer were provided to ModelGraph and an underlying ModelStage (`{label}`). "
@@ -379,16 +381,16 @@ class ModelGraph:
                         category=UserWarning,
                         stacklevel=2,
                     )
-                    stage._optimizer = None
+                    node._optimizer = None
 
-                # Check for matching backend
-                if stage.backend != self._optimizer.backend:
-                    msg = (
-                        f"Optimizer backend (`{self._optimizer.backend.value}`) doesn't match the backend for `{label}`. "
-                        f"A global optimizer can only be provided to ModelGraph when "
-                        f"all underlying ModelStages have a matching backend. "
-                    )
-                    raise RuntimeError(msg)
+            # Warn if using mixed backend: not thoroughly tested
+            if len(set(used_backends)) > 1:
+                msg = (
+                    "A global optimizer was provided to ModelGraph, but the underlying stages have "
+                    "differing backends. All backends must match to use a single optimizer."
+                )
+                raise RuntimeError(msg)
+            self._optimizer.backend = used_backends[0]
 
     # ==========================================
     # ModelGraph Node Modifiers
@@ -941,7 +943,10 @@ class ModelGraph:
         total_opt_loss = 0.0
         total_non_opt_loss = 0.0
 
-        for lbl in self.connected_node_labels:
+        for lbl in self._sorted_node_labels:
+            if lbl in self.source_node_labels:
+                continue
+
             node = self._nodes[lbl]
             if not isinstance(node, ComputationNode):
                 msg = f"Training can only be perform on ComputationNodes. Received: {node}."
@@ -1024,7 +1029,10 @@ class ModelGraph:
         non_opt_losses: list[LossResult] = []
 
         # Forward pass + collect outputs
-        for lbl in self.connected_node_labels:
+        for lbl in self._sorted_node_labels:
+            if lbl in self.source_node_labels:
+                continue
+
             node = self._nodes[lbl]
             node_losses = losses.get(lbl)
             if not isinstance(node, ComputationNode):
@@ -1090,7 +1098,7 @@ class ModelGraph:
             total_opt_loss=float(total_opt_loss),
             total_non_opt_loss=float(total_non_opt_loss),
             all_loss_results=loss_cache,
-            stage_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
+            node_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
         )
 
     def _train_step_tensorflow(
@@ -1130,7 +1138,10 @@ class ModelGraph:
 
         with tf.GradientTape(persistent=True) as tape:
             # Forward pass + collect outputs
-            for lbl in self.connected_node_labels:
+            for lbl in self._sorted_node_labels:
+                if lbl in self.source_node_labels:
+                    continue
+
                 node = self._nodes[lbl]
                 node_losses = losses.get(lbl)
                 if not isinstance(node, ComputationNode):
@@ -1197,7 +1208,7 @@ class ModelGraph:
             total_opt_loss=float(total_opt_loss),
             total_non_opt_loss=float(total_non_opt_loss),
             all_loss_results=loss_cache,
-            stage_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
+            node_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
         )
 
     def _graphwise_train_step(
@@ -1313,6 +1324,9 @@ class ModelGraph:
 
         # Go through stages in sorted order
         for lbl in self._sorted_node_labels:
+            if lbl in self.source_node_labels:
+                continue
+
             node = self._nodes[lbl]
             node_losses = losses.get(lbl)
             if not isinstance(node, EvaluableMixin):
@@ -1335,7 +1349,7 @@ class ModelGraph:
             total_opt_loss=total_opt_loss,
             total_non_opt_loss=total_non_opt_loss,
             all_loss_results=loss_cache,
-            stage_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
+            node_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
         )
 
     # ==========================================

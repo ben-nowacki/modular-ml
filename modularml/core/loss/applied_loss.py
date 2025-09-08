@@ -193,9 +193,9 @@ class AppliedLoss:
                 sample_coll = batch_input[node].role_samples[role]
                 sample_weights[k] = batch_input[node].role_sample_weights[role]
                 if attribute == "features":
-                    kwargs[k] = sample_coll.get_all_features(format=get_data_format_for_backend(backend=self.backend))
+                    kwargs[k] = sample_coll.get_all_features(fmt=get_data_format_for_backend(backend=self.backend))
                 elif attribute == "targets":
-                    kwargs[k] = sample_coll.get_all_targets(format=get_data_format_for_backend(backend=self.backend))
+                    kwargs[k] = sample_coll.get_all_targets(fmt=get_data_format_for_backend(backend=self.backend))
                 else:
                     msg = f"Invalid AppliedLoss input attribute for batch_input: {attribute}"
                     raise ValueError(msg)
