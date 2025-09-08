@@ -81,7 +81,7 @@ class GraphNodeError(ModularMLError):
 
 
 class GraphNodeInputError(GraphNodeError):
-    def __init__(self, message: str = None):
+    def __init__(self, message: str | None = None):
         if message is None:
             message = "Error with GraphNode input."
         super().__init__(message)

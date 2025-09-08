@@ -11,6 +11,7 @@ class Backend(str, Enum):
         TENSORFLOW (str): TensorFlow backend (tf.keras.Model, tf.Tensor).
         SCIKIT (str): scikit-learn backend (BaseEstimator).
         NONE (str): No backend detected or unsupported object type.
+
     """
 
     TORCH = "torch"
@@ -29,6 +30,7 @@ def backend_requires_optimizer(backend: Backend) -> bool:
     Returns:
         bool: True if the backend requires an optimizer (e.g., PyTorch, TensorFlow),
               False otherwise (e.g., scikit-learn).
+
     """
     return backend in [Backend.TORCH, Backend.TENSORFLOW]
 

@@ -1,24 +1,13 @@
-from typing import Any, Literal
+from enum import Enum
+from typing import Any
 
 import numpy as np
 import pandas as pd
-
-from modularml.core.data_structures.data import Data
-
-try:
-    import torch
-except ImportError:
-    torch = None
-
-try:
-    import tensorflow as tf
-except ImportError:
-    tf = None
-
-
-from enum import Enum
+import tensorflow as tf
+import torch
 
 from modularml.utils.backend import Backend
+from modularml.utils.error_handling import ErrorMode
 
 
 class DataFormat(Enum):
@@ -64,10 +53,7 @@ def normalize_format(fmt: str | DataFormat) -> DataFormat:
     return _FORMAT_ALIASES[fmt]
 
 
-T_ERRORS = Literal["raise", "coerce", "ignore"]
-
-
-def to_python(obj):
+def to_python(obj):  # noqa: PLR0911
     """
     Recursively converts an object into its native Python equivalent.
 
@@ -115,14 +101,14 @@ def to_python(obj):
         return {k: to_python(v) for k, v in obj.items()}
     if isinstance(obj, list | tuple):
         return type(obj)(to_python(v) for v in obj)
-    if isinstance(obj, Data):
+    if hasattr(obj, "value"):
         return to_python(obj.value)
 
     # Base case
     return obj
 
 
-def to_list(obj: Any, errors: T_ERRORS = "raise"):
+def to_list(obj: Any, errors: ErrorMode = ErrorMode.RAISE):  # noqa: PLR0911
     """
     Converts any object into a Python list.
 
@@ -138,7 +124,7 @@ def to_list(obj: Any, errors: T_ERRORS = "raise"):
 
     """
     # If we're ignoring incompatible types, leave dicts unchanged directly
-    if errors == "ignore" and isinstance(obj, dict):
+    if errors == ErrorMode.IGNORE and isinstance(obj, dict):
         return obj
 
     py_obj = to_python(obj)
@@ -153,28 +139,28 @@ def to_list(obj: Any, errors: T_ERRORS = "raise"):
 
     # Dicts aren't naturally convertible to lists
     if isinstance(py_obj, dict):
-        if errors == "raise":
+        if errors == ErrorMode.RAISE:
             raise TypeError("Cannot convert dict to list. Use DICT format instead.")
-        if errors == "coerce":
+        if errors == ErrorMode.COERCE:
             # Convert dict values into a list of values
             return list(py_obj.values())
-        if errors == "ignore":
+        if errors == ErrorMode.IGNORE:
             return py_obj
 
     # Fallback: try NumPy coercion if possible
     try:
         return np.asarray(py_obj).tolist()
     except Exception as e:
-        if errors == "raise":
+        if errors == ErrorMode.RAISE:
             msg = f"Cannot convert object of type {type(py_obj)} to list."
             raise TypeError(msg) from e
-        if errors == "ignore":
+        if errors == ErrorMode.IGNORE:
             return py_obj
-        if errors == "coerce":
+        if errors == ErrorMode.COERCE:
             return [py_obj]
 
 
-def to_numpy(obj: Any, errors: T_ERRORS = "raise") -> np.ndarray:
+def to_numpy(obj: Any, errors: ErrorMode = ErrorMode.RAISE) -> np.ndarray:  # noqa: PLR0911
     """Converts any object into a NumPy array."""
     # If it's already a numpy array, just return
     if isinstance(obj, np.ndarray):
@@ -184,11 +170,11 @@ def to_numpy(obj: Any, errors: T_ERRORS = "raise") -> np.ndarray:
 
     # Dicts must use DICT_NUMPY format unless coerced
     if isinstance(py_obj, dict):
-        if errors == "raise":
+        if errors == ErrorMode.RAISE:
             raise TypeError("Cannot convert dict directly to NumPy array. Use DICT_NUMPY instead.")
-        elif errors == "coerce":
+        if errors == ErrorMode.COERCE:
             return np.array(list(py_obj.values()))
-        elif errors == "ignore":
+        if errors == ErrorMode.IGNORE:
             return py_obj
 
     # Sequences (lists, tuples) -> convert directly
@@ -197,12 +183,12 @@ def to_numpy(obj: Any, errors: T_ERRORS = "raise") -> np.ndarray:
             return np.asarray(py_obj)
 
         except Exception as e:
-            if errors == "raise":
+            if errors == ErrorMode.RAISE:
                 msg = f"Cannot convert sequence of type {type(py_obj)} to NumPy array."
                 raise TypeError(msg) from e
-            if errors == "ignore":
+            if errors == ErrorMode.IGNORE:
                 return py_obj
-            if errors == "coerce":
+            if errors == ErrorMode.COERCE:
                 return np.array([py_obj])
 
     # Scalars -> wrap into a 0-D array
@@ -210,17 +196,17 @@ def to_numpy(obj: Any, errors: T_ERRORS = "raise") -> np.ndarray:
         return np.asarray(py_obj)
 
     # Unsupported type
-    if errors == "raise":
+    if errors == ErrorMode.RAISE:
         msg = f"Cannot convert object of type {type(py_obj)} to NumPy array."
         raise TypeError(msg)
-    if errors == "ignore":
+    if errors == ErrorMode.IGNORE:
         return py_obj
-    if errors == "coerce":
+    if errors == ErrorMode.COERCE:
         return np.array([py_obj])
     return None
 
 
-def to_torch(obj: Any, errors: T_ERRORS = "raise") -> "torch.Tensor":  # type: ignore
+def to_torch(obj: Any, errors: ErrorMode = ErrorMode.RAISE) -> "torch.Tensor":
     """Converts any object into a PyTorch tensor."""
     if torch is None:
         raise ImportError("PyTorch is not installed.")
@@ -233,16 +219,16 @@ def to_torch(obj: Any, errors: T_ERRORS = "raise") -> "torch.Tensor":  # type: i
     try:
         return torch.as_tensor(np.asarray(py_obj), dtype=torch.float32)
     except Exception as e:
-        if errors == "raise":
+        if errors == ErrorMode.RAISE:
             msg = f"Cannot convert object of type {type(py_obj)} to Torch tensor."
             raise TypeError(msg) from e
-        if errors == "ignore":
+        if errors == ErrorMode.IGNORE:
             return py_obj
-        if errors == "coerce":
+        if errors == ErrorMode.COERCE:
             return torch.as_tensor(np.asarray([py_obj]), dtype=torch.float32)
 
 
-def to_tensorflow(obj: Any, errors: T_ERRORS = "raise") -> "tf.Tensor":  # type: ignore
+def to_tensorflow(obj: Any, errors: ErrorMode = ErrorMode.RAISE) -> "tf.Tensor":
     """Converts any object into a TensorFlow tensor."""
     if tf is None:
         raise ImportError("TensorFlow is not installed.")
@@ -255,18 +241,18 @@ def to_tensorflow(obj: Any, errors: T_ERRORS = "raise") -> "tf.Tensor":  # type:
     try:
         return tf.convert_to_tensor(np.asarray(py_obj), dtype=tf.float32)
     except Exception as e:
-        if errors == "raise":
+        if errors == ErrorMode.RAISE:
             msg = f"Cannot convert object of type {type(py_obj)} to TensorFlow tensor."
             raise TypeError(msg) from e
-        if errors == "ignore":
+        if errors == ErrorMode.IGNORE:
             return py_obj
-        if errors == "coerce":
+        if errors == ErrorMode.COERCE:
             return tf.convert_to_tensor(np.asarray([py_obj]), dtype=tf.float32)
 
 
-def format_has_shape(format: DataFormat) -> bool:
+def format_has_shape(fmt: DataFormat) -> bool:
     """Returns True if the specified DataFormat has a shape attribute."""
-    return format in [DataFormat.NUMPY, DataFormat.TORCH, DataFormat.TENSORFLOW]
+    return fmt in [DataFormat.NUMPY, DataFormat.TORCH, DataFormat.TENSORFLOW]
 
 
 def enforce_numpy_shape(arr: np.ndarray, target_shape: tuple[int, ...]) -> np.ndarray:
@@ -276,27 +262,27 @@ def enforce_numpy_shape(arr: np.ndarray, target_shape: tuple[int, ...]) -> np.nd
     return arr
 
 
-def convert_dict_to_format(
+def convert_dict_to_format(  # noqa: PLR0911
     data: dict[str, Any],
-    format: str | DataFormat,
-    errors: T_ERRORS = "raise",
+    fmt: str | DataFormat,
+    errors: ErrorMode = ErrorMode.RAISE,
 ) -> Any:
     """
     Converts a dictionary of data arrays into the specified format.
 
     Args:
         data: Dict of arrays, lists, scalars, or tensors.
-        format: Target data format to convert into.
+        fmt: Target data format to convert into.
         errors: How to handle incompatible types:
-            - "raise": Raise an error when conversion fails.
-            - "coerce": Force conversion where possible.
-            - "ignore": Leave unconvertible objects unchanged.
+            - ErrorMode.RAISE: Raise an error when conversion fails.
+            - ErrorMode.COERCE: Force conversion where possible.
+            - ErrorMode.IGNORE: Leave unconvertible objects unchanged.
 
     Returns:
         Converted object.
 
     """
-    fmt = normalize_format(format)
+    fmt = normalize_format(fmt)
 
     if fmt == DataFormat.DICT:
         return to_python(data)
@@ -346,27 +332,27 @@ def convert_dict_to_format(
 
 def convert_to_format(
     data: Any,
-    format: str | DataFormat,
-    errors: T_ERRORS = "raise",
+    fmt: str | DataFormat,
+    errors: ErrorMode = ErrorMode.RAISE,
 ) -> Any:
     """
     Converts a data object into the specified format.
 
     Args:
         data: Dicts, arrays, lists, scalars, or tensors.
-        format: Target data format to convert into.
+        fmt: Target data format to convert into.
         errors: How to handle incompatible types:
-            - "raise": Raise an error when conversion fails.
-            - "coerce": Force conversion where possible.
-            - "ignore": Leave unconvertible objects unchanged.
+            - ErrorMode.RAISE: Raise an error when conversion fails.
+            - ErrorMode.COERCE: Force conversion where possible.
+            - ErrorMode.IGNORE: Leave unconvertible objects unchanged.
 
     Returns:
         Converted object.
 
     """
-    fmt = normalize_format(format)
+    fmt = normalize_format(fmt)
     if isinstance(data, dict):
-        return convert_dict_to_format(data=data, format=format, errors=errors)
+        return convert_dict_to_format(data=data, fmt=fmt, errors=errors)
 
     if fmt == DataFormat.NUMPY:
         return to_numpy(data, errors=errors)
