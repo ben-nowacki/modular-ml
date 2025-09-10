@@ -121,6 +121,10 @@ class Experiment:
         if not phase.is_resolved:
             _ = phase.resolve_loss_inputs_and_roles(self.graph)
 
+        # Determine frozen vs trainable nodes:
+        frozen_nodes = phase.get_frozen_nodes()
+        trainable_nodes = set(self.graph._nodes_req_opt.keys()).difference(set(frozen_nodes))
+
         print(f"Executing TrainingPhase: {phase.label}")
         print("  > Training")
         for epoch in range(phase.n_epochs):
@@ -138,7 +142,7 @@ class Experiment:
                 step_res = self.graph.train_step(
                     batch_input=batch,
                     losses=phase._loss_mapping,
-                    trainable_stages=phase.get_trainable_stages(),
+                    trainable_stages=trainable_nodes,
                 )
                 total_loss += step_res.total_loss
                 total_opt_loss += step_res.total_opt_loss

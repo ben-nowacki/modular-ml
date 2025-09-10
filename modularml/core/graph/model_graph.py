@@ -91,7 +91,8 @@ class ModelGraph:
         # 1. all optimizer-requiring stages have same backend
         # 2. warn if stages have their own optimizer (will be overwritten)
         self._optimizer = optimizer
-        self._nodes_req_opt: dict[str, ModelStage] | None = None
+        self._nodes_req_opt: dict[str, ModelStage] | None = None  # all nodes that require an optimizer
+        self._opt_built_from_nodes: set[str] = set()  # nodes used in the current training_phase to build optimizer
         self._validate_optimizer()
 
         self._built = False
@@ -709,6 +710,34 @@ class ModelGraph:
             input_shapes.append(out_shape)
         return input_shapes
 
+    def _build_optimizer(self, nodes_to_build_optimizer_with: list[str]):
+        # Build global optimizer if defined
+        if self._optimizer is not None:
+            if self._optimizer.backend == Backend.TORCH:
+                # Collect model parameters from nodes to build optimizer with
+                all_model_params = []
+                for node_lbl in nodes_to_build_optimizer_with:
+                    all_model_params.extend(list(self._nodes[node_lbl]._model.parameters()))
+
+                # Build optimizer will all parameters
+                self._optimizer.build(force_rebuild=True, parameters=all_model_params)
+
+            elif self._optimizer.backend == Backend.TENSORFLOW:
+                self._optimizer.build(force_rebuild=False)
+
+            elif self._optimizer.backend == Backend.SCIKIT:
+                # Scikit-learn optimizers are typically fit internally
+                pass
+
+            else:
+                raise BackendNotSupportedError(
+                    backend=self._optimizer.backend,
+                    message="Unknown backend for optimizer building",
+                )
+
+        # Update record of nodes used to construct this optimizer
+        self._opt_built_from_nodes = set(nodes_to_build_optimizer_with)
+
     def build_all(self, *, reset: bool = False) -> None:
         """
         Build all ModelStages contained in this ModelGraph.
@@ -796,29 +825,8 @@ class ModelGraph:
                 output: BatchOutput = node.forward(node.get_input_batch(cache))
                 cache[lbl] = output
 
-        # Build global optimizer if defined
-        if self._optimizer is not None:
-            if self._optimizer.backend == Backend.TORCH:
-                # Collect model parameters from all stages
-                all_model_params = []
-                for stage in self._nodes_req_opt.values():
-                    all_model_params.extend(list(stage._model.parameters()))
-
-                # Build optimizer will all parameters
-                self._optimizer.build(force_rebuild=True, parameters=all_model_params)
-
-            elif self._optimizer.backend == Backend.TENSORFLOW:
-                self._optimizer.build(force_rebuild=False)
-
-            elif self._optimizer.backend == Backend.SCIKIT:
-                # Scikit-learn optimizers are typically fit internally
-                pass
-
-            else:
-                raise BackendNotSupportedError(
-                    backend=self._optimizer.backend,
-                    message="Unknown backend for optimizer building",
-                )
+        # Build optimizer with all optimizable nodes
+        self._build_optimizer(self._nodes_req_opt)
 
         self._built = True
 
@@ -996,6 +1004,7 @@ class ModelGraph:
         self,
         batch_input: dict[str, Batch],
         losses: dict[str, list[AppliedLoss]],
+        nodes_to_iterate_over: list[str],
     ) -> StepResult:
         """
         Perform full-graph optimization using a PyTorch-based optimizer.
@@ -1006,6 +1015,7 @@ class ModelGraph:
         Args:
             batch_input (dict[str, Batch]): Input batches from FeatureSets.
             losses (dict[str, list[AppliedLoss]]): Loss functions to apply per stage.
+            nodes_to_iterate_over (list[str]): A list of nodes defining the minimum subgraph needing to be trained.
 
         Returns:
             StepResult: Aggregated loss values, stage outputs, and gradients.
@@ -1029,7 +1039,7 @@ class ModelGraph:
         non_opt_losses: list[LossResult] = []
 
         # Forward pass + collect outputs
-        for lbl in self._sorted_node_labels:
+        for lbl in nodes_to_iterate_over:
             if lbl in self.source_node_labels:
                 continue
 
@@ -1041,7 +1051,7 @@ class ModelGraph:
 
             if isinstance(node, TrainableMixin) and not node.freeze:
                 if not backend_requires_optimizer(node.backend):
-                    step_res = node.train_step(batch_input=batch_input, losses=node_losses)
+                    step_res = node.train_step(batch_input=cache, losses=node_losses)
                     cache[lbl] = step_res.node_outputs[lbl]
                     loss_cache[lbl].extend(step_res.all_loss_results[lbl])
                     non_opt_losses.extend(step_res.all_loss_results[lbl])
@@ -1050,14 +1060,15 @@ class ModelGraph:
                 # Perform manual train + loss comp (to ensure no autograd breakage)
                 node.model.train()
                 model_output: BatchOutput = node.forward(node.get_input_batch(cache))
-                cache[lbl] = model_output
 
                 # Compute stage loss (store entire LossResult for later computation)
                 if node_losses is not None:
                     for loss in node_losses:
-                        loss_res = loss.compute(batch_input=batch_input, model_outputs={lbl: model_output})
+                        loss_res = loss.compute(batch_input=cache, model_outputs={lbl: model_output})
                         loss_cache[lbl].append(loss_res)
                         opt_losses.append(loss_res)
+
+                cache[lbl] = model_output
                 continue
 
             if isinstance(node, EvaluableMixin):
@@ -1069,20 +1080,27 @@ class ModelGraph:
                     )
 
                 node.model.eval()
-                step_res = node.eval_step(batch_input=batch_input, losses=node_losses)
+                step_res = node.eval_step(batch_input=cache, losses=node_losses)
                 cache[lbl] = step_res.node_outputs[lbl]
                 loss_cache[lbl].extend(step_res.all_loss_results[lbl])
                 non_opt_losses.extend(step_res.all_loss_results[lbl])
                 continue
 
-            msg = f"Node `{lbl}` is not trainable or evaluable."
-            raise TypeError(msg)
+            # If not a Trainable/Evaluable node (ie, its a MergeStage)
+            # just perform a forward pass and collect outputs
+            model_output: BatchOutput = node.forward(node.get_input_batch(cache))
+            cache[lbl] = model_output
 
         # Perform optimization stepping
         if not opt_losses:
             raise RuntimeError("Optimizer stepping cannot be performed because no losses were applied.")
+
         total_opt_loss = torch.stack([lr.value for lr in opt_losses]).sum()
         total_opt_loss.backward()
+        # for lbl in self._opt_built_from_nodes:
+        #     node = self._nodes[lbl]
+        #     for name, param in node._model.named_parameters():
+        #         print(f"{lbl}.{name} grad: {param.grad.norm().item() if param.grad is not None else 'None'}")
         self._optimizer.step()
 
         # Convert total loss to float now that gradient tracking is done
@@ -1105,6 +1123,7 @@ class ModelGraph:
         self,
         batch_input: dict[str, Batch],
         losses: dict[str, list[AppliedLoss]],
+        nodes_to_iterate_over: list[str],
     ) -> StepResult:
         """
         Perform full-graph optimization using a TensorFlow-based optimizer.
@@ -1115,6 +1134,7 @@ class ModelGraph:
         Args:
             batch_input (dict[str, Batch]): Input batches keyed by FeatureSet.
             losses (dict[str, list[AppliedLoss]]): Loss functions to compute.
+            nodes_to_iterate_over (list[str]): A list of nodes defining the minimum subgraph needing to be trained.
 
         Returns:
             StepResult: Object containing loss values and model outputs.
@@ -1138,7 +1158,7 @@ class ModelGraph:
 
         with tf.GradientTape(persistent=True) as tape:
             # Forward pass + collect outputs
-            for lbl in self._sorted_node_labels:
+            for lbl in nodes_to_iterate_over:
                 if lbl in self.source_node_labels:
                     continue
 
@@ -1150,7 +1170,7 @@ class ModelGraph:
 
                 if isinstance(node, TrainableMixin) and not node.freeze:
                     if not backend_requires_optimizer(node.backend):
-                        step_res = node.train_step(batch_input=batch_input, losses=node_losses)
+                        step_res = node.train_step(batch_input=cache, losses=node_losses)
                         cache[lbl] = step_res.node_outputs[lbl]
                         loss_cache[lbl].extend(step_res.all_loss_results[lbl])
                         non_opt_losses.extend(step_res.all_loss_results[lbl])
@@ -1158,7 +1178,6 @@ class ModelGraph:
 
                     # Perform manual train + loss comp
                     model_output: BatchOutput = node.forward(node.get_input_batch(cache), training=True)
-                    cache[lbl] = model_output
 
                     # Track trainable variables for this stage
                     trainable_vars.extend(node.model.trainable_variables)
@@ -1166,9 +1185,11 @@ class ModelGraph:
                     # Compute stage loss (store entire LossResult for later computation)
                     if node_losses is not None:
                         for loss in node_losses:
-                            loss_res = loss.compute(batch_input=batch_input, model_outputs={lbl: model_output})
+                            loss_res = loss.compute(batch_input=cache, model_outputs={lbl: model_output})
                             loss_cache[lbl].append(loss_res)
                             opt_losses.append(loss_res)
+
+                    cache[lbl] = model_output
                     continue
 
                 if isinstance(node, EvaluableMixin):
@@ -1180,14 +1201,16 @@ class ModelGraph:
                         )
 
                     node.model.eval()
-                    step_res = node.eval_step(batch_input=batch_input, losses=node_losses)
+                    step_res = node.eval_step(batch_input=cache, losses=node_losses)
                     cache[lbl] = step_res.node_outputs[lbl]
                     loss_cache[lbl].extend(step_res.all_loss_results[lbl])
                     non_opt_losses.extend(step_res.all_loss_results[lbl])
                     continue
 
-                msg = f"Node `{lbl}` is not trainable or evaluable."
-                raise TypeError(msg)
+                # If not a Trainable/Evaluable node (ie, its a MergeStage)
+                # just perform a forward pass and collect outputs
+                model_output: BatchOutput = node.forward(node.get_input_batch(cache))
+                cache[lbl] = model_output
 
         # Perform optimization stepping
         total_opt_loss = tf.add_n([lr.value for lr in opt_losses])
@@ -1215,6 +1238,7 @@ class ModelGraph:
         self,
         batch_input: dict[str, Batch],
         losses: dict[str, list[AppliedLoss]],
+        nodes_to_iterate_over: list[str],
     ) -> StepResult:
         """
         Perform a graph-level optimization step.
@@ -1226,6 +1250,7 @@ class ModelGraph:
         Args:
             batch_input (dict[str, Batch]): Input data for the graph.
             losses (dict[str, list[AppliedLoss]]): Loss functions to apply.
+            nodes_to_iterate_over (list[str]): A list of nodes defining the minimum subgraph needing to be trained.
 
         Returns:
             StepResult: Contains total loss, individual losses, and outputs.
@@ -1235,13 +1260,41 @@ class ModelGraph:
 
         """
         if self._optimizer.backend == Backend.TORCH:
-            return self._train_step_torch(batch_input=batch_input, losses=losses)
+            return self._train_step_torch(
+                batch_input=batch_input,
+                losses=losses,
+                nodes_to_iterate_over=nodes_to_iterate_over,
+            )
 
         if self._optimizer.backend == Backend.TENSORFLOW:
-            return self._train_step_tensorflow(batch_input=batch_input, losses=losses)
+            return self._train_step_tensorflow(
+                batch_input=batch_input,
+                losses=losses,
+                nodes_to_iterate_over=nodes_to_iterate_over,
+            )
 
         msg = f"Unknown backend for optimization: {self._optimizer.backend}"
         raise ValueError(msg)
+
+    def _rebuild_optimizer_if_needed(self, trainable_stages: list[str]):
+        """Rebuilds the graph-level optimizer only if the set of trainable stages has changed."""
+        stage_set = set(trainable_stages)
+
+        # Only rebuild if the trainable set has changed
+        if stage_set == self._opt_built_from_nodes:
+            return
+        msg = (
+            "The set of trainable nodes in ModelGraph have changed. "
+            f"The optimizer is being rebuilt for nodes: {stage_set}"
+        )
+        warnings.warn(
+            message=msg,
+            category=UserWarning,
+            stacklevel=2,
+        )
+
+        # Build optimizer with optimizable nodes in this training phase
+        self._build_optimizer(stage_set)
 
     def train_step(
         self,
@@ -1276,17 +1329,37 @@ class ModelGraph:
             if isinstance(node, TrainableMixin):
                 node.freeze = node_lbl not in trainable_stages
 
+        # Determine which nodes actually need to be iterated over
+        nodes_to_iterate_over: set[str] = set()
+        # region: For each trainable stage, add all its upstream nodes (and itself) to the list
+        for stage in trainable_stages:
+            if stage not in self._sorted_node_labels:
+                msg = f"Trainable stage '{stage}' not found in graph."
+                raise ValueError(msg)
+
+            idx = self._sorted_node_labels.index(stage)
+            # Add all nodes up to and including this one
+            nodes_to_iterate_over.update(self._sorted_node_labels[: idx + 1])
+        # Preserve topological order by filtering self._sorted_node_labels
+        nodes_to_iterate_over = [lbl for lbl in self._sorted_node_labels if lbl in nodes_to_iterate_over]
+        # endregion
+
         # Case 1: Graph-level training
         if self._optimizer is not None:
+            # Rebuild global optimizer (only if set of trainable stages changed)
+            self._rebuild_optimizer_if_needed(trainable_stages=trainable_stages)
+            # Run graphwise training logic
             return self._graphwise_train_step(
                 batch_input=batch_input,
                 losses=losses,
+                nodes_to_iterate_over=nodes_to_iterate_over,
             )
 
         # Case 2: Stage-level training
         return self._stagewise_train_step(
             batch_input=batch_input,
             losses=losses,
+            nodes_to_iterate_over=nodes_to_iterate_over,
         )
 
     def eval_step(
@@ -1329,20 +1402,27 @@ class ModelGraph:
 
             node = self._nodes[lbl]
             node_losses = losses.get(lbl)
-            if not isinstance(node, EvaluableMixin):
-                msg = f"Evaluation can only be perform on EvaluableMixin classes. Received: {node}."
+            if isinstance(node, EvaluableMixin):
+                # Forward pass + loss
+                step_res = node.eval_step(batch_input=cache, losses=node_losses)
+
+                # Cache stage outputs
+                cache[lbl] = step_res.node_outputs[lbl]
+                loss_cache[lbl] = step_res.all_loss_results[lbl]
+
+                total_loss += step_res.total_loss
+                total_opt_loss += step_res.total_opt_loss
+                total_non_opt_loss += step_res.total_non_opt_loss
+
+            elif isinstance(node, ComputationNode):
+                # If not a Evaluable node (ie, its a MergeStage)
+                # just perform a forward pass and collect outputs
+                model_output: BatchOutput = node.forward(node.get_input_batch(cache))
+                cache[lbl] = model_output
+
+            else:
+                msg = f"Evaluation can only be perform on ComputationNode subclasses. Received: {node}."
                 raise TypeError(msg)
-
-            # Forward pass + loss
-            step_res = node.eval_step(batch_input=cache, losses=node_losses)
-
-            # Cache stage outputs
-            cache[lbl] = step_res.node_outputs[lbl]
-            loss_cache[lbl] = step_res.all_loss_results[lbl]
-
-            total_loss += step_res.total_loss
-            total_opt_loss += step_res.total_opt_loss
-            total_non_opt_loss += step_res.total_non_opt_loss
 
         return StepResult(
             total_loss=total_loss,
