@@ -195,7 +195,13 @@ class BatchOutput:
             self._target_shape = None
 
         if self.tags is not None:
-            t_shapes = list({self.tags[role].shape for role in self.tags})
+            t_shapes = []
+            for role in self.tags:
+                if isinstance(self.tags[role], dict):
+                    t_shapes.extend([self.tags[role][k].shape for k in self.tags[role]])
+                else:
+                    t_shapes.append(self.tags[role].shape)
+            t_shapes = list(set(t_shapes))
             if len(t_shapes) != 1:
                 msg = f"Inconsistent tag shapes across Batch roles: {t_shapes}."
                 raise ValueError(msg)

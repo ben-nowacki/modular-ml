@@ -11,6 +11,8 @@ from modularml.core.data_structures.step_result import StepResult
 from modularml.core.graph.computation_node import ComputationNode
 from modularml.core.graph.graph_node import GraphNode
 from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
+from modularml.core.loss.loss_collection import LossCollection
+from modularml.core.loss.loss_record import LossRecord
 from modularml.models.wrappers import wrap_model
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import (
@@ -26,7 +28,7 @@ from modularml.utils.exceptions import (
 
 if TYPE_CHECKING:
     from modularml.core.loss.applied_loss import AppliedLoss
-    from modularml.core.loss.loss_result import LossResult
+    from modularml.core.loss.loss_record import LossResult
     from modularml.core.optimizer.optimizer import Optimizer
     from modularml.models.base import BaseModel
 
@@ -191,6 +193,8 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         self,
         input_shapes: list[tuple[int, ...]] | None = None,
         output_shapes: list[tuple[int, ...]] | None = None,
+        *,
+        force: bool = False,
     ):
         """
         Build the ModelStage by initializing the underlying BaseModel and its optimizer.
@@ -208,6 +212,9 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 The expected output shapes of this stage. If provided, it must contain exactly
                 one element. If not provided, the BaseModel must be capable of inferring it
                 internally or during construction.
+                
+            force (bool): If model is already instantiated it will not be re-instantiated unless \
+                `force=True`. Defaults to False.
 
         Raises:
             ValueError: If more than one input shape is provided (ModelStage supports a single input).
@@ -235,8 +242,8 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         output_shape = output_shapes[0] if output_shapes is not None else None
 
         # Build underlying BaseModel if not already built
-        if not self._model.is_built:
-            self._model.build(input_shape=input_shape, output_shape=output_shape)
+        if (not self._model.is_built) or force:
+            self._model.build(input_shape=input_shape, output_shape=output_shape, force=force)
 
         # Build optimizer if defined
         if self._optimizer is not None:
@@ -285,6 +292,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             all_outputs = {}
             all_targets = {}
             sample_uuids = {}
+            tags = {}
             for role, samples in x.role_samples.items():
                 # Format features for this backend
                 features = samples.get_all_features(
@@ -293,6 +301,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 all_outputs[role] = self._model(features, **kwargs)
                 all_targets[role] = samples.get_all_targets(fmt=DataFormat.NUMPY)
                 sample_uuids[role] = samples.sample_uuids
+                tags[role] = samples.get_all_tags(fmt=DataFormat.DICT_NUMPY)
 
             # In order to preserve auto-grad for pytorch, we cannot modify underlying
             # data format until after loss computation and optimizer stepping
@@ -300,11 +309,11 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 features=all_outputs,  # preserve backend-specific tensors
                 targets=all_targets,  # pass targets unmodified
                 sample_uuids=sample_uuids,
+                tags=tags,
             )
 
         if isinstance(x, BatchOutput):
             all_outputs = {}
-            sample_uuids = {}
             for role in x.available_roles:
                 # Format any-format to this backend (obj is unchanged if in correct format)
                 features = convert_to_format(
@@ -312,14 +321,14 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                     fmt=get_data_format_for_backend(self.backend),
                 )
                 all_outputs[role] = self._model(features, **kwargs)
-                sample_uuids[role] = x.sample_uuids[role]
 
             # In order to preserve auto-grad for pytorch, we cannot modify underlying
             # data format until after loss computation and optimizer stepping
             return BatchOutput(
                 features=all_outputs,  # preserve backend-specific tensors
                 targets=x.targets,  # pass targets unmodified
-                sample_uuids=sample_uuids,
+                sample_uuids=x.sample_uuids,
+                tags=x.tags,
             )
 
         if isinstance(x, Data):
@@ -500,40 +509,35 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         self._model.train()
         self._optimizer.zero_grad()
 
-        total_loss = 0
-        loss_results: list[LossResult] = []
+        loss_records: list[LossRecord] = []
         outputs: dict[str, BatchOutput] = {}
 
         # Forward pass
-        outputs: dict[str, BatchOutput] = {}
         outputs[self.label] = self.forward(self.get_input_batch(batch_input))
 
         # Compute losses
         if losses is not None:
             for loss in losses:
-                loss_res = loss.compute(batch_input=batch_input, model_outputs=outputs)
-                loss_results.append(loss_res)
-                total_loss += loss_res.value
+                weighted_raw_loss = loss.compute(batch_input=batch_input, model_outputs=outputs)
+                lr = LossRecord(
+                    value=weighted_raw_loss,
+                    label=loss.label,
+                    contributes_to_update=True,
+                )
+                loss_records.append(lr)
 
         # Backward + opt step
-        total_loss.backward()
+        lc = LossCollection(records=loss_records)
+        lc.trainable.backward()
         self._optimizer.step()
 
-        total_loss = total_loss.item() if hasattr(total_loss, "item") else total_loss
-
-        return StepResult(
-            total_loss=total_loss,
-            total_opt_loss=total_loss,
-            total_non_opt_loss=0.0,
-            all_loss_results={self.label: loss_results},
-            node_outputs=outputs,
-        )
+        return StepResult(losses=lc, node_outputs=outputs)
 
     def _train_step_tensorflow(
         self,
         batch_input: dict[str, Batch],
         losses: list[AppliedLoss],
-    ) -> LossResult:
+    ) -> StepResult:
         """
         Runs a training step using Tensorflow: forward, loss, backward, optimizer.
 
@@ -548,8 +552,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         # Zero optimizer gradients
         self._optimizer.zero_grad()
 
-        total_loss = 0
-        loss_results: list[LossResult] = []
+        loss_records: list[LossRecord] = []
         outputs: dict[str, BatchOutput] = {}
 
         # Track gradients over forward passes & loss computation
@@ -564,23 +567,20 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         # Compute losses
         if losses is not None:
             for loss in losses:
-                loss_res = loss.compute(batch_input=batch_input, model_outputs=outputs)
-                loss_results.append(loss_res)
-                total_loss += loss_res.value
+                weighted_raw_loss = loss.compute(batch_input=batch_input, model_outputs=outputs)
+                lr = LossRecord(
+                    value=weighted_raw_loss,
+                    label=loss.label,
+                    contributes_to_update=True,
+                )
+                loss_records.append(lr)
 
         # Backward + opt step
-        grads = tape.gradient(total_loss, self._model.trainable_variables)
+        lc = LossCollection(records=loss_records)
+        grads = tape.gradient(lc.total, self._model.trainable_variables)
         self._optimizer.step(grads=grads, variables=self._model.trainable_variables)
 
-        total_loss = float(total_loss)
-
-        return StepResult(
-            total_loss=total_loss,
-            total_opt_loss=total_loss,
-            total_non_opt_loss=0.0,
-            all_loss_results={self.label: loss_results},
-            node_outputs=outputs,
-        )
+        return StepResult(losses=lc, node_outputs=outputs)
 
     def _train_step_scikit(
         self,
@@ -657,8 +657,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         """
         self._model.eval()
 
-        total_loss = 0
-        loss_results: list[LossResult] = []
+        loss_records: list[LossRecord] = []
         outputs: dict[str, BatchOutput] = {}
 
         with torch.no_grad():
@@ -666,25 +665,18 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             outputs[self.label] = self.forward(self.get_input_batch(batch_input))
 
             # Compute losses
-            loss_results: list[LossResult] = []
             if losses is not None:
                 for loss in losses:
-                    loss_res = loss.compute(
-                        batch_input=batch_input,
-                        model_outputs=outputs,
+                    weighted_raw_loss = loss.compute(batch_input=batch_input, model_outputs=outputs)
+                    lr = LossRecord(
+                        value=weighted_raw_loss,
+                        label=loss.label,
+                        contributes_to_update=False,  # not used in optimizer stepping
                     )
-                    loss_results.append(loss_res)
-                    total_loss += loss_res.value
+                    loss_records.append(lr)
 
-        total_loss = total_loss.item() if hasattr(total_loss, "item") else total_loss
-
-        return StepResult(
-            total_loss=total_loss,
-            total_opt_loss=0.0,
-            total_non_opt_loss=total_loss,
-            all_loss_results={self.label: loss_results},
-            node_outputs=outputs,
-        )
+        lc = LossCollection(records=loss_records)
+        return StepResult(losses=lc, node_outputs=outputs)
 
     def _eval_step_tensorflow(
         self,
@@ -702,10 +694,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             StepResult: Loss values and outputs.
 
         """
-        self._model.eval()
-
-        total_loss = 0
-        loss_results: list[LossResult] = []
+        loss_records: list[LossRecord] = []
         outputs: dict[str, BatchOutput] = {}
 
         # Forward pass (with training=True)
@@ -715,22 +704,18 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         )
 
         # Compute losses
-        loss_results: list[LossResult] = []
         if losses is not None:
             for loss in losses:
-                loss_res = loss.compute(batch_input=batch_input, model_outputs=outputs)
-                loss_results.append(loss_res)
-                total_loss += loss_res.value
+                weighted_raw_loss = loss.compute(batch_input=batch_input, model_outputs=outputs)
+                lr = LossRecord(
+                    value=weighted_raw_loss,
+                    label=loss.label,
+                    contributes_to_update=False,  # not used in optimizer stepping
+                )
+                loss_records.append(lr)
 
-        total_loss = float(total_loss)
-
-        return StepResult(
-            total_loss=total_loss,
-            total_opt_loss=0.0,
-            total_non_opt_loss=total_loss,
-            all_loss_results={self.label: loss_results},
-            node_outputs=outputs,
-        )
+        lc = LossCollection(records=loss_records)
+        return StepResult(losses=lc, node_outputs=outputs)
 
     def _eval_step_scikit(
         self,
