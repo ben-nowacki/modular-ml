@@ -126,3 +126,12 @@ class SampleLoadError(FeatureSetError):
 
 class SubsetOverlapWarning(UserWarning):
     pass
+
+
+class NotInvertibleError(ModularMLError):
+    """Raised when a node's outputs cannot be inverse-transformed (merged sources, incompatible shapes, etc.)."""
+
+    def __init__(self, message: str | None = None):
+        if message is None:
+            message = "Failed to apply inverse_transform."
+        super().__init__(message)

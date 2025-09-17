@@ -1,12 +1,13 @@
 import warnings
 
-from modularml.core.experiment.base_phase import BasePhase
+from modularml.core.experiment.phase_io import PhaseIO
 from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.model_graph import ModelGraph
 from modularml.core.loss.applied_loss import AppliedLoss
 from modularml.core.samplers.feature_sampler import FeatureSampler
 
 
-class TrainingPhase(BasePhase):
+class TrainingPhase:
     """
     Encapsulates a single stage of training for a ModelGraph.
 
@@ -33,41 +34,65 @@ class TrainingPhase(BasePhase):
         self,
         label: str,
         losses: list[AppliedLoss],
-        samplers: dict[str, FeatureSampler],
+        train_samplers: dict[str, FeatureSampler],
         batch_size: int,
         n_epochs: int,
         nodes_to_freeze: list[str | GraphNode] | None = None,
-        # merge_policy: str | None = None,
-        # merge_mapping: dict[str, Any] | None = None,
+        val_samplers: dict[str, FeatureSampler] | None = None,
+        # Early stopping parameters
+        early_stop_patience: int | None = None,
+        early_stop_metric: str = "val_loss",
+        early_stop_mode: str = "min",
+        early_stop_min_delta: float = 0.0,
     ):
         """
         Initializes a TrainingPhase.
 
         Args:
             label (str): Name of this training phase (e.g., "pretrain_encoder").
-            losses (list[AppliedLoss]): list of loss functions and their input mappings.
-            samplers (dict[str, FeatureSampler]): Mapping from source string to FeatureSampler.
+            losses (list[AppliedLoss]): List of loss functions and their input mappings.
+            train_samplers (dict[str, FeatureSampler]): Mapping from source string to FeatureSampler.
                 Keys must be of the form "FeatureSet" or "FeatureSet.subset".
-            batch_size (int): Batch size to enforce across all samplers (overrides existing sampler batch sizes).
+            batch_size (int): Batch size to enforce across all samplers.
             n_epochs (int): Number of training epochs.
-            nodes_to_freeze (list[str | GraphNode] | None): The list of ModelGraph nodes to freeze during this \
-                training phase. Defaults to None (ie, it will train all stages).
-
-            # merge_policy (str, optional): Strategy to merge roles if needed. Not yet implemented. TODO
-            # merge_mapping (dict[str, Any], optional): Custom mapping for role merges. Not yet implemented. TODO
+            nodes_to_freeze (list[str | GraphNode] | None): The list of ModelGraph nodes to freeze during this
+                training phase. Defaults to None (i.e., it will train all stages).
+            val_samplers (dict[str, FeatureSampler] | None): Validation samplers, if provided.
+            early_stop_patience (int | None): Number of epochs with no improvement before stopping early.
+                If None, early stopping is disabled.
+            early_stop_metric (str): Which loss metric to monitor (e.g., "val_loss" or "train_loss").
+            early_stop_mode (str): One of {"min", "max"}.
+                - "min": Training stops when the monitored metric stops decreasing.
+                - "max": Training stops when the monitored metric stops increasing.
+            early_stop_min_delta (float): Minimum change in the monitored metric to be considered an improvement.
 
         """
-        super().__init__(
-            label=label,
+        self.label = label
+
+        self.train_io = PhaseIO(
+            samplers=train_samplers,
             losses=losses,
-            samplers=samplers,
             batch_size=batch_size,
-            # merge_policy=merge_policy,
-            # merge_mapping=merge_mapping,
+        )
+        self.val_io: PhaseIO | None = (
+            PhaseIO(
+                samplers=val_samplers,
+                losses=losses,
+                batch_size=batch_size,
+            )
+            if val_samplers is not None
+            else None
         )
 
         self.n_epochs = n_epochs
 
+        # Early stopping configuration
+        self.early_stop_patience = early_stop_patience
+        self.early_stop_metric = early_stop_metric
+        self.early_stop_mode = early_stop_mode
+        self.early_stop_min_delta = early_stop_min_delta
+
+        # Track frozen nodes
         self._frozen_nodes: list[str] = []
         if not isinstance(nodes_to_freeze, list):
             nodes_to_freeze = [nodes_to_freeze]
@@ -77,9 +102,24 @@ class TrainingPhase(BasePhase):
             elif isinstance(n, GraphNode):
                 self._frozen_nodes.append(n.label)
 
-    def get_frozen_nodes(self) -> list[str]:
-        # Check that nodes with losses aren't frozen
-        nodes_with_loss = set(self._loss_mapping.keys())
+    @property
+    def resolved(self) -> bool:
+        return self.train_io.resolved and (self.val_io is None or self.val_io.resolved)
+
+    @property
+    def frozen_nodes(self) -> list[str]:
+        if not self.resolved:
+            raise RuntimeError("You must call `.resolve(...)` before accessing frozen_nodes.")
+        return self._frozen_nodes
+
+    def resolve(self, graph: ModelGraph):
+        # Resolve PhaseIO instances
+        self.train_io.resolve(graph=graph)
+        if self.val_io is not None:
+            self.val_io.resolve(graph=graph)
+
+        # Check that user-specified frozen nodes don't have a loss applied to them
+        nodes_with_loss = set(self.train_io.losses_mapped_by_node.keys())
         overlapped = set(self._frozen_nodes).intersection(nodes_with_loss)
         if len(overlapped) != 0:
             msg = (
@@ -87,6 +127,3 @@ class TrainingPhase(BasePhase):
                 f"The attached losses will be ignored during optimizer stepping."
             )
             warnings.warn(message=msg, category=UserWarning, stacklevel=2)
-
-        # Return frozen nodes
-        return self._frozen_nodes

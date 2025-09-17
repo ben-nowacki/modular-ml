@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 
 from modularml.core.data_structures.sample import Sample
@@ -49,13 +51,13 @@ class SampleCollection:
     def get_sample_with_uuid(self, uuid: str) -> Sample:
         return self._uuid_sample_map[uuid]
 
-    def get_samples_with_uuid(self, uuids: list[str]) -> "SampleCollection":
+    def get_samples_with_uuid(self, uuids: list[str]) -> SampleCollection:
         return SampleCollection(samples=[self.get_sample_with_uuid(x) for x in uuids])
 
     def get_sample_with_label(self, label: str) -> Sample:
         return self._label_sample_map[label]
 
-    def get_samples_with_label(self, labels: list[str]) -> "SampleCollection":
+    def get_samples_with_label(self, labels: list[str]) -> SampleCollection:
         return SampleCollection(samples=[self.get_sample_with_uuid(x) for x in labels])
 
     def __iter__(self):
@@ -124,7 +126,7 @@ class SampleCollection:
         raw = {k: [s.tags[k].value for s in self.samples] for k in self.tag_keys}
         return convert_dict_to_format(raw, fmt=fmt)
 
-    def to_backend(self, backend: str | Backend) -> "SampleCollection":
+    def to_backend(self, backend: str | Backend) -> SampleCollection:
         """Returns a new SampleCollection with all Data objects converted to the specified backend."""
         if isinstance(backend, str):
             backend = Backend(backend)
@@ -136,3 +138,14 @@ class SampleCollection:
             tags = {k: v.to_backend(backend) for k, v in s.tags.items()}
             converted.append(Sample(features=features, targets=targets, tags=tags, label=s.label, uuid=s.uuid))
         return SampleCollection(samples=converted)
+
+    def copy(self) -> SampleCollection:
+        """
+        Create a deep copy of the SampleCollection, including all contained Sample instances.
+
+        Returns:
+            SampleCollection: A new SampleCollection with identical Samples.
+
+        """
+        copied_samples = [s.copy() for s in self.samples]
+        return SampleCollection(samples=copied_samples)

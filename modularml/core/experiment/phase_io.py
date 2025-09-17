@@ -1,58 +1,49 @@
+import copy
 import warnings
 from collections import defaultdict
 from typing import Any
 
 from modularml.core.data_structures.batch import Batch
 from modularml.core.graph.feature_set import FeatureSet
+from modularml.core.graph.graph_node import GraphNode
 from modularml.core.graph.model_graph import ModelGraph
 from modularml.core.loss.applied_loss import AppliedLoss
 from modularml.core.samplers.feature_sampler import FeatureSampler
 
 
-class BasePhase:
+class PhaseIO:
     def __init__(
         self,
-        label: str,
+        samplers: dict[str, FeatureSampler],
         losses: list[AppliedLoss] | None = None,
-        samplers: dict[str, FeatureSampler] | None = None,
         batch_size: int = 32,
-        # merge_policy: str | None = None,
-        # merge_mapping: dict[str, Any] | None = None,
     ):
-        """
-        Create a BasePhase for Experiment evaluation/training.
-
-        Args:
-            label (str): Name of this training phase (e.g., "pretrain_encoder").
-            losses (list[AppliedLoss]): list of loss functions and their input mappings.
-            samplers (dict[str, FeatureSampler]): Mapping from source string to FeatureSampler.
-                Keys must be of the form "FeatureSet" or "FeatureSet.subset".
-            batch_size (int): Batch size to enforce across all samplers (overrides existing sampler batch sizes).
-
-            # merge_policy (str, optional): Strategy to merge roles if needed. Not yet implemented. TODO
-            # merge_mapping (dict[str, Any], optional): Custom mapping for role merges. Not yet implemented. TODO
-
-        """
-        self.label = label
+        # Store losses and losses grouped by ModelGraph node label
         self.losses = losses or []
-        self.samplers = samplers or {}
-        self.batch_size = batch_size
-
-        # Only needed if losses is non-null
-        self._available_loss_inputs = None
-        self._required_loss_inputs = None
-        self._loss_mapping: dict[str, list[AppliedLoss]] = defaultdict(list)
+        self._loss_mapping = defaultdict(list)
 
         # Parsed samplers if provided
-        if self.samplers:
-            self.samplers: dict[tuple[str, str | None], FeatureSampler] = {}
+        self.samplers: dict[tuple[str, str | None], FeatureSampler] = {}
+        if samplers:
             for k, v in samplers.items():
                 v.batch_size = batch_size  # overwrite pre-existing batch_size
-                self.samplers[self._parse_sample_spec(k)] = v
+                self.samplers[self._parse_sampler_spec(k)] = copy.deepcopy(v)
+        self.batch_size = batch_size
 
-        self._is_resolved = False
+        # Internal state for lazy validation
+        self._resolved = False
 
-    def _parse_sample_spec(self, spec: str) -> tuple[str, str | None]:
+    @property
+    def resolved(self) -> bool:
+        return self._resolved
+
+    @property
+    def losses_mapped_by_node(self) -> dict[str, list[AppliedLoss]]:
+        if not self._resolved:
+            raise RuntimeError("You must call `.resolve(...)` before accessing losses.")
+        return self._loss_mapping
+
+    def _parse_sampler_spec(self, spec: str) -> tuple[str, str | None]:
         """
         Parses a string that references a FeatureSet or FeatureSubset.
 
@@ -80,20 +71,7 @@ class BasePhase:
 
         return featureset, subset
 
-    def resolve_loss_inputs_and_roles(
-        self,
-        graph: ModelGraph,
-    ) -> dict[str, Any]:
-        """
-        Resolves all possible input keys for AppliedLosses after a full model pass.
-
-        This performs a single forward pass on one batch to:
-        - Determine available `FeatureSet.sample_attribute.role` mappings
-        - Determine available `ModelStage.output` keys
-        - Identify if roles need merging (e.g. 'anchor', 'default')
-        """
-        self._loss_mapping: dict[str, list[AppliedLoss]] = defaultdict(list)
-
+    def resolve(self, graph: ModelGraph):
         # Step 1: Sample batches from all samplers
         batches = self.get_batches({k: graph._nodes[k] for k in graph.source_node_labels})
 
@@ -113,10 +91,10 @@ class BasePhase:
         available_inputs: set[str] = set()
 
         # Valid FeatureSet-based AppliedLoss input keys (eg, "FeatureSet.targets" or "FeatureSet.features.anchor")
-        for fs_label, batch in batch_input.items():
+        for fs_lbl, batch in batch_input.items():
             for role in batch.available_roles:
-                available_inputs.add(f"{fs_label}.features.{role}")
-                available_inputs.add(f"{fs_label}.targets.{role}")
+                available_inputs.add(f"{fs_lbl}.features.{role}")
+                available_inputs.add(f"{fs_lbl}.targets.{role}")
 
         # Valid ModelStage-based AppliedLoss input keys (eg, "Encoder.output" or "Encoder.output.anchor")
         for stage_name, batch in outputs.items():
@@ -125,6 +103,7 @@ class BasePhase:
 
         # Step 5: Determine loss-required inputs
         required_inputs = set()
+        self._loss_mapping.clear()
         for loss in self.losses:
             for source in loss.all_inputs.values():
                 # source is of type: tuple[str, str, Optional[str]] for node, attribute, role
@@ -140,26 +119,13 @@ class BasePhase:
             msg = f"Missing inputs required by `losses`: {missing_inputs}"
             raise ValueError(msg)
 
-        # Save available & required loss terms
-        self._available_loss_inputs = list(available_inputs)
-        self._required_loss_inputs = list(required_inputs)
+        self._resolved = True
 
-        self._is_resolved = True
-
-    @property
-    def available_loss_inputs(self) -> list[str]:
-        if self._available_loss_inputs is None:
-            raise RuntimeError("You must call `resolve_loss_inputs_and_roles()` to generate available_loss_inputs.")
-        return self._available_loss_inputs
-
-    @property
-    def is_resolved(self) -> bool:
-        return self._is_resolved
-
-    def get_losses_for_stage(self, stage_name: str) -> list[AppliedLoss] | None:
-        if not self._is_resolved:
-            raise RuntimeError("You must call Phase.resolve_loss_inputs_and_roles(...) before accessing losses.")
-        return self._loss_mapping.get(stage_name, None)
+    def get_losses_for_node(self, node: str | GraphNode) -> list[AppliedLoss] | None:
+        if not self._resolved:
+            raise RuntimeError("You must call `.resolve(...)` before accessing losses.")
+        node_lbl = node if isinstance(node, str) else node.label
+        return self._loss_mapping.get(node_lbl, None)
 
     def get_batches(self, featuresets: dict[str, FeatureSet]) -> dict[str, list[Batch]]:
         """
@@ -173,7 +139,7 @@ class BasePhase:
             dict[str, list[Batch]]: dictionary mapping each FeatureSet label to a list of Batches.
 
         Raises:
-            ValueError: If a required FeatureSet or Subset is missing.
+            ValueError: If a required FeatureSet or FeatureSubset is missing.
 
         Warnings:
             If samplers yield differing numbers of batches, only the minimum number will be used.
@@ -196,17 +162,18 @@ class BasePhase:
         batches: dict[str, list[Batch]] = {}
 
         # 2. Build batches (ensure samplers are bound to sources)
-        for sampler_spec, sampler in self.samplers.items():
+        for (fs_lbl, fss_lbl), sampler in self.samplers.items():
             if not sampler.is_bound():
                 # Get FeatureSet
-                source = featuresets[sampler_spec[0]]
-                # Get Subset if specified
-                if sampler_spec[1] is not None:
-                    source = source.get_subset(sampler_spec[1])
+                source = featuresets[fs_lbl]
+                # Get FeatureSubset if specified
+                if fss_lbl is not None:
+                    source = source.get_subset(fss_lbl)
+
                 # Bind source to sampler
                 sampler.bind_source(source=source)
 
-            batches[sampler_spec[0]] = sampler.batches
+            batches[fs_lbl] = sampler.batches
 
         # 3. Check n_batches for mismatch
         batch_lens = {len(b) for b in batches.values()}
