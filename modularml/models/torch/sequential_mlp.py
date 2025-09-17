@@ -72,6 +72,8 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         self,
         input_shape: tuple[int] | None = None,
         output_shape: tuple[int] | None = None,
+        *,
+        force: bool = False,
     ):
         """
         Builds the internal torch.nn.Sequential model.
@@ -79,24 +81,26 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         Args:
             input_shape (Tuple[int], optional): Input shape excluding batch dim.
             output_shape (Tuple[int], optional): Output shape excluding batch dim.
+            force (bool): If model is already instantiated, force determines whether \
+                to reinstantiate with the new shapes. Defaults to False.
 
         Raises:
             ValueError: If shape mismatch is detected.
 
         """
         if input_shape:
-            if self._input_shape and input_shape != self._input_shape:
+            if self._input_shape and input_shape != self._input_shape and not force:
                 msg = f"Inconsistent input_shape: {input_shape} vs {self._input_shape}"
                 raise ValueError(msg)
             self._input_shape = input_shape
 
         if output_shape:
-            if self._output_shape and output_shape != self._output_shape:
+            if self._output_shape and output_shape != self._output_shape and not force:
                 msg = f"Inconsistent output_shape: {output_shape} vs {self._output_shape}"
                 raise ValueError(msg)
             self._output_shape = output_shape
 
-        if self.is_built:
+        if self.is_built and not force:
             return
 
         if self._input_shape is None:

@@ -178,6 +178,8 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         self,
         input_shape: tuple[int, ...] | None = None,
         output_shape: tuple[int, ...] | None = None,
+        *,
+        force: bool = False,
     ):
         """
         Construct or validate the wrapped PyTorch model.
@@ -195,6 +197,8 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
                 for validation or lazy instantiation.
             output_shape (tuple[int, ...] | None): Expected output shape (excluding batch dimension)
                 to use for validation or lazy instantiation.
+            force (bool): If model is already instantiated, force determines whether \
+                to reinstantiate with the new shapes. Defaults to False.
 
         Raises:
             RuntimeError: If validation fails for a pre-instantiated model, or if model construction
