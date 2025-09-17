@@ -16,7 +16,7 @@ from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.graph.feature_subset import FeatureSubset
 from modularml.core.graph.graph_node import GraphNode
 from modularml.core.transforms.feature_transform import FeatureTransform
-from modularml.utils.data_format import DataFormat
+from modularml.utils.data_format import DataFormat, convert_to_format
 from modularml.utils.exceptions import SampleLoadError, SubsetOverlapWarning
 
 if TYPE_CHECKING:
@@ -32,7 +32,6 @@ class TransformRecord:
     fit_spec: str
     apply_spec: str
     transform: FeatureTransform
-    mode: Literal["transform", "inverse_transform"]
 
     def get_config(self) -> dict[str, Any]:
         """
@@ -43,7 +42,6 @@ class TransformRecord:
         return {
             "fit_spec": self.fit_spec,
             "apply_spec": self.apply_spec,
-            "mode": self.mode,
             "transform_config": self.transform.get_config(),
         }
 
@@ -52,7 +50,6 @@ class TransformRecord:
         return cls(
             fit_spec=cfg["fit_spec"],
             apply_spec=cfg["apply_spec"],
-            mode=cfg["mode"],
             transform=FeatureTransform.from_config(cfg["transform_config"]),
         )
 
@@ -61,7 +58,6 @@ class TransformRecord:
         return {
             "fit_spec": self.fit_spec,
             "apply_spec": self.apply_spec,
-            "mode": self.mode,
             "transform": self.transform.to_serializable(),
         }
 
@@ -70,7 +66,6 @@ class TransformRecord:
         return cls(
             fit_spec=obj["fit_spec"],
             apply_spec=obj["apply_spec"],
-            mode=obj["mode"],
             transform=FeatureTransform.from_serializable(obj["transform"]),
         )
 
@@ -142,7 +137,7 @@ class FeatureSet(SampleCollection, GraphNode):
         SampleCollection.__init__(self, samples=samples)
         GraphNode.__init__(self, label=label, upstream_nodes=None, downstream_nodes=None)
 
-        self.subsets: dict[str, FeatureSubset] = {}
+        self._subsets: dict[str, FeatureSubset] = {}
 
         self._split_configs: list[SplitterRecord] = []
         self._transform_logs: dict[str, list[TransformRecord]] = {"features": [], "targets": []}
@@ -176,7 +171,11 @@ class FeatureSet(SampleCollection, GraphNode):
     # ==========================================
     @property
     def available_subsets(self) -> list[str]:
-        return list(self.subsets.keys())
+        return list(self._subsets.keys())
+
+    @property
+    def subsets(self) -> dict[str, FeatureSubset]:
+        return self._subsets
 
     @property
     def n_subsets(self) -> int:
@@ -201,11 +200,11 @@ class FeatureSet(SampleCollection, GraphNode):
             FeatureSubset: A named view of this FeatureSet.
 
         """
-        if name not in self.subsets:
+        if name not in self._subsets:
             msg = f"`{name}` is not a valid subset. Use `FeatureSet.available_subsets` to view available subset names."
             raise ValueError(msg)
 
-        return self.subsets[name]
+        return self._subsets[name]
 
     def add_subset(self, subset: FeatureSubset):
         """
@@ -215,11 +214,11 @@ class FeatureSet(SampleCollection, GraphNode):
             subset (FeatureSubset): The subset to add.
 
         """
-        if subset.label in self.subsets:
+        if subset.label in self._subsets:
             msg = f"Subset label ('{subset.label}') already exists."
             raise ValueError(msg)
 
-        for s in self.subsets.values():
+        for s in self._subsets.values():
             if not subset.is_disjoint_with(s):
                 overlap = set(subset.sample_uuids).intersection(s.sample_uuids)
                 warnings.warn(
@@ -230,7 +229,7 @@ class FeatureSet(SampleCollection, GraphNode):
                     stacklevel=2,
                 )
 
-        self.subsets[subset.label] = subset
+        self._subsets[subset.label] = subset
 
     # def pop_subset(self, name: str) -> "FeatureSubset":
     #     """
@@ -243,10 +242,10 @@ class FeatureSet(SampleCollection, GraphNode):
     #         FeatureSubset: The removed subset.
     #     """
 
-    #     if not name in self.subsets:
+    #     if not name in self._subsets:
     #         raise ValueError(f"`{name}` is not a valid subset. Use `FeatureSet.available_subsets` to view available subset names.")
 
-    #     return self.subsets.pop(name)
+    #     return self._subsets.pop(name)
 
     # def remove_subset(self, name: str, force:bool = False) -> None:
     #     """
@@ -257,7 +256,7 @@ class FeatureSet(SampleCollection, GraphNode):
     #         force (bool, optional): Overrides any errors raised during removal.
     #     """
 
-    #     if not name in self.subsets:
+    #     if not name in self._subsets:
     #         raise ValueError(f"`{name}` is not a valid subset. Use `FeatureSet.available_subsets` to view available subset names.")
 
     #     for sr in self._split_configs:
@@ -270,11 +269,11 @@ class FeatureSet(SampleCollection, GraphNode):
     #         HOW TO CHECK IF SUBSET WAS CREATED WITH OTHER SIBLING SUBSET IN SAME SPLIT?
     #           - this should raise a similar warning as above
 
-    #     del self.subsets[name]
+    #     del self._subsets[name]
 
     def clear_subsets(self) -> None:
         """Remove all previously defined subsets."""
-        self.subsets.clear()
+        self._subsets.clear()
         self._split_configs = []
 
     def filter(self, **conditions: dict[str, Any | list[Any], Callable]) -> FeatureSet | None:
@@ -588,6 +587,39 @@ class FeatureSet(SampleCollection, GraphNode):
 
         return subset, component, key
 
+    def apply_transform_to_collection(
+        self,
+        data: SampleCollection,
+        subset: str,
+        component: str | None,
+        *,
+        inverse: bool = False,
+    ):
+        """
+        Apply stored transformations (or their inverse) to a SampleCollection.
+
+        Args:
+            data (SampleCollection): The collection of samples to transform.
+            subset (str): The subset name (e.g., 'train', 'val') used in the original fit_transform.
+            component (str | None): The component name ('features' or 'targets'). If None, applies \
+                (or inverses) transforms on both features and targets.
+            inverse (bool): Whether to apply the inverse transform.
+
+        Returns:
+            SampleCollection: A new collection with transformed data.
+        """
+        if component is not None and component not in {"features", "targets"}:
+            msg = f"Invalid component: {component}. Must be 'features', 'targets', or None."
+            raise ValueError(msg)
+
+        if component == "features":
+            for t_record in self._transform_logs["features"]:
+                # t_record.apply_spec : str
+                # t_record.transform : FeatureTransform
+                pass
+
+            pass
+
     def fit_transform(
         self,
         fit: str,
@@ -683,104 +715,135 @@ class FeatureSet(SampleCollection, GraphNode):
 
         # Record this transformation
         self._transform_logs[apply_component].append(
-            TransformRecord(fit_spec=fit, apply_spec=apply, transform=copy.deepcopy(transform), mode="transform"),
+            TransformRecord(fit_spec=fit, apply_spec=apply, transform=copy.deepcopy(transform)),
         )
 
-    def inverse_transform(self, on: str = "features"):
-        """
-        Performs an inverse_transform of the latest applied transform.
+    def inverse_transform(
+        self,
+        data: SampleCollection,
+        component: Literal["features", "targets"],
+        *,
+        subset: str | None = None,
+        which: Literal["all", "last"] = "all",
+        inplace: bool = False,
+    ) -> SampleCollection | None:
+        allowed_components = ["features", "targets"]
+        if component not in allowed_components:
+            msg = f"`component` must be one of the following: {allowed_components}. Received: {component}"
+            raise ValueError(msg)
 
-        Removes it from the transformation log.
+        if not isinstance(data, SampleCollection):
+            msg = f"Data must be of type SampleCollection. Received: {type(data)}"
+            raise TypeError(msg)
 
-        Args:
-            on (str, optional): {'features', 'targets'}. Whether to inverse \
-                the last feature transform or last target transform. Defaults \
-                to 'features''.
+        # Make copy if don't want to mutate original
+        if not inplace:
+            data = data.copy()
+            self.inverse_transform(
+                data=data,
+                subset=subset,
+                component=component,
+                which=which,
+                inplace=True,
+            )
+            return data
 
-        """
+        # Get list of applicable transforms
+        records: list[TransformRecord] = []
+        for record in self._transform_logs[component]:
+            r_subset, r_comp, r_key = self._parse_spec(record.apply_spec)
+            if r_subset is None or subset is None or r_subset == subset:
+                records.append(record)
+        # Only take last record if which == 'last'
+        if which == "last":
+            records = records[-1:]
+
+        # Go through reverse order
+        for record in reversed(records):
+            r_subset, r_comp, r_key = self._parse_spec(record.apply_spec)
+
+            # Gather transformed data from samples
+            x_apply = []
+            for sample in data:
+                component_dict: dict[str, Data] = getattr(sample, r_comp)
+                if r_key:
+                    if r_key not in component_dict:
+                        msg = f"Key ({r_key}) is missing from Sample.{r_comp}"
+                        raise ValueError(msg)
+                    x_apply.append(component_dict[r_key].value)
+                else:
+                    x_apply.append(np.vstack([d.value for d in component_dict.values()]))
+
+            # Ensure shape = (n_samples, ...)
+            x_apply = np.asarray(x_apply).reshape(len(data), -1)
+
+            # Apply inverse transform
+            x_restored = record.transform.inverse_transform(x_apply)
+
+            # Write restored values back to Samples
+            for s, s_restored in zip(data, x_restored, strict=True):
+                # Preserve shape: single scaler vs array
+                new_val = s_restored.value if s_restored.ndim == 0 or s_restored.shape == () else s_restored
+
+                # Mutate specified key
+                if r_key is not None:
+                    getattr(s, r_comp)[r_key].value = new_val
+
+                # Otherwise, try to split out key dimension
+                else:
+                    all_keys = getattr(s, r_comp).keys()
+                    new_val = np.atleast_2d(new_val)
+                    new_val.reshape(len(all_keys), -1)
+                    for i, k in enumerate(all_keys):
+                        getattr(s, r_comp)[k].value = new_val[i]
+
+        return None
+
+    def undo_last_transform(self, on: Literal["features", "targets"]):
         allowed_ons = ["features", "targets"]
         if on not in allowed_ons:
             msg = f"`on` must be one of the following: {allowed_ons}. Received: {on}"
             raise ValueError(msg)
 
-        if not self._transform_logs[on]:
-            raise RuntimeError("No transform to inverse. The transform log is empty.")
+        t_record = self._transform_logs[on][-1]
+        r_subset, r_comp, r_key = self._parse_spec(t_record.apply_spec)
 
-        # Pop the last transform
-        last_transform = self._transform_logs[on].pop(-1)
-        apply_spec = last_transform.apply_spec
-        transform = last_transform.transform
+        sample_coll = SampleCollection(self.get_subset(r_subset).samples if r_subset else self.samples)
 
-        apply_subset, apply_component, apply_key = self._parse_spec(apply_spec)
-        apply_samples = self.get_subset(apply_subset).samples if apply_subset else self.samples
+        # Inverse transform all data in sample_coll (mutated inplace)
+        self.inverse_transform(
+            data=sample_coll,
+            component=on,
+            subset=r_subset,
+            which="last",
+            inplace=True,
+        )
 
-        # Gather transformed data from samples
-        x_apply = []
-        for sample in apply_samples:
-            component_dict: dict[str, Data] = getattr(sample, apply_component)
-            if apply_key:
-                if apply_key not in component_dict:
-                    msg = f"apply_key ({apply_key}) is missing from Sample.{apply_component}"
-                    raise ValueError(msg)
-                x_apply.append(component_dict[apply_key].value)
-            else:
-                x_apply.append(np.vstack([d.value for d in component_dict.values()]))
+        # Remove log
+        self._transform_logs[on].pop(-1)
 
-        # Ensure shape = (n_samples, ...)
-        x_apply = np.asarray(x_apply).reshape(len(apply_samples), -1)
-
-        # Apply inverse transform
-        x_restored = transform.inverse_transform(x_apply)
-
-        # Write restored values back to Samples
-        for s, s_restored in zip(apply_samples, x_restored, strict=True):
-            # Preserve shape: single scaler vs array
-            new_val = s_restored.value if s_restored.ndim == 0 or s_restored.shape == () else s_restored
-
-            # Mutate specified apply_key
-            if apply_key is not None:
-                getattr(s, apply_component)[apply_key].value = new_val
-
-            # Otherwise, try to split out key dimension
-            else:
-                all_keys = getattr(s, apply_component).keys()
-                new_val = np.atleast_2d(new_val)
-                new_val.reshape(len(all_keys), -1)
-                for i, k in enumerate(all_keys):
-                    getattr(s, apply_component)[k].value = new_val[i]
-
-    def undo_all_transforms(self, on: str | None = None):
+    def undo_all_transforms(self, on: Literal["features", "targets"] | None = None):
         """
         Undo all transforms applied.
 
         Arguments:
-            on (str, optional): Can optionally undo all transforms only applied
+            on (Literal["features", "targets"] | None): Can optionally undo all transforms only applied
                 to `on`. Must be: 'features', 'targets', or None. If None, all
                 transforms applied to both 'features' and 'targets' will be undone.
                 Defaults to None.
 
         """
-        all_ons = []
-        if on is None:
-            all_ons = ["features", "targets"]
-        elif isinstance(on, str):
-            all_ons = [
-                on,
-            ]
-        else:
-            msg = f"`on` must be a str. Received: {on}"
-            raise TypeError(msg)
-
+        all_ons = [on] if on is not None else ["features", "targets"]
         for o in all_ons:
             while len(self._transform_logs[o]) > 0:
-                self.inverse_transform(on=o)
+                self.undo_last_transform(on=o)
 
     # ==========================================
     # State/Config Management Methods
     # ==========================================
     def save_samples(self, path: str | Path):
         """Save the sample data to the specified path."""
-        path = Path(path).with_suffix("pkl")
+        path = Path(path).with_suffix(".pkl")
         path.parent.mkdir(parents=True, exist_ok=True)
         with Path.open(path, "wb") as f:
             pickle.dump(self.samples, f)
@@ -809,7 +872,7 @@ class FeatureSet(SampleCollection, GraphNode):
         return {
             "label": self.label,
             "sample_data": str(sample_path) if sample_path else None,
-            "subset_configs": {k: v.get_config() for k, v in self.subsets.items()},
+            "subset_configs": {k: v.get_config() for k, v in self._subsets.items()},
             "transform_logs": {k: [tr.get_config() for tr in v] for k, v in self._transform_logs.items()},
             "split_logs": self._split_configs,
         }
@@ -844,7 +907,7 @@ class FeatureSet(SampleCollection, GraphNode):
         return {
             "label": self.label,
             "samples": self.samples,
-            "subset_configs": {k: v.get_config() for k, v in self.subsets.items()},
+            "subset_configs": {k: v.get_config() for k, v in self._subsets.items()},
             "transform_logs": {k: [tr.to_serializable() for tr in v] for k, v in self._transform_logs.items()},
             "split_logs": self._split_configs,
         }
@@ -906,65 +969,3 @@ class FeatureSet(SampleCollection, GraphNode):
 
         data = joblib.load(path)
         return cls.from_serializable(data)
-
-    # # ================================================================================
-    # # Visuallization Methods
-    # # ================================================================================
-    # def plot_sankey(self):
-    #     """
-    #     Plot a Sankey diagram showing how sample IDs flow across nested FeatureSubsets.
-    #     Subset hierarchy is determined using dot-notation (e.g., 'train.pretrain').
-    #     Samples with multiple subset memberships will show multiple paths.
-    #     """
-    #     import plotly.graph_objects as go
-
-    #     if not self.subsets:
-    #         raise ValueError("No subsets to plot.")
-
-    #     # Track flow edges: (from_label, to_label) -> set of sample_ids
-    #     flows = defaultdict(set)
-
-    #     # Track all unique nodes for consistent indexing
-    #     all_nodes = set([self.label])  # start from root
-
-    #     # Reverse map: sample_id -> list of subset names it belongs to
-    #     sample_to_subsets = defaultdict(list)
-    #     for subset_name, subset in self.subsets.items():
-    #         for s_uuid in subset.sample_uuids:
-    #             sample_to_subsets[s_uuid].append(subset_name)
-    #         all_nodes.add(subset_name)
-
-    #     # Infer parent from dot-notation (e.g., "train.pretrain" → "train")
-    #     for s_uuid, paths in sample_to_subsets.items():
-    #         for path in paths:
-    #             parts = path.split(".")
-    #             for i in range(len(parts)):
-    #                 parent = self.label if i == 0 else ".".join(parts[:i])
-    #                 child = ".".join(parts[: i + 1])
-    #                 flows[(parent, child)].add(s_uuid)
-    #                 all_nodes.update([parent, child])
-
-    #     # Map node name to index
-    #     all_nodes = sorted(all_nodes)
-    #     node_index = {name: i for i, name in enumerate(all_nodes)}
-
-    #     # Build Sankey components
-    #     sources, targets, values, labels = [], [], [], all_nodes
-    #     for (src, tgt), sample_ids in flows.items():
-    #         sources.append(node_index[src])
-    #         targets.append(node_index[tgt])
-    #         values.append(len(sample_ids))  # number of samples flowing
-
-    #     # Plot
-    #     fig = go.Figure(
-    #         data=[
-    #             go.Sankey(
-    #                 arrangement="snap",
-    #                 node=dict(pad=15, thickness=20, line=dict(color="black", width=0.5), label=labels),
-    #                 link=dict(source=sources, target=targets, value=values, color="rgba(100,100,200,0.4)"),
-    #             )
-    #         ]
-    #     )
-
-    #     fig.update_layout(title_text="FeatureSet Subset Sankey", font_size=12)
-    #     fig.show()
