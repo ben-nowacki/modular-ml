@@ -15,6 +15,8 @@ from modularml.core.graph.graph_node import GraphNode
 from modularml.core.graph.merge_stages.merge_stage import MergeStage
 from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
 from modularml.core.graph.model_stage import ModelStage
+from modularml.core.loss.loss_collection import LossCollection
+from modularml.core.loss.loss_record import LossRecord
 from modularml.utils.backend import Backend, backend_requires_optimizer
 from modularml.utils.data_format import to_python
 from modularml.utils.error_handling import ErrorMode
@@ -24,7 +26,7 @@ from modularml.utils.modeling import make_dummy_batch
 if TYPE_CHECKING:
     from modularml.core.data_structures.batch import Batch, BatchOutput
     from modularml.core.loss.applied_loss import AppliedLoss
-    from modularml.core.loss.loss_result import LossResult
+    from modularml.core.loss.loss_record import LossResult
     from modularml.core.optimizer.optimizer import Optimizer
 
 
@@ -925,6 +927,7 @@ class ModelGraph:
         self,
         batch_input: dict[str, Batch],
         losses: dict[str, list[AppliedLoss]],
+        nodes_to_iterate_over: list[str],
     ) -> StepResult:
         """
         Execute training by calling `train_step` on each stage individually.
@@ -935,6 +938,7 @@ class ModelGraph:
         Args:
             batch_input (dict[str, Batch]): Input data keyed by FeatureSet label.
             losses (dict[str, list[AppliedLoss]]): Applied losses keyed by node label.
+            nodes_to_iterate_over (list[str]): A list of nodes defining the minimum subgraph needing to be trained.
 
         Returns:
             StepResult: Aggregated losses and outputs from the training step.
@@ -946,30 +950,27 @@ class ModelGraph:
         """
         # Cache all stage outputs
         cache: dict[str, Batch | BatchOutput] = dict(batch_input)
-        loss_cache: dict[str, list[LossResult]] = defaultdict(list)
-        total_loss = 0.0
-        total_opt_loss = 0.0
-        total_non_opt_loss = 0.0
+        loss_cache: LossCollection = None
 
-        for lbl in self._sorted_node_labels:
+        # Forward pass + collect outputs
+        for lbl in nodes_to_iterate_over:
             if lbl in self.source_node_labels:
                 continue
 
             node = self._nodes[lbl]
+            node_losses = losses.get(lbl)
             if not isinstance(node, ComputationNode):
-                msg = f"Training can only be perform on ComputationNodes. Received: {node}."
+                msg = f"Training can only be performed on ComputationNodes. Received: {node}."
                 raise TypeError(msg)
 
-            # Get losses for this node
-            node_losses = losses.get(lbl)
-
-            # Forward pass + loss (+ opt if trainable)
+            # Use train_step if trainable
             if isinstance(node, TrainableMixin) and not node.freeze:
                 if node_losses is None:
                     msg = f"Node `{lbl}` is set to train but has no applied losses."
                     raise ValueError(msg)
                 step_res = node.train_step(batch_input=cache, losses=node_losses)
 
+            # Use eval_step if not trainable but is evaluable
             elif isinstance(node, EvaluableMixin):
                 if node_losses:
                     warnings.warn(
@@ -979,24 +980,36 @@ class ModelGraph:
                     )
                 step_res = node.eval_step(batch_input=cache, losses=node_losses)
 
+            # Use manual forward + loss comp otherwise (no optimizer contribution)
             else:
-                msg = f"Node `{lbl}` is not trainable or evaluable."
-                raise TypeError(msg)
+                model_output: BatchOutput = node.forward(node.get_input_batch(cache))
+                loss_records: list[LossRecord] = []
+                if node_losses is not None:
+                    for loss in node_losses:
+                        weighted_raw_loss = loss.compute(
+                            batch_input=cache,
+                            model_outputs={lbl: model_output},
+                        )
+                        lr = LossRecord(
+                            value=weighted_raw_loss,
+                            label=loss.label,
+                            contributes_to_update=False,  # does not contribute to loss stepping
+                        )
+                        loss_records.append(lr)
+                lc = LossCollection(records=loss_records)
+                step_res = StepResult(losses=lc, node_outputs={lbl: model_output})
 
             # Cache stage outputs
             cache[lbl] = step_res.node_outputs[lbl]
 
-            # Record losses
-            loss_cache[lbl] = step_res.all_loss_results[lbl]
-            total_loss += step_res.total_loss
-            total_opt_loss += step_res.total_opt_loss
-            total_non_opt_loss += step_res.total_non_opt_loss
+            # Merge losses into a single LossCollection
+            if loss_cache is None:
+                loss_cache = step_res.losses
+            else:
+                loss_cache += step_res.losses
 
         return StepResult(
-            total_loss=total_loss,
-            total_non_opt_loss=total_non_opt_loss,
-            total_opt_loss=total_opt_loss,
-            all_loss_results=loss_cache,
+            losses=loss_cache,
             node_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
         )
 
@@ -1027,16 +1040,10 @@ class ModelGraph:
         """
         # Cache all stage outputs
         cache: dict[str, Batch | BatchOutput] = dict(batch_input)
-        # Cache all loss results (keyed by ModelStage.label)
-        loss_cache: dict[str, list[LossResult]] = defaultdict(list)
+        loss_records: list[LossRecord] = []
 
         # Set optimizer
         self._optimizer.zero_grad()
-
-        # There may be cases were the ModelGraph consits of PyTorch & non-optimizable stages (eg, scikit)
-        # To optimizate the PyTorch stages, we need to separate out losses for optimization and not
-        opt_losses: list[LossResult] = []
-        non_opt_losses: list[LossResult] = []
 
         # Forward pass + collect outputs
         for lbl in nodes_to_iterate_over:
@@ -1046,76 +1053,71 @@ class ModelGraph:
             node = self._nodes[lbl]
             node_losses = losses.get(lbl)
             if not isinstance(node, ComputationNode):
-                msg = f"Training can only be perform on ComputationNodes. Received: {node}."
+                msg = f"Training can only be performed on ComputationNodes. Received: {node}."
                 raise TypeError(msg)
 
             if isinstance(node, TrainableMixin) and not node.freeze:
-                if not backend_requires_optimizer(node.backend):
-                    step_res = node.train_step(batch_input=cache, losses=node_losses)
-                    cache[lbl] = step_res.node_outputs[lbl]
-                    loss_cache[lbl].extend(step_res.all_loss_results[lbl])
-                    non_opt_losses.extend(step_res.all_loss_results[lbl])
-                    continue
-
                 # Perform manual train + loss comp (to ensure no autograd breakage)
-                node.model.train()
+                if hasattr(node.model, "train"):
+                    node.model.train()
                 model_output: BatchOutput = node.forward(node.get_input_batch(cache))
 
                 # Compute stage loss (store entire LossResult for later computation)
                 if node_losses is not None:
                     for loss in node_losses:
-                        loss_res = loss.compute(batch_input=cache, model_outputs={lbl: model_output})
-                        loss_cache[lbl].append(loss_res)
-                        opt_losses.append(loss_res)
+                        weighted_raw_loss = loss.compute(
+                            batch_input=cache,
+                            model_outputs={lbl: model_output},
+                        )
+                        lr = LossRecord(
+                            value=weighted_raw_loss,
+                            label=loss.label,
+                            contributes_to_update=True,
+                        )
+                        loss_records.append(lr)
 
                 cache[lbl] = model_output
                 continue
 
-            if isinstance(node, EvaluableMixin):
-                if node_losses:
-                    warnings.warn(
-                        f"Node `{lbl}` has losses applied during train_step, but it is frozen. "
-                        f"These losses will not contribute to optimizer stepping.",
-                        stacklevel=2,
-                    )
+            if node_losses:
+                warnings.warn(
+                    f"Node `{lbl}` has losses applied during train_step, but it is not a "
+                    "subclass of TrainableMixin. These losses will not contribute to "
+                    "optimizer stepping.",
+                    stacklevel=2,
+                )
 
+            if hasattr(node.model, "eval"):
                 node.model.eval()
-                step_res = node.eval_step(batch_input=cache, losses=node_losses)
-                cache[lbl] = step_res.node_outputs[lbl]
-                loss_cache[lbl].extend(step_res.all_loss_results[lbl])
-                non_opt_losses.extend(step_res.all_loss_results[lbl])
-                continue
-
-            # If not a Trainable/Evaluable node (ie, its a MergeStage)
-            # just perform a forward pass and collect outputs
             model_output: BatchOutput = node.forward(node.get_input_batch(cache))
+
+            # Compute stage loss (store entire LossResult for later computation)
+            if node_losses is not None:
+                for loss in node_losses:
+                    weighted_raw_loss = loss.compute(
+                        batch_input=cache,
+                        model_outputs={lbl: model_output},
+                    )
+                    lr = LossRecord(
+                        value=weighted_raw_loss,
+                        label=loss.label,
+                        contributes_to_update=False,
+                    )
+                    loss_records.append(lr)
+
             cache[lbl] = model_output
+            continue
 
         # Perform optimization stepping
-        if not opt_losses:
-            raise RuntimeError("Optimizer stepping cannot be performed because no losses were applied.")
+        if not loss_records:
+            raise RuntimeError("Optimizer stepping cannot be performed because no recorded losses.")
 
-        total_opt_loss = torch.stack([lr.value for lr in opt_losses]).sum()
-        total_opt_loss.backward()
-        # for lbl in self._opt_built_from_nodes:
-        #     node = self._nodes[lbl]
-        #     for name, param in node._model.named_parameters():
-        #         print(f"{lbl}.{name} grad: {param.grad.norm().item() if param.grad is not None else 'None'}")
+        lc = LossCollection(records=loss_records)
+        lc.trainable.backward()
         self._optimizer.step()
 
-        # Convert total loss to float now that gradient tracking is done
-        total_opt_loss = total_opt_loss.item()
-
-        # Aggregate all losses for logging
-        total_non_opt_loss = 0
-        for lr in non_opt_losses:
-            total_non_opt_loss += to_python(lr.value)
-
         return StepResult(
-            total_loss=float(total_non_opt_loss) + float(total_opt_loss),
-            total_opt_loss=float(total_opt_loss),
-            total_non_opt_loss=float(total_non_opt_loss),
-            all_loss_results=loss_cache,
+            losses=lc,
             node_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
         )
 
@@ -1146,15 +1148,13 @@ class ModelGraph:
         """
         # Cache all stage outputs
         cache: dict[str, Batch | BatchOutput] = dict(batch_input)
-        # Cache all loss results (keyed by ModelStage.label)
-        loss_cache: dict[str, list[LossResult]] = defaultdict(list)
+        loss_records: list[LossRecord] = []
+
+        # Set optimizer
+        self._optimizer.zero_grad()
+
         # Collect trainable variables for optimization
         trainable_vars = []
-
-        # There may be cases were the ModelGraph consits of TF & non-optimizable stages (eg, scikit)
-        # To optimizate the TF stages, we need to separate out losses for optimization and not
-        opt_losses: list[LossResult] = []
-        non_opt_losses: list[LossResult] = []
 
         with tf.GradientTape(persistent=True) as tape:
             # Forward pass + collect outputs
@@ -1165,72 +1165,78 @@ class ModelGraph:
                 node = self._nodes[lbl]
                 node_losses = losses.get(lbl)
                 if not isinstance(node, ComputationNode):
-                    msg = f"Training can only be perform on ComputationNodes. Received: {node}."
+                    msg = f"Training can only be performed on ComputationNodes. Received: {node}."
                     raise TypeError(msg)
 
                 if isinstance(node, TrainableMixin) and not node.freeze:
-                    if not backend_requires_optimizer(node.backend):
-                        step_res = node.train_step(batch_input=cache, losses=node_losses)
-                        cache[lbl] = step_res.node_outputs[lbl]
-                        loss_cache[lbl].extend(step_res.all_loss_results[lbl])
-                        non_opt_losses.extend(step_res.all_loss_results[lbl])
-                        continue
+                    # Collect trainable model variables
+                    if hasattr(node.model, "trainable_variables"):
+                        trainable_vars += list(node.model.trainable_variables)
 
-                    # Perform manual train + loss comp
-                    model_output: BatchOutput = node.forward(node.get_input_batch(cache), training=True)
-
-                    # Track trainable variables for this stage
-                    trainable_vars.extend(node.model.trainable_variables)
+                    model_output: BatchOutput = node.forward(
+                        node.get_input_batch(cache),
+                        training=True,
+                    )
 
                     # Compute stage loss (store entire LossResult for later computation)
                     if node_losses is not None:
                         for loss in node_losses:
-                            loss_res = loss.compute(batch_input=cache, model_outputs={lbl: model_output})
-                            loss_cache[lbl].append(loss_res)
-                            opt_losses.append(loss_res)
+                            weighted_raw_loss = loss.compute(
+                                batch_input=cache,
+                                model_outputs={lbl: model_output},
+                            )
+                            lr = LossRecord(
+                                value=weighted_raw_loss,
+                                label=loss.label,
+                                contributes_to_update=True,
+                            )
+                            loss_records.append(lr)
 
                     cache[lbl] = model_output
                     continue
 
-                if isinstance(node, EvaluableMixin):
-                    if node_losses:
-                        warnings.warn(
-                            f"Node `{lbl}` has losses applied during train_step, but it is frozen. "
-                            f"These losses will not contribute to optimizer stepping.",
-                            stacklevel=2,
+                if node_losses:
+                    warnings.warn(
+                        f"Node `{lbl}` has losses applied during train_step, but it is not a "
+                        "subclass of TrainableMixin. These losses will not contribute to "
+                        "optimizer stepping.",
+                        stacklevel=2,
+                    )
+                model_output: BatchOutput = node.forward(
+                    node.get_input_batch(cache),
+                    training=False,
+                )
+
+                # Compute stage loss (store entire LossResult for later computation)
+                if node_losses is not None:
+                    for loss in node_losses:
+                        weighted_raw_loss = loss.compute(
+                            batch_input=cache,
+                            model_outputs={lbl: model_output},
                         )
+                        lr = LossRecord(
+                            value=weighted_raw_loss,
+                            label=loss.label,
+                            contributes_to_update=False,
+                        )
+                        loss_records.append(lr)
 
-                    node.model.eval()
-                    step_res = node.eval_step(batch_input=cache, losses=node_losses)
-                    cache[lbl] = step_res.node_outputs[lbl]
-                    loss_cache[lbl].extend(step_res.all_loss_results[lbl])
-                    non_opt_losses.extend(step_res.all_loss_results[lbl])
-                    continue
-
-                # If not a Trainable/Evaluable node (ie, its a MergeStage)
-                # just perform a forward pass and collect outputs
-                model_output: BatchOutput = node.forward(node.get_input_batch(cache))
                 cache[lbl] = model_output
+                continue
 
         # Perform optimization stepping
-        total_opt_loss = tf.add_n([lr.value for lr in opt_losses])
-        grads = tape.gradient(total_opt_loss, trainable_vars)
+        if not loss_records:
+            raise RuntimeError("Optimizer stepping cannot be performed because no recorded losses.")
+
+        lc = LossCollection(records=loss_records)
+        grads = tape.gradient(lc.trainable, trainable_vars)
+        if any(g is None for g in grads):
+            raise RuntimeError("Some gradients are None. Check your graph and loss construction.")
         self._optimizer.step(grads=grads, variables=trainable_vars)
         del tape  # Clean up persistent tape
 
-        # Convert total loss to float now that gradient tracking is done
-        total_opt_loss = float(total_opt_loss.numpy())
-
-        # Aggregate all losses for logging
-        total_non_opt_loss = 0
-        for lr in non_opt_losses:
-            total_non_opt_loss += to_python(lr.value)
-
         return StepResult(
-            total_loss=float(total_non_opt_loss) + float(total_opt_loss),
-            total_opt_loss=float(total_opt_loss),
-            total_non_opt_loss=float(total_non_opt_loss),
-            all_loss_results=loss_cache,
+            losses=lc,
             node_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
         )
 
@@ -1390,45 +1396,55 @@ class ModelGraph:
 
         # Cache all stage outputs
         cache: dict[str, Batch | BatchOutput] = dict(batch_input)
-        loss_cache: dict[str, list[LossResult]] = defaultdict(list)
-        total_loss = 0.0
-        total_opt_loss = 0.0
-        total_non_opt_loss = 0.0
+        loss_cache: LossCollection = None
 
-        # Go through stages in sorted order
+        # Forward pass + collect outputs
         for lbl in self._sorted_node_labels:
             if lbl in self.source_node_labels:
                 continue
 
             node = self._nodes[lbl]
             node_losses = losses.get(lbl)
-            if isinstance(node, EvaluableMixin):
-                # Forward pass + loss
-                step_res = node.eval_step(batch_input=cache, losses=node_losses)
-
-                # Cache stage outputs
-                cache[lbl] = step_res.node_outputs[lbl]
-                loss_cache[lbl] = step_res.all_loss_results[lbl]
-
-                total_loss += step_res.total_loss
-                total_opt_loss += step_res.total_opt_loss
-                total_non_opt_loss += step_res.total_non_opt_loss
-
-            elif isinstance(node, ComputationNode):
-                # If not a Evaluable node (ie, its a MergeStage)
-                # just perform a forward pass and collect outputs
-                model_output: BatchOutput = node.forward(node.get_input_batch(cache))
-                cache[lbl] = model_output
-
-            else:
-                msg = f"Evaluation can only be perform on ComputationNode subclasses. Received: {node}."
+            if not isinstance(node, ComputationNode):
+                msg = f"Evaluation can only be performed on ComputationNodes. Received: {node}."
                 raise TypeError(msg)
 
+            # Use eval_step (if supported)
+            if isinstance(node, EvaluableMixin):
+                step_res = node.eval_step(batch_input=cache, losses=node_losses)
+
+            # Use manual forward + loss comp otherwise (no optimizer contribution)
+            else:
+                if hasattr(node, "model") and hasattr(node.model, "eval"):
+                    node.model.eval()
+                model_output: BatchOutput = node.forward(node.get_input_batch(cache))
+                loss_records: list[LossRecord] = []
+                if node_losses is not None:
+                    for loss in node_losses:
+                        weighted_raw_loss = loss.compute(
+                            batch_input=cache,
+                            model_outputs={lbl: model_output},
+                        )
+                        lr = LossRecord(
+                            value=weighted_raw_loss,
+                            label=loss.label,
+                            contributes_to_update=False,  # does not contribute to loss stepping
+                        )
+                        loss_records.append(lr)
+                lc = LossCollection(records=loss_records)
+                step_res = StepResult(losses=lc, node_outputs={lbl: model_output})
+
+            # Cache stage outputs
+            cache[lbl] = step_res.node_outputs[lbl]
+
+            # Merge losses into a single LossCollection
+            if loss_cache is None:
+                loss_cache = step_res.losses
+            else:
+                loss_cache += step_res.losses
+
         return StepResult(
-            total_loss=total_loss,
-            total_opt_loss=total_opt_loss,
-            total_non_opt_loss=total_non_opt_loss,
-            all_loss_results=loss_cache,
+            losses=loss_cache,
             node_outputs={k: v for k, v in cache.items() if k in self.connected_node_labels},
         )
 
