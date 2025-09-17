@@ -1,6 +1,4 @@
 import copy
-import math
-import warnings
 from collections import defaultdict
 from typing import Any, Literal
 
@@ -8,7 +6,6 @@ import numpy as np
 import pandas as pd
 from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
-from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.node_outputs import NodeOutputs
 from modularml.core.data_structures.sample import Sample
@@ -503,9 +500,8 @@ class Experiment:
                 results[k] = to_python(unscaled)
 
         else:
-            raise NotImplementedError(
-                "Inverse transform of node outputs using feature transforms is not supported yet."
-            )
+            msg = "Inverse transform of node outputs using feature transforms is not supported yet."
+            raise NotImplementedError(msg)
         # endregion
 
         return pd.DataFrame(results)

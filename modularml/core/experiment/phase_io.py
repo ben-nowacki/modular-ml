@@ -1,7 +1,6 @@
 import copy
 import warnings
 from collections import defaultdict
-from typing import Any
 
 from modularml.core.data_structures.batch import Batch
 from modularml.core.graph.feature_set import FeatureSet
