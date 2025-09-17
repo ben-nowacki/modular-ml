@@ -582,7 +582,7 @@ class ModelGraph:
             # Move downstream_node (`before`) inputs to new_node inputs
             downstream_node = self._nodes[before]
             node.set_upstream_nodes(
-                inputs=downstream_node.get_upstream_nodes(error_mode=ErrorMode.COERCE),
+                upstream_nodes=downstream_node.get_upstream_nodes(error_mode=ErrorMode.COERCE),
                 error_mode=ErrorMode.COERCE,
             )
 
@@ -615,7 +615,7 @@ class ModelGraph:
             # Move upstream_node (`after`) outputs to new_node outputs
             upstream_node = self._nodes[after]
             node.set_downstream_nodes(
-                outputs=upstream_node.get_downstream_nodes(error_mode=ErrorMode.COERCE),
+                downstream_nodes=upstream_node.get_downstream_nodes(error_mode=ErrorMode.COERCE),
                 error_mode=ErrorMode.COERCE,
             )
 
@@ -798,7 +798,7 @@ class ModelGraph:
                 continue
 
             # Build node with shape inferrence
-            if isinstance(node, ComputationNode) and not node.is_built:
+            if isinstance(node, ComputationNode) and (not node.is_built or reset):
                 # Get all inputs feeding into this node
                 input_shapes: list[tuple[int, ...]] = self._get_input_shapes(node)
 
@@ -814,7 +814,7 @@ class ModelGraph:
                         output_shapes = [cache[node.upstream_node].target_shape]
 
                     # Build node
-                    node.build(input_shapes=input_shapes, output_shapes=output_shapes)
+                    node.build(input_shapes=input_shapes, output_shapes=output_shapes, force=reset)
                     print(f"Built node `{lbl}` with shapes: {node.input_shape} -> {node.output_shape}")
 
                 # MergeStage only accepts an input_shape, but also requires a backend
@@ -831,6 +831,62 @@ class ModelGraph:
         self._build_optimizer(self._nodes_req_opt)
 
         self._built = True
+
+    def get_node_source(self, node: GraphNode | str) -> str | tuple[str] | None:
+        """
+        Recursively trace the ultimate source FeatureSet node(s) that feed into the given node.
+
+        A "source node" in this context means one of the graph's root FeatureSets
+        (i.e., labels in `self._source_node_labels`) that provides original data
+        with no upstream dependencies.
+
+        Args:
+            node (GraphNode | str):
+                The target node for which to trace back sources. Can be either a
+                GraphNode instance or its string label.
+
+        Returns:
+            str | tuple[str] | None:
+                - If exactly one source node is found, returns its label as a string.
+                - If multiple distinct source nodes are found, returns a tuple of their labels.
+                - If no sources are found (e.g., orphaned node), returns None.
+
+        Notes:
+            - Traverses all upstream connections recursively, not just direct parents.
+            - Useful for determining lineage of a ModelStage output
+            (e.g., which FeatureSet(s) provided its training/evaluation data).
+            - If the node is itself a source FeatureSet, it will be returned as the sole source.
+
+        """
+
+        node_instance = node
+        if isinstance(node, str):
+            node_instance = self._nodes[node]
+
+        visited: set[str] = set()
+
+        def _collect_sources(n: GraphNode) -> set[str]:
+            if n.label in visited:
+                return set()  # prevent cycles
+            visited.add(n.label)
+
+            # If this node is itself a source, stop here
+            if n.label in self._source_node_labels:
+                return {n.label}
+
+            # Otherwise, recurse upstream
+            sources = set()
+            for upstream in n.get_upstream_nodes(error_mode=ErrorMode.COERCE):
+                sources |= _collect_sources(self._nodes[upstream])
+            return sources
+
+        sources = _collect_sources(node_instance)
+
+        if not sources:
+            return None
+        if len(sources) == 1:
+            return next(iter(sources))
+        return tuple(sources)
 
     # ==========================================
     # Forward Pass / Direct Calls

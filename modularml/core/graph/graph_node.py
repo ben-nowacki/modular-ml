@@ -154,7 +154,7 @@ class GraphNode(ABC):
 
         """
         if not self.allows_upstream_connections:
-            handled = self._handle_fatal_error(
+            handled = self._handle_benign_error(
                 GraphNodeInputError,
                 "This node does not allow upstream connections.",
                 error_mode,
@@ -177,7 +177,7 @@ class GraphNode(ABC):
 
         """
         if not self.allows_downstream_connections:
-            handled = self._handle_fatal_error(
+            handled = self._handle_benign_error(
                 GraphNodeOutputError,
                 "This node does not allow downstream connections.",
                 error_mode,
