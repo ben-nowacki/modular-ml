@@ -1,12 +1,11 @@
-
 from sklearn.preprocessing import (
-    StandardScaler,
-    MinMaxScaler,
     MaxAbsScaler,
-    RobustScaler,
+    MinMaxScaler,
     Normalizer,
-    QuantileTransformer,
     PowerTransformer,
+    QuantileTransformer,
+    RobustScaler,
+    StandardScaler,
 )
 
 from .absolute import Absolute
@@ -16,11 +15,18 @@ from .per_sample_zero import PerSampleZeroStart
 from .segmented_scaler import SegmentedScaler
 
 __all__ = [
-    "StandardScaler", "MinMaxScaler", "MaxAbsScaler", "RobustScaler", 
-    "Normalizer", "QuantileTransformer", "PowerTransformer",
-    
-    "Absolute", "Negate", "PerSampleMinMaxScaler", "PerSampleZeroStart",
+    "Absolute",
+    "MaxAbsScaler",
+    "MinMaxScaler",
+    "Negate",
+    "Normalizer",
+    "PerSampleMinMaxScaler",
+    "PerSampleZeroStart",
+    "PowerTransformer",
+    "QuantileTransformer",
+    "RobustScaler",
     "SegmentedScaler",
+    "StandardScaler",
 ]
 
 
@@ -32,7 +38,6 @@ SCALER_REGISTRY = {
     "normalize": Normalizer,
     "quantile": QuantileTransformer,
     "power": PowerTransformer,
-    
     "sample_minmax": PerSampleMinMaxScaler,
     "sample_zero": PerSampleZeroStart,
     "negate": Negate,

@@ -1,8 +1,7 @@
-
-
-from .feature_sampler import FeatureSampler
-
+from .paired_sampler import PairedSampler
+from .simple_sampler import SimpleSampler
 
 __all__ = [
-    "FeatureSampler", 
+    "PairedSampler",
+    "SimpleSampler",
 ]

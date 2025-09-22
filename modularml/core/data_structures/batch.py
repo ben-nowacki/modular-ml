@@ -1,176 +1,284 @@
-
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
 import uuid
+from dataclasses import dataclass, field
+from typing import Any
 
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
 
- 
+
 @dataclass
-class Batch: 
+class Batch:
     """
-    Container for a single batch of samples
+    A container representing a batch of samples grouped by roles (e.g., 'anchor', 'positive').
 
     Attributes:
-        role_samples (Dict[str, SampleCollection]): Sample collections in \
-            batch assigned to a string-based "role". E.g., for triplet-based \
-            batches, you'd have \
-            `_samples={'anchor':List[Sample], 'negative':List[Sample], ...}`.
-        role_sample_weights: (Dict[str, Data]): List of weights  applied to \
-            samples in this batch, using the same string-based "role" dictionary. \
-            E.g., `_sample_weights={'anchor':List[float], 'negative':..., ...}`. \
-            If None, all samples will have the same weight.
-        label (str, optional): Optional user-assigned label.
-        uuid (str): A globally unique ID for this batch. Automatically assigned if not provided.    
-    """  
-    role_samples: Dict[str, SampleCollection]
-    role_sample_weights: Dict[str, Data] = None
-    label: Optional[str] = None
+        role_samples (dict[str, SampleCollection]):
+            A mapping from string-based roles to SampleCollection objects.
+            For example, a triplet batch may use:
+            {'anchor': SampleCollection, 'positive': SampleCollection, 'negative': SampleCollection}.
+
+        role_sample_weights (dict[str, Data], optional):
+            Optional mapping of roles to per-sample weight arrays.
+            If not provided, weights are assumed to be uniform (1.0 for all samples).
+
+        label (str, optional):
+            Optional label or tag associated with the batch (e.g., for tracking or logging).
+
+        uuid (str):
+            A unique identifier automatically assigned to each batch instance.
+
+    """
+
+    role_samples: dict[str, SampleCollection]
+    role_sample_weights: dict[str, Data] = None
+    label: str | None = None
     uuid: str = field(default_factory=lambda: str(uuid.uuid4()))
-    
+
     def __post_init__(self):
+        """
+        Perform post-initialization checks.
+
+        Checks performed include:
+            - Ensures all role sample collections have the same feature/target shape.
+            - Initializes sample weights to 1.0 if not provided.
+            - Validates consistency between sample and weight lengths.
+
+        """
         # Enforce consistent shapes
-        f_shapes = list(set([c.feature_shape for c in self.role_samples.values()]))
-        if not len(f_shapes) == 1:
-            raise ValueError(f"Inconsistent feature shapes across Batch roles: {f_shapes}.")
+        f_shapes = list({c.feature_shape for c in self.role_samples.values()})
+        if len(f_shapes) != 1:
+            msg = f"Inconsistent feature shapes across Batch roles: {f_shapes}."
+            raise ValueError(msg)
         self._feature_shape = f_shapes[0]
-        
-        t_shapes = list(set([c.target_shape for c in self.role_samples.values()]))
-        if not len(t_shapes) == 1:
-            raise ValueError(f"Inconsistent target shapes across Batch roles: {t_shapes}.")
+
+        t_shapes = list({c.target_shape for c in self.role_samples.values()})
+        if len(t_shapes) != 1:
+            msg = f"Inconsistent target shapes across Batch roles: {t_shapes}."
+            raise ValueError(msg)
         self._target_shape = t_shapes[0]
-        
+
         # Check weight shapes
         if self.role_sample_weights is None:
-            self.role_sample_weights = {
-                r: Data([1, ] * len(c))
-                for r,c in self.role_samples.items()
-            }
+            self.role_sample_weights = {r: Data([1] * len(c)) for r, c in self.role_samples.items()}
         else:
-            # Check that each sample weight key matches sample length 
+            # Check that each sample weight key matches sample length
             for r, c in self.role_samples.items():
-                if not r in self.role_sample_weights.keys():
-                    raise KeyError(f'Batch `role_sample_weights` is missing required role: `{r}`')
-                if not len(self.role_sample_weights[r]) == len(c):
-                    raise ValueError(
+                if r not in self.role_sample_weights:
+                    msg = f"Batch `role_sample_weights` is missing required role: `{r}`"
+                    raise KeyError(msg)
+                if len(self.role_sample_weights[r]) != len(c):
+                    msg = (
                         f"Length of batch sample weights does not match length of samples "
                         f"for role `{r}`: {len(self.role_sample_weights[r])} != {len(c)}."
                     )
-        
+                    raise ValueError(msg)
+
     @property
-    def available_roles(self) -> List[str]:
-        """All assigned roles in this batch."""
+    def available_roles(self) -> list[str]:
+        """
+        List of role names (e.g., ['anchor', 'positive']).
+
+        Returns:
+            list[str]: The list of available role keys.
+
+        """
         return list(self.role_samples.keys())
 
     @property
-    def feature_shape(self) -> Tuple[int, ...]:
+    def feature_shape(self) -> tuple[int, ...]:
+        """
+        Feature shape shared across all roles.
+
+        Returns:
+            tuple[int, ...]: Shape of features.
+
+        """
         return self._feature_shape
-    
+
     @property
-    def target_shape(self) -> Tuple[int, ...]:
+    def target_shape(self) -> tuple[int, ...]:
+        """
+        Target shape shared across all roles.
+
+        Returns:
+            tuple[int, ...]: Shape of targets.
+
+        """
         return self._target_shape
 
     @property
     def n_samples(self) -> int:
+        """
+        Number of samples in each role (equal for all roles).
+
+        Returns:
+            int: Sample count per role.
+
+        """
         if not hasattr(self, "_n_samples") or self._n_samples is None:
             self._n_samples = len(self.role_samples[self.available_roles[0]])
         return self._n_samples
-       
+
     def __len__(self):
+        """
+        Return number of samples per role.
+
+        Returns:
+            int: Sample count.
+
+        """
         return self.n_samples
 
-    def get_samples(self, role:str) -> SampleCollection:
+    def get_samples(self, role: str) -> SampleCollection:
+        """
+        Retrieve the sample collection for a given role.
+
+        Args:
+            role (str): The role name to retrieve.
+
+        Returns:
+            SampleCollection: The samples associated with that role.
+
+        """
         return self.role_samples[role]
-    
+
 
 @dataclass
 class BatchOutput:
-    features: Dict[str, Any]
-    sample_uuids: Dict[str, Any]
-    targets: Optional[Dict[str, Any]] = None
-    tags: Optional[Dict[str, Any]] = None 
-    
-    
-    def __post_init__(self, ): 
+    """
+    Output container for ComputationNodes, representing the raw output tensor(s) for each role.
+
+    Attributes:
+        features (dict[str, Any]):
+            Mapping from role names to output feature tensors.
+
+        sample_uuids (dict[str, Any]):
+            Mapping from role names to sample UUID lists.
+
+        targets (dict[str, Any], optional):
+            Optional mapping from role names to target tensors.
+
+        tags (dict[str, Any], optional):
+            Optional mapping from role names to auxiliary tag data.
+
+    """
+
+    features: dict[str, Any]
+    sample_uuids: dict[str, Any]
+    targets: dict[str, Any] | None = None
+    tags: dict[str, Any] | None = None
+
+    def __post_init__(self):
+        """
+        Perform validation and shape enforcement.
+
+        Checks performed include:
+            - Checks for consistency of feature, target, and tag shapes.
+            - Ensures keys match between features and sample_uuids.
+
+        """
         # Enforce consistent shapes
-        f_shapes = list(set([self.features[role].shape for role in self.features.keys()]))
-        if not len(f_shapes) == 1:
-            raise ValueError(f"Inconsistent feature shapes across BatchOutput roles: {f_shapes}.")
+        f_shapes = list({self.features[role].shape for role in self.features})
+        if len(f_shapes) != 1:
+            msg = f"Inconsistent feature shapes across BatchOutput roles: {f_shapes}."
+            raise ValueError(msg)
         self._feature_shape = f_shapes[0]
-        
+
         if self.targets is not None:
-            t_shapes = list(set([self.targets[role].shape for role in self.targets.keys()]))
-            if not len(t_shapes) == 1:
-                raise ValueError(f"Inconsistent target shapes across Batch roles: {t_shapes}.")
+            t_shapes = list({self.targets[role].shape for role in self.targets})
+            if len(t_shapes) != 1:
+                msg = f"Inconsistent target shapes across Batch roles: {t_shapes}."
+                raise ValueError(msg)
             self._target_shape = t_shapes[0]
-        else:  self._target_shape = None
-        
+        else:
+            self._target_shape = None
+
         if self.tags is not None:
-            t_shapes = list(set([self.tags[role].shape for role in self.tags.keys()]))
-            if not len(t_shapes) == 1:
-                raise ValueError(f"Inconsistent tag shapes across Batch roles: {t_shapes}.")
+            t_shapes = []
+            for role in self.tags:
+                if isinstance(self.tags[role], dict):
+                    t_shapes.extend([self.tags[role][k].shape for k in self.tags[role]])
+                else:
+                    t_shapes.append(self.tags[role].shape)
+            t_shapes = list(set(t_shapes))
+            if len(t_shapes) != 1:
+                msg = f"Inconsistent tag shapes across Batch roles: {t_shapes}."
+                raise ValueError(msg)
             self._target_shape = t_shapes[0]
-        else:  self._target_shape = None
-        
+        else:
+            self._target_shape = None
+
         # Ensure feature keys = sample uuid keys
-        f_keys = set(list(self.features.keys()))
-        s_keys = set(list(self.sample_uuids.keys()))
+        f_keys = set(self.features.keys())
+        s_keys = set(self.sample_uuids.keys())
         if f_keys.difference(s_keys):
-            raise ValueError(f"features and sample_uuids have differing keys: {f_keys} != {s_keys}.")
-        
-    
-    def to_batch(self, label: str = None, role_sample_weights = None) -> Batch:
+            msg = f"features and sample_uuids have differing keys: {f_keys} != {s_keys}."
+            raise ValueError(msg)
+
+    def to_batch(self, label: str | None = None, role_sample_weights=None) -> Batch:
+        """
+        Convert the BatchOutput into a Batch of SampleCollections.
+
+        Args:
+            label (str, optional): Optional label to assign to the Batch.
+            role_sample_weights (dict[str, Data], optional): Optional weights per role.
+
+        Returns:
+            Batch: A reconstructed Batch object.
+
+        """
         role_samples = {}
-        
+
         for role in self.available_roles:
             samples = []
             for i in range(len(self.features[role])):
-                features = {
-                    f"output_{i}": Data(self.features[role][i][j])
-                    for j in range(len(self.features[role][i]))
-                }
+                features = {f"output_{i}": Data(self.features[role][i][j]) for j in range(len(self.features[role][i]))}
                 targets = self.targets
                 if self.targets is not None:
-                    targets = {
-                        f"output_{i}": Data(self.targets[role][i][j])
-                        for j in range(len(self.targets[role][i]))
-                    }
+                    targets = {f"output_{i}": Data(self.targets[role][i][j]) for j in range(len(self.targets[role][i]))}
                 tags = self.tags
                 if self.tags is not None:
-                    tags = {
-                        f"output_{i}": Data(self.tags[role][i][j])
-                        for j in range(len(self.tags[role][i]))
-                    }
-                metadata = self.metadata
-                if self.metadata is not None:
-                    metadata = {
-                        f"output_{i}": Data(self.metadata[role][i][j])
-                        for j in range(len(self.metadata[role][i]))
-                    }
-                    
-                samples.append(Sample(
-                    features=features, targets=targets, tags=tags, metadata=metadata
-                ))
-            
+                    tags = {f"output_{i}": Data(self.tags[role][i][j]) for j in range(len(self.tags[role][i]))}
+                samples.append(Sample(features=features, targets=targets, tags=tags))
+
             role_samples[role] = SampleCollection(samples)
-        
+
         return Batch(
             role_samples=role_samples,
             role_sample_weights=role_sample_weights,
             label=label,
         )
-    
+
     @property
-    def available_roles(self) -> List[str]:
-        """All assigned roles."""
+    def available_roles(self) -> list[str]:
+        """
+        List of all roles present in the output.
+
+        Returns:
+            list[str]: The keys in the `features` dictionary.
+
+        """
         return list(self.features.keys())
 
     @property
-    def feature_shape(self) -> Tuple[int, ...]:
+    def feature_shape(self) -> tuple[int, ...]:
+        """
+        Shape of the output features.
+
+        Returns:
+            tuple[int, ...]: The shape tuple of feature tensors.
+
+        """
         return self._feature_shape
-    
+
     @property
-    def target_shape(self) -> Tuple[int, ...]:
+    def target_shape(self) -> tuple[int, ...]:
+        """
+        Shape of the output targets (if available).
+
+        Returns:
+            tuple[int, ...]: The shape tuple of target tensors.
+
+        """
         return self._target_shape

@@ -5,7 +5,7 @@
 
 **Modular, fast, and reproducible ML experimentation built for R\&D.**
 
-[![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/modularml.svg)](https://pypi.org/project/modularml/)
 [![Docs](https://app.readthedocs.org/projects/modular-ml/badge/?version=latest&style=flat)](https://modular-ml.readthedocs.io/en/latest/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange
