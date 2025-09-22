@@ -29,7 +29,10 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Programming Language :: Python"
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
 ]
 
 
@@ -39,14 +42,14 @@ dependencies = [
     "pandas",
     "scikit-learn",
     "scikit-optimize>=0.9.0",
-    "optuna",                      # For hyperparameter tuning
-    "torch",                       # PyTorch backend
-    "tensorflow",                  # TensorFlow backend
-    "networkx",                    # DAG structure
-    "plotly",
+    "optuna",
+    "torch",
+    "tensorflow",
     "matplotlib",
     "nbformat",
-    "joblib"
+    "joblib",
+    "typing-extensions",
+    "rich"
 ]
 
 
