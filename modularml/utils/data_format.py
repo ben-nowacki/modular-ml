@@ -160,8 +160,28 @@ def to_list(obj: Any, errors: ErrorMode = ErrorMode.RAISE):  # noqa: PLR0911
             return [py_obj]
 
 
-def to_numpy(obj: Any, errors: ErrorMode = ErrorMode.RAISE) -> np.ndarray:  # noqa: PLR0911
-    """Converts any object into a NumPy array."""
+def to_numpy(
+    obj: Any,
+    errors: ErrorMode = ErrorMode.RAISE,
+    _top_level: bool = True,
+) -> np.ndarray:
+    """
+    Recursively converts any object into a NumPy array.
+
+    Nested lists/tuples are traversed so every sub-sequence
+    is converted to np.ndarray where appropriate. Scalars are left
+    as plain Python types inside the structure; only the *outermost*
+    call wraps the final scalar into a 0-D array.
+
+    Args:
+        obj: Object to convert.
+        errors: Error handling mode (RAISE, COERCE, IGNORE).
+        _top_level: Internal flag to track recursion depth.
+
+    Returns:
+        np.ndarray or object (if IGNORE and conversion is not possible).
+
+    """
     # If it's already a numpy array, just return
     if isinstance(obj, np.ndarray):
         return obj
@@ -180,11 +200,15 @@ def to_numpy(obj: Any, errors: ErrorMode = ErrorMode.RAISE) -> np.ndarray:  # no
     # Sequences (lists, tuples) -> convert directly
     if isinstance(py_obj, list | tuple):
         try:
-            return np.asarray(py_obj)
-
+            # Recursively convert every element to numpy before stacking
+            converted = [to_numpy(item, errors=errors, _top_level=False) for item in py_obj]
+            return np.array(
+                converted,
+                dtype=object if any(isinstance(c, np.ndarray) and c.ndim == 0 for c in converted) else None,
+            )
         except Exception as e:
             if errors == ErrorMode.RAISE:
-                msg = f"Cannot convert sequence of type {type(py_obj)} to NumPy array."
+                msg = f"Cannot convert nested sequence of type {type(py_obj)} to NumPy array."
                 raise TypeError(msg) from e
             if errors == ErrorMode.IGNORE:
                 return py_obj
@@ -193,7 +217,9 @@ def to_numpy(obj: Any, errors: ErrorMode = ErrorMode.RAISE) -> np.ndarray:  # no
 
     # Scalars -> wrap into a 0-D array
     if np.isscalar(py_obj):
-        return np.asarray(py_obj)
+        if _top_level:
+            return np.asarray(py_obj)
+        return py_obj  # leave scalars within a nest object unchanged
 
     # Unsupported type
     if errors == ErrorMode.RAISE:

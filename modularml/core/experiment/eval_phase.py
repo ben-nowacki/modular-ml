@@ -1,9 +1,10 @@
-from modularml.core.experiment.base_phase import BasePhase
+from modularml.core.experiment.phase_io import PhaseIO
+from modularml.core.graph.model_graph import ModelGraph
 from modularml.core.loss.applied_loss import AppliedLoss
 from modularml.core.samplers.feature_sampler import FeatureSampler
 
 
-class EvaluationPhase(BasePhase):
+class EvaluationPhase:
     """
     Encapsulates a single stage of evaluation for a ModelGraph.
 
@@ -29,8 +30,6 @@ class EvaluationPhase(BasePhase):
         samplers: dict[str, FeatureSampler],
         batch_size: int,
         losses: list[AppliedLoss] | None = None,
-        # merge_policy: str | None = None,
-        # merge_mapping: dict[str, Any] | None = None,
     ):
         """
         Initializes an EvaluationPhase.
@@ -41,16 +40,19 @@ class EvaluationPhase(BasePhase):
                 Keys must be of the form "FeatureSet" or "FeatureSet.subset".
             batch_size (int): Batch size to enforce across all samplers (overrides existing sampler batch sizes).
             losses (list[AppliedLoss], optional): Optional list of loss functions and their input mappings.
-
-            # merge_policy (str, optional): Strategy to merge roles if needed. Not yet implemented. TODO
-            # merge_mapping (dict[str, Any], optional): Custom mapping for role merges. Not yet implemented. TODO
-
         """
-        super().__init__(
-            label=label,
-            losses=losses,
+        self.label = label
+
+        self.eval_io = PhaseIO(
             samplers=samplers,
             batch_size=batch_size,
-            # merge_policy=merge_policy,
-            # merge_mapping=merge_mapping,
+            losses=losses,
         )
+
+    @property
+    def resolved(self) -> bool:
+        return self.eval_io.resolved
+
+    def resolve(self, graph: ModelGraph):
+        # Resolve PhaseIO
+        self.eval_io.resolve(graph=graph)

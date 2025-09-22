@@ -88,6 +88,7 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         self,
         input_shape: tuple[int] | None = None,
         output_shape: tuple[int] | None = None,
+        force: bool = False,
     ):
         """
         Build the CNN layers and optional final linear projection.
@@ -95,6 +96,8 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         Args:
             input_shape (tuple[int] | None): Input shape (channels, length) to override initial input shape.
             output_shape (tuple[int] | None): Output shape to override initial output shape.
+            force (bool): If model is already instantiated, force determines whether to reinstantiate with \
+                the new shapes. Defaults to False.
 
         Raises:
             ValueError: If inconsistent shape is passed compared to earlier ones, or if input shape is not specified.
@@ -102,18 +105,18 @@ class SequentialCNN(BaseModel, torch.nn.Module):
 
         """
         if input_shape:
-            if self._input_shape and input_shape != self._input_shape:
+            if self._input_shape and input_shape != self._input_shape and not force:
                 msg = f"Inconsistent input_shape: {input_shape} vs {self._input_shape}"
                 raise ValueError(msg)
             self._input_shape = input_shape
 
         if output_shape:
-            if self._output_shape and output_shape != self._output_shape:
+            if self._output_shape and output_shape != self._output_shape and not force:
                 msg = f"Inconsistent output_shape: {output_shape} vs {self._output_shape}"
                 raise ValueError(msg)
             self._output_shape = output_shape
 
-        if self.is_built:
+        if self.is_built and not force:
             return
 
         if self._input_shape is None:

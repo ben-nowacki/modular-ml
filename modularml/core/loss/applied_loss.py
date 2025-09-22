@@ -1,10 +1,11 @@
+from typing import Any
+
 import numpy as np
 import tensorflow as tf
 import torch
 
 from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.loss.loss import Loss
-from modularml.core.loss.loss_result import LossResult
 from modularml.utils.backend import Backend
 from modularml.utils.data_format import get_data_format_for_backend, to_numpy
 
@@ -141,7 +142,7 @@ class AppliedLoss:
 
         return node, attribute, role
 
-    def compute(self, batch_input: dict[str, Batch], model_outputs: dict[str, BatchOutput]) -> LossResult:
+    def compute(self, batch_input: dict[str, Batch], model_outputs: dict[str, BatchOutput]) -> Any:
         """
         Compute the loss value given input batches and model outputs.
 
@@ -150,7 +151,7 @@ class AppliedLoss:
             model_outputs (dict[str, BatchOutput]): Mapping of ModelStage label to output.
 
         Returns:
-            LossResult: Contains the computed loss value and metadata (label, weight).
+            Any: The computed loss value in the data format of the loss function backend.
 
         Raises:
             ValueError: If input spec references unknown nodes or missing roles.
@@ -230,35 +231,33 @@ class AppliedLoss:
         # Call loss function (convert to positional args if needed)
         if all(k.isdigit() for k in kwargs):
             args = [kwargs[str(i)] for i in range(len(kwargs))]
-            loss_res = self.loss(*args)
+            raw_loss = self.loss(*args)
         else:
-            loss_res = self.loss(**kwargs)
+            raw_loss = self.loss(**kwargs)
 
         # Apply sample weighting
         # Convert mean_weights to correct backend tensor
-        weighted_loss = None
+        weighted_raw_loss = None
         if self.backend == Backend.TORCH:
             # Ensure loss has shape (batch_size, )
-            loss_res = loss_res.view(-1)
-            mean_weights_tensor = torch.as_tensor(mean_weights, device=loss_res.device)
-            weighted_loss = torch.sum(loss_res * mean_weights_tensor) * self.weight
+            raw_loss = raw_loss.view(-1)
+            mean_weights_tensor = torch.as_tensor(mean_weights, device=raw_loss.device)
+            weighted_raw_loss = torch.sum(raw_loss * mean_weights_tensor) * self.weight
 
         elif self.backend == Backend.TENSORFLOW:
             # Ensure loss has shape (batch_size, )
-            loss_res = tf.reshape(loss_res, [-1])
-            mean_weights_tensor = tf.convert_to_tensor(mean_weights, dtype=loss_res.dtype)
-            weighted_loss = tf.reduce_sum(loss_res * mean_weights_tensor) * self.weight
+            raw_loss = tf.reshape(raw_loss, [-1])
+            mean_weights_tensor = tf.convert_to_tensor(mean_weights, dtype=raw_loss.dtype)
+            weighted_raw_loss = tf.reduce_sum(raw_loss * mean_weights_tensor) * self.weight
 
         else:
             # Assume NumPy
-            loss_res = np.reshape(loss_res, (-1,))
+            raw_loss = np.reshape(raw_loss, (-1,))
             mean_weights = np.reshape(mean_weights, (-1,))
-            weighted_loss = np.sum(loss_res * mean_weights) * self.weight
+            weighted_raw_loss = np.sum(raw_loss * mean_weights) * self.weight
 
-        return LossResult(
-            label=self.label,
-            value=weighted_loss,
-        )
+        # returns the raw weighted loss without changing data types (to preserve auto-grad)
+        return weighted_raw_loss
 
     def __repr__(self) -> str:
         return f"AppliedLoss(label={self.label}, loss={self.loss}, all_inputs={self.all_inputs}, weight={self.weight})"

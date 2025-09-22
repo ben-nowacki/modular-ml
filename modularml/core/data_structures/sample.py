@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import copy
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -113,11 +116,20 @@ class Sample:
     def get_tags(self, key: str) -> Data:
         return self.tags.get(key)
 
-    def to_backend(self, backend: Backend) -> "Sample":
+    def to_backend(self, backend: Backend) -> Sample:
         return Sample(
             features={k: v.to_backend(backend) for k, v in self.features.items()},
             targets={k: v.to_backend(backend) for k, v in self.targets.items()},
             tags={k: v.to_backend(backend) for k, v in self.tags.items()},
+            label=self.label,
+            uuid=self.uuid,
+        )
+
+    def copy(self) -> Sample:
+        return Sample(
+            features={k: copy.deepcopy(v) for k, v in self.features.items()},
+            targets={k: copy.deepcopy(v) for k, v in self.targets.items()},
+            tags={k: copy.deepcopy(v) for k, v in self.tags.items()},
             label=self.label,
             uuid=self.uuid,
         )

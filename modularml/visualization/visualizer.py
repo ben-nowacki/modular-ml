@@ -300,7 +300,7 @@ class GraphIR:
                     src=src,
                     dst=dst,
                     conn_spec=EdgeConnectionSpec(style="-->", label=src_shape),
-                    anim_spec=EDGE_ANIMATION_DASH_MEDIUM,  # EDGE_ANIMATION_NONE,
+                    anim_spec=EDGE_ANIMATION_NONE,  # EDGE_ANIMATION_DASH_MEDIUM, EDGE_ANIMATION_NONE,
                 )
                 edges.append(e)
                 e_id_ctr += 1
