@@ -97,6 +97,7 @@ class Loss:
                 "cross_entropy": torch.nn.CrossEntropyLoss(reduction=self.reduction),
                 "bce": torch.nn.BCELoss(reduction=self.reduction),
                 "bce_logits": torch.nn.BCEWithLogitsLoss(reduction=self.reduction),
+                "cosine_embedding": torch.nn.CosineEmbeddingLoss(reduction=self.reduction)
             }
         elif self.backend == Backend.TENSORFLOW:
             avail_losses = {
