@@ -115,7 +115,7 @@ class PhaseIO:
         # Check is inputs required by AppliedLosses is missing from forward pass
         missing_inputs = required_inputs - available_inputs
         if missing_inputs:
-            msg = f"Missing inputs required by `losses`: {missing_inputs}"
+            msg = f"Missing inputs required by `losses`: {missing_inputs}. Available inputs: {available_inputs}"
             raise ValueError(msg)
 
         self._resolved = True
