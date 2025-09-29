@@ -37,7 +37,7 @@ class ConcatStage(MergeStage):
         self,
         label: str,
         upstream_nodes: list[str | GraphNode],
-        axis: int = -1,
+        axis: int = 0,
         *,
         pad_inputs: bool = False,
         pad_mode: PadMode = PadMode.CONSTANT,
@@ -131,20 +131,21 @@ class ConcatStage(MergeStage):
 
         return padded
 
-    def _validate_dims(self, values: list[Any]):
+    def _validate_dims(self, values: list[Any], concat_axis: int):
         reference_shape = values[0].shape
         for i, v in enumerate(values[1:], start=1):
             for dim, (ref_dim, val_dim) in enumerate(zip(reference_shape, v.shape, strict=True)):
-                if dim == self.concat_axis:
+                if dim == concat_axis:
                     continue
                 if ref_dim != val_dim:
                     msg = (
                         f"Mismatch in non-concat dimension {dim} between input 0 and {i}: "
-                        f"{ref_dim} vs {val_dim}. Set `pad_inputs=True` to auto-align."
+                        f"{ref_dim} vs {val_dim}. Set `pad_inputs=True` to auto-align. "
+                        f"{reference_shape} vs {v.shape} on axis={concat_axis}"
                     )
                     raise ValueError(msg)
 
-    def apply_merge(self, values: list[Any]) -> Any:
+    def apply_merge(self, values: list[Any], *, includes_batch_dim: bool = True) -> Any:
         """
         Concatenate input tensors along the specified axis.
 
@@ -154,6 +155,8 @@ class ConcatStage(MergeStage):
 
         Args:
             values (list[Any]): List of input tensors to be merged.
+            includes_batch_dim (bool): Whether the inputs values have a batch dimension. \
+                Defaults to True.
 
         Returns:
             Any: Concatenated tensor, in the backend-specific format.
@@ -169,14 +172,15 @@ class ConcatStage(MergeStage):
         if self.pad_inputs:
             values = self._pad_inputs(values)
         else:
-            self._validate_dims(values=values)
+            self._validate_dims(values=values, concat_axis=self.concat_axis + int(includes_batch_dim))
 
         # Apply backend-specific concatentation function (to ensure no breakage of gradients)
         if self._backend == Backend.TORCH:
-            return torch.concatenate(tensors=values, dim=self.concat_axis)
+            return torch.concatenate(tensors=values, dim=self.concat_axis + int(includes_batch_dim))
         if self._backend == Backend.TENSORFLOW:
-            return tf.concat(values=values, axis=self.concat_axis)
+            return tf.concat(values=values, axis=self.concat_axis + int(includes_batch_dim))
         if self._backend == Backend.SCIKIT:
-            return np.concatenate(values, axis=self.concat_axis)
+            return np.concatenate(values, axis=self.concat_axis + int(includes_batch_dim))
+
         msg = f"Unsupported backend for concatenation: {self._backend}"
         raise ValueError(msg)

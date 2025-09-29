@@ -125,12 +125,14 @@ class MergeStage(ComputationNode, ABC):
         return self._merged_shape
 
     @abstractmethod
-    def apply_merge(self, values: list[Any]) -> Any:
+    def apply_merge(self, values: list[Any], *, includes_batch_dim: bool = True) -> Any:
         """
         Merge logic to be implemented by subclasses.
 
         Args:
             values (list[Any]): A list of backend-specific tensors to be merged.
+            includes_batch_dim (bool): Whether the inputs values have a batch dimension. \
+                Defaults to True.
 
         Returns:
             Any: Merged tensor in backend-native format.
@@ -160,7 +162,10 @@ class MergeStage(ComputationNode, ABC):
         if self._backend == Backend.NONE:
             msg = f"Backend not set in MergeStage `{self.label}`. Make sure `.build()` was called."
             raise RuntimeError(msg)
-        merged_data = self.apply_merge(values=[np.ones(shape=x) for x in input_shapes])
+        merged_data = self.apply_merge(
+            values=[np.ones(shape=x) for x in input_shapes],
+            includes_batch_dim=False,
+        )
         if isinstance(merged_data, list):
             return [x.shape for x in merged_data]
         return [convert_to_format(merged_data, fmt=DataFormat.NUMPY).shape]
@@ -231,7 +236,7 @@ class MergeStage(ComputationNode, ABC):
         # Case 1: all inputs are Data
         if all(isinstance(x, Data) for x in all_inputs):
             data_to_merge = [x.value for x in all_inputs]
-            merged = self.apply_merge(values=data_to_merge)
+            merged = self.apply_merge(values=data_to_merge, includes_batch_dim=False)
             return Data(value=merged)
 
         # Case 2: all inputs are Batch or BatchOutput
@@ -277,8 +282,8 @@ class MergeStage(ComputationNode, ABC):
                         )
                         sample_uuids.append(x.sample_uuids[r])
 
-                merged_targets[r] = self.apply_merge(values=targets)
-                merged_features[r] = self.apply_merge(values=features)
+                merged_targets[r] = self.apply_merge(values=targets, includes_batch_dim=True)
+                merged_features[r] = self.apply_merge(values=features, includes_batch_dim=True)
                 merged_uuids[r] = list(zip(*sample_uuids, strict=True))
 
             return BatchOutput(
