@@ -176,8 +176,12 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             raise ValueError(msg)
 
         # Return output_shape is already known
-        if self.output_shape is not None:
-            return [self.output_shape]
+        try:
+            outshape = self.output_shape
+            if outshape is not None:
+                return [outshape]
+        except RuntimeError:
+            pass
 
         # Pass inferencing task to BaseModel (if supports it)
         if hasattr(self._model, "infer_output_shapes"):
@@ -212,7 +216,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 The expected output shapes of this stage. If provided, it must contain exactly
                 one element. If not provided, the BaseModel must be capable of inferring it
                 internally or during construction.
-                
+
             force (bool): If model is already instantiated it will not be re-instantiated unless \
                 `force=True`. Defaults to False.
 
@@ -229,6 +233,9 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         """
         if self.max_upstream_nodes is not None and len(input_shapes) > self.max_upstream_nodes:
             msg = f"ModelStage only support a single input. Received: {input_shapes}"
+            raise ValueError(msg)
+        if len(input_shapes) == 0:
+            msg = f"ModelStage({self.label}) must be provided exactly one input_shape. Received: {input_shapes}"
             raise ValueError(msg)
         input_shape = input_shapes[0]
 
@@ -293,6 +300,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             all_targets = {}
             sample_uuids = {}
             tags = {}
+            weights = {}
             for role, samples in x.role_samples.items():
                 # Format features for this backend
                 features = samples.get_all_features(
@@ -302,6 +310,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 all_targets[role] = samples.get_all_targets(fmt=DataFormat.NUMPY)
                 sample_uuids[role] = samples.sample_uuids
                 tags[role] = samples.get_all_tags(fmt=DataFormat.DICT_NUMPY)
+                weights[role] = x.role_sample_weights[role]
 
             # In order to preserve auto-grad for pytorch, we cannot modify underlying
             # data format until after loss computation and optimizer stepping
@@ -310,6 +319,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 targets=all_targets,  # pass targets unmodified
                 sample_uuids=sample_uuids,
                 tags=tags,
+                sample_weights=weights,
             )
 
         if isinstance(x, BatchOutput):
@@ -329,6 +339,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
                 targets=x.targets,  # pass targets unmodified
                 sample_uuids=x.sample_uuids,
                 tags=x.tags,
+                sample_weights=x.sample_weights,
             )
 
         if isinstance(x, Data):
