@@ -160,9 +160,10 @@ def to_list(obj: Any, errors: ErrorMode = ErrorMode.RAISE):  # noqa: PLR0911
             return [py_obj]
 
 
-def to_numpy(
+def to_numpy(  # noqa: PLR0911
     obj: Any,
     errors: ErrorMode = ErrorMode.RAISE,
+    *,
     _top_level: bool = True,
 ) -> np.ndarray:
     """
@@ -408,7 +409,7 @@ def get_data_format_for_backend(backend: str | Backend) -> DataFormat:
         return DataFormat.TORCH
     if backend == Backend.TENSORFLOW:
         return DataFormat.TENSORFLOW
-    if backend == Backend.SCIKIT:
+    if backend in [Backend.SCIKIT, Backend.NONE]:
         return DataFormat.NUMPY
     msg = f"Unsupported backend: {backend}"
     raise ValueError(msg)

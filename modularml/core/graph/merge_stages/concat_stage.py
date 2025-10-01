@@ -171,6 +171,7 @@ class ConcatStage(MergeStage):
         # Apply padding if defined
         if self.pad_inputs:
             values = self._pad_inputs(values)
+
         else:
             self._validate_dims(values=values, concat_axis=self.concat_axis + int(includes_batch_dim))
 
