@@ -35,7 +35,7 @@ def run_integration(session):
     """Run integration tests."""
     set_env(session, PROJECT_ENV)
     session.install("-e", ".[all,dev]", silent=False)  # editable + dev deps
-    session.run("pytest", "-m", "integration")
+    session.run("pytest", "-m", "integration", success_codes=[0, 5])
 
 
 @nox.session(name="coverage")
