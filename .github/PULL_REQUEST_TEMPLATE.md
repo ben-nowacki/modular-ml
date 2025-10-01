@@ -11,6 +11,6 @@
 
 ## Checklist
 - [ ] My code follows project style guidelines: `nox -s pre-commit`
-- [ ] I have added tests that prove my fix is effective or my feature works: `nox -s tests`
-- [ ] I have updated documentation if needed: `nox -s doctests`
+- [ ] I have added tests that prove my fix is effective or my feature works: `nox -s unit`
+- [ ] I have updated documentation if needed: `nox -s docs`
 - [ ] I have linked related issues

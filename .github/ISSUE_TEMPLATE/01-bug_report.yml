@@ -2,24 +2,24 @@ name: Bug Report
 description: File a bug report.
 title: "[Bug]: "
 labels: ["bug"]
-  body:
+body:
   - type: markdown
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report!
   - type: input
-    id: ModularML Version
+    id: modularml-version
     attributes:
-      label: ModularML version
+      label: ModularML Version
       description: What version of ModularML are you using?
       placeholder: run `python -c 'import modularml as mml; print(mml.__version__);'`
     validations:
       required: true
 
   - type: input
-    id: Python Version
+    id: python-version
     attributes:
-      label: Python version
+      label: Python Version
       description: What version of Python are you using?
       placeholder: run `python --version`
     validations:
@@ -37,7 +37,7 @@ labels: ["bug"]
     id: to-reproduce
     attributes:
       label: Describe how to reproduce the bug
-      description: Tell us how to reproduce this behaviour. Ideally, this should include a code block which produces the error. Strive to make this example as small and simple as possible. It should contain the code required to reproduce the error, and no additional code. 
+      description: Tell us how to reproduce this behaviour. Ideally, this should include a code block which produces the error. Strive to make this example as small and simple as possible. It should contain the code required to reproduce the error, and no additional code.
     validations:
       required: true
   - type: textarea
