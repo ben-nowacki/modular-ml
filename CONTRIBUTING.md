@@ -57,4 +57,3 @@ nox -s docs
 ```
 
 Docstrings must follow PEP257.
-
