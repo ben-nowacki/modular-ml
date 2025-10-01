@@ -7,8 +7,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/modularml.svg)](https://pypi.org/project/modularml/)
-[![codecov](https://codecov.io/gh/REIL-UConn/modular-ml/branch/main/graph/badge.svg)](https://codecov.io/gh/REIL-UConn/modular-ml)
-[![CI](https://github.com/REIL-UConn/modular-ml/actions/workflows/test_on_push.yml/badge.svg)](https://github.com/REIL-UConn/modular-ml/actions/workflows/test_on_push.yml)
+[![codecov](https://codecov.io/github/REIL-UConn/modular-ml/graph/badge.svg?token=Z063M1M6P3)](https://codecov.io/github/REIL-UConn/modular-ml)
 [![Docs](https://readthedocs.org/projects/modular-ml/badge/?version=latest)](https://modular-ml.readthedocs.io/en/latest/?badge=latest)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](LICENSE)
 
