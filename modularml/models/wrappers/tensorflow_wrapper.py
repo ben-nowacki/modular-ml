@@ -1,5 +1,3 @@
-import tensorflow as tf
-
 from modularml.models.base import BaseModel
 
 

@@ -77,7 +77,7 @@ class PhaseIO:
         # Step 2: Use the first batch from each source
         batch_input = {fs: b[0] for fs, b in batches.items()}
 
-        # TODO: merge policy needs to be check prior to forward pass. Need to:
+        # TODO: merge policy needs to be check prior to forward pass. Need to:  # noqa: FIX002
         #  - For each stage in graph._sorted_stage_labels, get required inputs.
         #  - If multiple inputs, check if suitable merge policy
 

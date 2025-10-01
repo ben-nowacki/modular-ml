@@ -49,7 +49,8 @@ def parity_plot(
         equal_aspect (bool): If True, enforce equal aspect ratio.
         kde_bw (float | None): Bandwidth override for KDE. Default = auto.
         kde_levels (int): Number of contour levels for KDE plot.
-        vmin/vmax set the data range used for colormapping and colorbar limits.
+        vmin (float): Minimum value for color map normalization.
+        vmax (float): Maximum value for color map normalization.
         colorbar: whether to plot a colorbar.
 
     Returns:
@@ -150,11 +151,27 @@ def plot_parity_from_node_outputs(
         outputs (NodeOutputs | pd.DataFrame): TrainingResult/EvaluationResult outputs \
             in raw form or as a Pandas DataFrame.
         node (str): Node label to plot.
+        ax (plt.Axes | None): Axis to plot on. If None, creates a new figure/axis.
         plot_style (str): One of {"scatter", "hexbin", "kde"}.
+        colors (array-like | None): Colors for scatter points (scatter mode).
+        cmap (Colormap): Colormap for density modes.
+        gridsize (int): Grid resolution for hexbin.
+        alpha (float): Transparency for scatter or KDE shading.
+        s (int): Marker size for scatter.
+        line_style (str): Style of 1:1 reference line.
+        line_width (float): Width of 1:1 reference line.
+        line_color (str): Color of 1:1 reference line.
+        equal_aspect (bool): If True, enforce equal aspect ratio.
+        auto_bounds (bool): Auto-adjust plot limits. Defaults to True.
+        margin_frac (float): Percent of axis range to add as empty spacing. Defaults to 0.05.
         dim (int | None): Select dimension if multi-D.
         flatten (bool): Flatten multi-D outputs to 1D.
         title (str | None): Optional title.
-        Other args: forwarded to parity_plot().
+        kde_bw (float | None): Bandwidth override for KDE. Default = auto.
+        kde_levels (int): Number of contour levels for KDE plot.
+        vmin (float): Minimum value for color map normalization.
+        vmax (float): Maximum value for color map normalization.
+        colorbar (bool): Whether to add a colorbar. Defaulst to True.
 
     Returns:
         (matplotlib.Figure, matplotlib.Axes)

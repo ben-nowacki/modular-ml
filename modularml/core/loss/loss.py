@@ -63,7 +63,7 @@ class Loss:
             if self.name is None:
                 self.name = mod.__name__
 
-            # TODO: how to infer backend?
+            # Need to improve this backend inference method
             if self.backend is None:
                 if "torch" in mod.__name__:
                     self.backend = Backend.TORCH

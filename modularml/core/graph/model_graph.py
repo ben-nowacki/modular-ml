@@ -6,7 +6,6 @@ from collections import defaultdict, deque
 from typing import TYPE_CHECKING
 
 import tensorflow as tf
-import torch
 
 from modularml.core.data_structures.step_result import StepResult
 from modularml.core.graph.computation_node import ComputationNode
@@ -18,7 +17,6 @@ from modularml.core.graph.model_stage import ModelStage
 from modularml.core.loss.loss_collection import LossCollection
 from modularml.core.loss.loss_record import LossRecord
 from modularml.utils.backend import Backend, backend_requires_optimizer
-from modularml.utils.data_format import to_python
 from modularml.utils.error_handling import ErrorMode
 from modularml.utils.exceptions import BackendNotSupportedError
 from modularml.utils.modeling import make_dummy_batch
@@ -26,7 +24,6 @@ from modularml.utils.modeling import make_dummy_batch
 if TYPE_CHECKING:
     from modularml.core.data_structures.batch import Batch, BatchOutput
     from modularml.core.loss.applied_loss import AppliedLoss
-    from modularml.core.loss.loss_record import LossResult
     from modularml.core.optimizer.optimizer import Optimizer
 
 

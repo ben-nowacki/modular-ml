@@ -452,7 +452,7 @@ class Experiment:
         elif isinstance(meta, tuple) and len(meta) == 2 and all(isinstance(x, (str, type(None))) for x in meta):
             fs_label, fss_label = meta
         elif isinstance(meta, str):
-            fs_label, subset_label = meta, None
+            fs_label, _subset_label = meta, None
 
         # Case 3 - Node has multiple sources (ie, node is downstream of a MergeStage)
         else:

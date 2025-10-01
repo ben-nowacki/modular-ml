@@ -28,7 +28,6 @@ from modularml.utils.exceptions import (
 
 if TYPE_CHECKING:
     from modularml.core.loss.applied_loss import AppliedLoss
-    from modularml.core.loss.loss_record import LossResult
     from modularml.core.optimizer.optimizer import Optimizer
     from modularml.models.base import BaseModel
 
@@ -598,7 +597,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         batch_input: dict[str, Batch],
         losses: list[AppliedLoss],
     ) -> StepResult:
-        # TODO: implement sklean.fit inplace of training
+        # TODO: implement sklean.fit inplace of training  # noqa: FIX002
         raise NotImplementedError("Training for scikit model not implemented yet.")
 
     def train_step(
@@ -733,7 +732,7 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         batch_input: dict[str, Batch],
         losses: list[AppliedLoss],
     ) -> StepResult:
-        # TODO: perform sklearn.predict
+        # TODO: perform sklearn.predict  # noqa: FIX002
         raise NotImplementedError("Evaluation for scikit model not implemented yet.")
 
     def eval_step(
