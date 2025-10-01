@@ -73,8 +73,8 @@ def dev_env(session):
     session.run(python, "-m", "pip", "install", "-e", ".[all,dev]", external=True)
 
 
-@nox.session(name="quick", reuse_venv=True)
-def run_quick(session):
+@nox.session(name="all_tests", reuse_venv=True)
+def run_all_tests(session):
     """Run unit tests and integration tests."""
     run_unit(session)
     run_integration(session)
