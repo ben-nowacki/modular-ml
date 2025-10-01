@@ -24,11 +24,13 @@ ignore = [
     "E501", "D1", "FBT003", "D203", "D212", "D401", "S311",
     "PERF401", "RET504", "FA102", "TRY003", "EM101",
 
-    "TD003", "PLR0913", "C901", "TD002", "SLF001", "PD002", 
+    "TD003", "PLR0913", "C901", "TD002", "SLF001", "PD002",
     "PLR2004", "PLR0912", "PLR0915", "S301",
 ]
 
 
 [lint.per-file-ignores]
 "examples/*.ipynb" = ["S310", "N803", ]
-"tests/*" = ["INP001", "S101", ]
+"**/preprocessing/*.py" = ["N803", "ARG002", "N806", ]
+"tests/*" = ["INP001", "S101", "PLC0415", "F841", "N803", "ARG001", "ARG002", "N806", ]
+"**/__init__.py" = ["I", "F401", "F841", ]

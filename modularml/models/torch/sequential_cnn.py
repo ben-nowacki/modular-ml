@@ -88,6 +88,7 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         self,
         input_shape: tuple[int] | None = None,
         output_shape: tuple[int] | None = None,
+        *,
         force: bool = False,
     ):
         """
@@ -141,7 +142,7 @@ class SequentialCNN(BaseModel, torch.nn.Module):
                     kernel_size=self.config["kernel_size"],
                     stride=self.config["stride"],
                     padding=self.config["padding"],
-                )
+                ),
             )
             layers.append(act_fn)
 

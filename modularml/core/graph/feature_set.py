@@ -16,7 +16,7 @@ from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.graph.feature_subset import FeatureSubset
 from modularml.core.graph.graph_node import GraphNode
 from modularml.core.transforms.feature_transform import FeatureTransform
-from modularml.utils.data_format import DataFormat, convert_to_format
+from modularml.utils.data_format import DataFormat
 from modularml.utils.exceptions import SampleLoadError, SubsetOverlapWarning
 
 if TYPE_CHECKING:
@@ -587,38 +587,37 @@ class FeatureSet(SampleCollection, GraphNode):
 
         return subset, component, key
 
-    def apply_transform_to_collection(
-        self,
-        data: SampleCollection,
-        subset: str,
-        component: str | None,
-        *,
-        inverse: bool = False,
-    ):
-        """
-        Apply stored transformations (or their inverse) to a SampleCollection.
+    # def apply_transform_to_collection(
+    #     self,
+    #     data: SampleCollection,
+    #     subset: str,
+    #     component: str | None,
+    #     *,
+    #     inverse: bool = False,
+    # ):
+    #     """
+    #     Apply stored transformations (or their inverse) to a SampleCollection.
 
-        Args:
-            data (SampleCollection): The collection of samples to transform.
-            subset (str): The subset name (e.g., 'train', 'val') used in the original fit_transform.
-            component (str | None): The component name ('features' or 'targets'). If None, applies \
-                (or inverses) transforms on both features and targets.
-            inverse (bool): Whether to apply the inverse transform.
+    #     Args:
+    #         data (SampleCollection): The collection of samples to transform.
+    #         subset (str): The subset name (e.g., 'train', 'val') used in the original fit_transform.
+    #         component (str | None): The component name ('features' or 'targets'). If None, applies \
+    #             (or inverses) transforms on both features and targets.
+    #         inverse (bool): Whether to apply the inverse transform.
 
-        Returns:
-            SampleCollection: A new collection with transformed data.
-        """
-        if component is not None and component not in {"features", "targets"}:
-            msg = f"Invalid component: {component}. Must be 'features', 'targets', or None."
-            raise ValueError(msg)
+    #     Returns:
+    #         SampleCollection: A new collection with transformed data.
 
-        if component == "features":
-            for t_record in self._transform_logs["features"]:
-                # t_record.apply_spec : str
-                # t_record.transform : FeatureTransform
-                pass
+    #     """
+    #     if component is not None and component not in {"features", "targets"}:
+    #         msg = f"Invalid component: {component}. Must be 'features', 'targets', or None."
+    #         raise ValueError(msg)
 
-            pass
+    #     if component == "features":
+    #         for t_record in self._transform_logs["features"]:
+    #             # t_record.apply_spec : str
+    #             # t_record.transform : FeatureTransform
+    #             pass
 
     def fit_transform(
         self,
@@ -806,7 +805,7 @@ class FeatureSet(SampleCollection, GraphNode):
             raise ValueError(msg)
 
         t_record = self._transform_logs[on][-1]
-        r_subset, r_comp, r_key = self._parse_spec(t_record.apply_spec)
+        r_subset, _r_comp, _r_key = self._parse_spec(t_record.apply_spec)
 
         sample_coll = SampleCollection(self.get_subset(r_subset).samples if r_subset else self.samples)
 
@@ -850,7 +849,7 @@ class FeatureSet(SampleCollection, GraphNode):
 
     @staticmethod
     def load_samples(path: str | Path) -> list[Sample]:
-        path = Path(path).with_suffix("pkl")
+        path = Path(path).with_suffix(".pkl")
         with Path.open(path, "rb") as f:
             return pickle.load(f)
 

@@ -6,7 +6,6 @@ from collections import defaultdict, deque
 from typing import TYPE_CHECKING
 
 import tensorflow as tf
-import torch
 
 from modularml.core.data_structures.step_result import StepResult
 from modularml.core.graph.computation_node import ComputationNode
@@ -18,7 +17,6 @@ from modularml.core.graph.model_stage import ModelStage
 from modularml.core.loss.loss_collection import LossCollection
 from modularml.core.loss.loss_record import LossRecord
 from modularml.utils.backend import Backend, backend_requires_optimizer
-from modularml.utils.data_format import to_python
 from modularml.utils.error_handling import ErrorMode
 from modularml.utils.exceptions import BackendNotSupportedError
 from modularml.utils.modeling import make_dummy_batch
@@ -26,7 +24,6 @@ from modularml.utils.modeling import make_dummy_batch
 if TYPE_CHECKING:
     from modularml.core.data_structures.batch import Batch, BatchOutput
     from modularml.core.loss.applied_loss import AppliedLoss
-    from modularml.core.loss.loss_record import LossResult
     from modularml.core.optimizer.optimizer import Optimizer
 
 
@@ -80,7 +77,7 @@ class ModelGraph:
                 If required optimizers are missing or if backends are incompatible.
 
         """
-        self._nodes: dict[str, GraphNode] = {node.label: node for node in nodes}
+        self._nodes: dict[str, GraphNode] = {node.label: copy.deepcopy(node) for node in nodes}
 
         # Reset node cache
         self._invalidate_node_label_cache()
@@ -554,25 +551,29 @@ class ModelGraph:
             downstream_node = self._nodes[before]
             upstream_node = self._nodes[after]
 
+            # Ensure new node defines the proper connections
+            node.add_upstream_node(after, error_mode=ErrorMode.COERCE)  # ignore if already exists
+            node.add_downstream_node(before, error_mode=ErrorMode.COERCE)  # ignore if already exists
+
             # Update downstream_node to input from new node (remove any connection to upstream_node)
-            downstream_node.add_upstream_node(
-                node.label,
-                error_mode=ErrorMode.COERCE,
-            )  # ignore if already exists
             downstream_node.remove_upstream_node(
                 upstream_node.label,
                 error_mode=ErrorMode.COERCE,
             )  # ignore it connection doesn't exist
-
-            # Update upstream_node to output to new node (remove any connection to downstream_node)
-            node.add_downstream_node(
-                upstream_node.label,
+            downstream_node.add_upstream_node(
+                node.label,
                 error_mode=ErrorMode.COERCE,
             )  # ignore if already exists
+
+            # Update upstream_node to output to new node (remove any connection to downstream_node)
             upstream_node.remove_downstream_node(
                 downstream_node.label,
                 error_mode=ErrorMode.COERCE,
             )  # ignore it connection doesn't exist
+            upstream_node.add_downstream_node(
+                node.label,
+                error_mode=ErrorMode.COERCE,
+            )  # ignore if already exists
 
         # insert before
         elif before is not None:
@@ -582,7 +583,9 @@ class ModelGraph:
             # Move downstream_node (`before`) inputs to new_node inputs
             downstream_node = self._nodes[before]
             node.set_upstream_nodes(
-                upstream_nodes=downstream_node.get_upstream_nodes(error_mode=ErrorMode.COERCE),
+                upstream_nodes=downstream_node.get_upstream_nodes(
+                    error_mode=ErrorMode.COERCE,
+                ),
                 error_mode=ErrorMode.COERCE,
             )
 
@@ -679,18 +682,28 @@ class ModelGraph:
             msg = f"Node to remove must be a string or GraphNode. Received: {node}"
             raise TypeError(msg)
 
-        for nd in self._nodes.values():
-            if nd.allows_upstream_connections:
-                nd.remove_upstream_node(
-                    node.label,
-                    error_mode=ErrorMode.COERCE,
-                )  # ignore if not an existing input
-            if nd.allows_downstream_connections:
-                nd.remove_downstream_node(
-                    node.label,
-                    error_mode=ErrorMode.COERCE,
-                )  # ignore if not an existing input
+        # If node has an input (upstream_node), we need to re-assign upstream_node to route to downstream_node
+        upstream_connections = node.get_upstream_nodes(error_mode=ErrorMode.COERCE)
+        downstream_connections = node.get_downstream_nodes(error_mode=ErrorMode.COERCE)
 
+        # Remove upstream references to "node"
+        for upstream_lbl in upstream_connections:
+            self._nodes[upstream_lbl].remove_downstream_node(node=node.label)
+            # Add new connectiosn to all nodes downstream of "node"
+            for downstream_lbl in downstream_connections:
+                self._nodes[upstream_lbl].add_downstream_node(downstream_lbl, error_mode=ErrorMode.COERCE)
+
+        # Remove downstream references to "node"
+        for downstream_lbl in downstream_connections:
+            self._nodes[downstream_lbl].remove_upstream_node(node=node.label)
+            # Add new connectiosn to all nodes downstream of "node"
+            for upstream_lbl in upstream_connections:
+                self._nodes[downstream_lbl].add_upstream_node(upstream_lbl, error_mode=ErrorMode.COERCE)
+
+        # Remove node from graph
+        self._nodes.pop(node.label)
+
+        # Update connections and rebuild all models
         self._update_node_label_cache()
         self.build_all(reset=True)
         return None
@@ -771,7 +784,6 @@ class ModelGraph:
             self._invalidate_node_label_cache()
             self._validate_graph_connections()
             self._sorted_node_labels = self._topological_sort()
-
             self._nodes_req_opt: dict[str, ModelStage] | None = None
             self._validate_optimizer()
 
@@ -805,7 +817,9 @@ class ModelGraph:
                 # ModelStage support output shape inferrence
                 if isinstance(node, ModelStage):
                     try:
-                        output_shapes: list[tuple[int, ...]] = node.infer_output_shapes(input_shapes)
+                        output_shapes: list[tuple[int, ...]] = node.infer_output_shapes(
+                            input_shapes,
+                        )
                     except ValueError:
                         output_shapes = None
                     # If a leaf ModelStage and failed to infer output_shapes,
@@ -814,8 +828,16 @@ class ModelGraph:
                         output_shapes = [cache[node.upstream_node].target_shape]
 
                     # Build node
-                    node.build(input_shapes=input_shapes, output_shapes=output_shapes, force=reset)
+                    node.build(
+                        input_shapes=input_shapes,
+                        output_shapes=output_shapes,
+                        force=reset,
+                    )
                     print(f"Built node `{lbl}` with shapes: {node.input_shape} -> {node.output_shape}")
+
+                    # Cache outputs of this newly built node
+                    output: BatchOutput = node.forward(node.get_input_batch(cache))
+                    cache[lbl] = output
 
                 # MergeStage only accepts an input_shape, but also requires a backend
                 elif isinstance(node, MergeStage):
@@ -823,9 +845,13 @@ class ModelGraph:
                     node.build(input_shapes=input_shapes, backend=backend)
                     print(f"Built node `{lbl}` with merged shape: {node.merged_shape}")
 
-                # Cache outputs of this newly built node
-                output: BatchOutput = node.forward(node.get_input_batch(cache))
-                cache[lbl] = output
+                    # Cache outputs of this newly built node
+                    output: list[BatchOutput] = node.forward(node.get_input_batch(cache))
+                    cache[lbl] = output
+
+                else:
+                    msg = f"Expected ModelStage or MergeStage. Received: {type(node)}"
+                    raise TypeError(msg)
 
         # Build optimizer with all optimizable nodes
         self._build_optimizer(self._nodes_req_opt)
@@ -858,7 +884,6 @@ class ModelGraph:
             - If the node is itself a source FeatureSet, it will be returned as the sole source.
 
         """
-
         node_instance = node
         if isinstance(node, str):
             node_instance = self._nodes[node]

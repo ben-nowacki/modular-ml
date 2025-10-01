@@ -70,7 +70,13 @@ class PairedSampler(FeatureSampler):
         self.max_pairs_per_anchor = max_pairs_per_anchor
         # Cache for faster lookup during pair generation
         self._cached_sample_bucket_keys: dict[str, tuple] = {}
-        super().__init__(source=source, batch_size=batch_size, shuffle=shuffle, drop_last=drop_last, seed=seed)
+        super().__init__(
+            source=source,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            drop_last=drop_last,
+            seed=seed,
+        )
 
     def _get_sample_cond_values(self, sample: Sample) -> list[Any]:
         """
@@ -166,7 +172,8 @@ class PairedSampler(FeatureSampler):
         # Build up buckets with matching & fallback samples
         for s in self.source.samples:
             sample_bucket_keys = self._get_sample_bucket_keys(sample=s)
-            for i, (cond, sbk) in enumerate(zip(self.conditions, sample_bucket_keys, strict=True)):
+            zipped = zip(self.conditions, sample_bucket_keys, strict=True)
+            for i, (cond, sbk) in enumerate(zipped):
                 # Go through all buckets
                 for bk, bucket in all_buckets[i].items():
                     if cond.mode == "similar":
@@ -215,14 +222,29 @@ class PairedSampler(FeatureSampler):
             joint_matches: set[str] = set.intersection(*map(set, all_matches))
 
             # Get valid fallbacks
-            # Each condition has its own set of matching and fallback samples
-            # Matching samples across all conditions are the interesection of each condition-specific matches
-            # Fallback sample within each condition then become the condition-specific fallbacks samples plus
-            #   the condition-specific matches that are not in the joint matches across all conditions
-            all_fb: list[set[str]] = [
-                (cb.fallback_samples | cb.matching_samples) - joint_matches for cb in cond_buckets
-            ]
-            joint_fb: set[str] = set.intersection(*map(set, all_fb))
+            # Each condition has its own set of matching and fallback samples:
+            #   - Joint matches are intersection across all conditions.
+            #   - Fallback = (condition-specific fallbacks) U (condition-specific matches)
+            #                that were not part of the joint matches.
+            #   - Only included if the condition allows fallback.
+            all_fb: list[set[str]] = []
+            for cond, cb in zip(self.conditions, cond_buckets, strict=True):
+                if cond.allow_fallback:
+                    fb = (cb.fallback_samples | cb.matching_samples) - joint_matches
+                    all_fb.append(fb)
+                else:
+                    all_fb.append(set())
+            joint_fb: set[str] = set.intersection(*all_fb) if all_fb else set()
+
+            # # Get valid fallbacks
+            # # Each condition has its own set of matching and fallback samples
+            # # Matching samples across all conditions are the interesection of each condition-specific matches
+            # # Fallback sample within each condition then become the condition-specific fallbacks samples plus
+            # #   the condition-specific matches that are not in the joint matches across all conditions
+            # all_fb: list[set[str]] = [
+            #     (cb.fallback_samples | cb.matching_samples) - joint_matches for cb in cond_buckets
+            # ]
+            # joint_fb: set[str] = set.intersection(*map(set, all_fb))
 
             bucket_products[bucket_keys] = ConditionBucket(
                 key=bucket_keys,
@@ -262,7 +284,10 @@ class PairedSampler(FeatureSampler):
             # Select only self.max_pairs_per_anchor (starting with matches)
             elif isinstance(self.max_pairs_per_anchor, int):
                 n_from_matches = min(int(self.max_pairs_per_anchor), len(matching_samples))
-                n_from_fb = min(int(self.max_pairs_per_anchor) - n_from_matches, len(fallback_samples))
+                n_from_fb = min(
+                    int(self.max_pairs_per_anchor) - n_from_matches,
+                    len(fallback_samples),
+                )
                 if n_from_matches > 0:
                     selected_matches = np.column_stack(
                         [
@@ -286,7 +311,7 @@ class PairedSampler(FeatureSampler):
                             ),
                         ],
                     )
-                    all_pairs.extend(selected_fb)
+                    all_pairs.append(selected_fb)
 
             else:
                 msg = f"`max_pairs_per_anchor` must be of type int or None. Received: {type(self.max_pairs_per_anchor)}"
@@ -324,6 +349,13 @@ class PairedSampler(FeatureSampler):
             pair_uuids = all_pairs[i : i + self.batch_size, 1]
             pair_samples = self.source.get_samples_with_uuid(pair_uuids)
 
+            if len(anchor_samples) != len(pair_samples):
+                msg = (
+                    f"Mismatched batch: {len(anchor_samples)} anchors vs {len(pair_samples)} pairs. "
+                    f"Anchor UUIDs: {anchor_uuids}, Pair UUIDs: {pair_uuids}"
+                )
+                raise RuntimeError(msg)
+
             pairing_weights = []
             for a, p in zip(anchor_samples.samples, pair_samples.samples, strict=True):
                 a_vals = self._get_sample_cond_values(a)
@@ -331,7 +363,7 @@ class PairedSampler(FeatureSampler):
                 weight = 0
                 for c_idx, cond in enumerate(self.conditions):
                     weight += cond.score(a_vals[c_idx], p_vals[c_idx])
-                pairing_weights.append(weight)
+                pairing_weights.append(weight / len(self.conditions))
             if self.drop_last and len(anchor_samples) < self.batch_size:
                 if i == 0:
                     warnings.warn(

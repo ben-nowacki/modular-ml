@@ -6,6 +6,7 @@ from modularml.core.data_structures.batch import Batch
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
+from modularml.utils.backend import Backend
 
 
 class PadMode(str, Enum):
@@ -30,7 +31,7 @@ class PadMode(str, Enum):
     CIRCULAR = "circular"
 
 
-def map_pad_mode_to_backend(mode: PadMode, backend: str) -> str:  # noqa: PLR0911
+def map_pad_mode_to_backend(mode: PadMode, backend: str | Backend) -> str:  # noqa: PLR0911
     """
     Map a universal PadMode to backend-specific string.
 
@@ -45,7 +46,8 @@ def map_pad_mode_to_backend(mode: PadMode, backend: str) -> str:  # noqa: PLR091
         ValueError: If mode or backend is unsupported.
 
     """
-    backend = backend.lower()
+    if isinstance(backend, str):
+        backend = Backend(backend.lower())
 
     match (mode, backend):
         case (PadMode.CONSTANT, _):

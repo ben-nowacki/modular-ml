@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, Type
+from typing import Any
 
 import tensorflow as tf
 import torch
@@ -204,7 +204,7 @@ class Optimizer:
         elif self._backend == Backend.TENSORFLOW:
             if grads is None or variables is None:
                 raise ValueError(
-                    "Tensorflow backend requires both `grads` and `variables` to be set in Optimizer.step()"
+                    "Tensorflow backend requires both `grads` and `variables` to be set in Optimizer.step()",
                 )
             self.instance.apply_gradients(zip(grads, variables, strict=True))
 

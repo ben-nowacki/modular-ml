@@ -63,13 +63,14 @@ class Loss:
             if self.name is None:
                 self.name = mod.__name__
 
-            # TODO: how to infer backend?
-            if "torch" in mod.__name__:
-                self.backend = Backend.TORCH
-            elif "tensorflow" in mod.__name__:
-                self.backend = Backend.TENSORFLOW
-            else:
-                self.backend = Backend.NONE
+            # Need to improve this backend inference method
+            if self.backend is None:
+                if "torch" in mod.__name__:
+                    self.backend = Backend.TORCH
+                elif "tensorflow" in mod.__name__:
+                    self.backend = Backend.TENSORFLOW
+                else:
+                    self.backend = Backend.NONE
 
         elif name and backend:
             self.loss_function: Callable = self._resolve()
@@ -97,7 +98,7 @@ class Loss:
                 "cross_entropy": torch.nn.CrossEntropyLoss(reduction=self.reduction),
                 "bce": torch.nn.BCELoss(reduction=self.reduction),
                 "bce_logits": torch.nn.BCEWithLogitsLoss(reduction=self.reduction),
-                "cosine_embedding": torch.nn.CosineEmbeddingLoss(reduction=self.reduction)
+                "cosine_embedding": torch.nn.CosineEmbeddingLoss(reduction=self.reduction),
             }
         elif self.backend == Backend.TENSORFLOW:
             avail_losses = {
@@ -147,7 +148,8 @@ class Loss:
         try:
             return self.loss_function(*args, **kwargs)
         except Exception as e:
-            raise LossError("Failed to call loss function.") from e
+            msg = f"Failed to call loss function. {e}"
+            raise LossError(msg) from e
 
     def __repr__(self):
         if self.name:
