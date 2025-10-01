@@ -21,5 +21,3 @@ print(modularml.__version__)
 
 api/index
 examples/index
-
-
