@@ -36,22 +36,37 @@ class AppliedLoss:
 
     """
 
-    def __init__(self, loss: Loss, all_inputs: dict[str, str], weight: float = 1.0, label: str | None = None):
+    def __init__(
+        self,
+        loss: Loss,
+        all_inputs: list[str] | dict[str, str],
+        weight: float = 1.0,
+        label: str | None = None,
+    ):
         """
         Initialize an AppliedLoss instance.
 
         Args:
             loss (Loss): Loss function object, including backend and callable.
-            all_inputs (dict[str, str]): Dictionary mapping loss argument names (e.g., "pred", "true") \
-                to graph references like "Node.attribute" or "Node.attribute.role".
+            all_inputs (list[str] | dict[str, str]): A list of loss arguments or a dictionary \
+                mapping loss argument names (e.g., "pred", "true") to graph references like \
+                "Node.attribute" or "Node.attribute.role".
             weight (float, optional): Scalar multiplier applied to the loss result. Defaults to 1.0.
             label (str, optional): Custom name for this loss. Defaults to the loss's name.
 
         """
         self.loss: Loss = loss
-        self.all_inputs: dict[str, tuple[str, str, str]] = {
-            str(k): self._parse_input_spec(p) for k, p in all_inputs.items()
-        }
+        self.all_inputs: dict[str, tuple[str, str, str]] = {}
+        if isinstance(all_inputs, list):
+            for i, p in enumerate(all_inputs):
+                self.all_inputs[f"{i}"] = self._parse_input_spec(p)
+        elif isinstance(all_inputs, dict):
+            for k, p in all_inputs.items():
+                self.all_inputs[str(k)] = self._parse_input_spec(p)
+        else:
+            msg = f"`all_inputs` must be a list or dict. Received: {type(all_inputs)}."
+            raise TypeError(msg)
+
         self.weight = float(weight)
         self.label = label if label is not None else loss.name
 
@@ -142,7 +157,11 @@ class AppliedLoss:
 
         return node, attribute, role
 
-    def compute(self, batch_input: dict[str, Batch], model_outputs: dict[str, BatchOutput]) -> Any:
+    def compute(
+        self,
+        batch_input: dict[str, Batch],
+        model_outputs: dict[str, BatchOutput],
+    ) -> Any:
         """
         Compute the loss value given input batches and model outputs.
 
@@ -207,6 +226,8 @@ class AppliedLoss:
                 if role not in model_outputs[node].available_roles:
                     msg = f"Required AppliedLoss role (`{role}`) is missing from model_outputs: {model_outputs[node].available_roles}"
                     raise ValueError(msg)
+
+                sample_weights[k] = model_outputs[node].sample_weights[role]
 
                 # Get attribute data (don't convert data format, will break pytorch autograd)
                 if attribute in ["features", "output"]:

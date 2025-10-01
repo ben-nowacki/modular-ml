@@ -44,6 +44,7 @@ class BaseModel(ABC):
         self,
         input_shape: tuple[int, ...] | None = None,
         output_shape: tuple[int, ...] | None = None,
+        *,
         force: bool = False,
     ):
         """Build the internal model layers given an input shape."""

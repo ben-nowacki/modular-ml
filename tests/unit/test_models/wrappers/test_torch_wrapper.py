@@ -100,7 +100,7 @@ def test_lazy_instantiation_with_incorrect_injection_keys(input_shape, output_sh
         inject_output_shape_as="custom_output_shape",
     )
 
-    with pytest.raises(ValueError, match="not accepted by `SimpleMLP` constructor."):
+    with pytest.raises(ValueError, match=r"not accepted by `SimpleMLP` constructor."):
         wrapper.build(input_shape=input_shape, output_shape=output_shape)
 
 
@@ -142,7 +142,7 @@ def test_missing_model_and_class_raises():
 
 def test_invalid_model_type_raises():
     """Test error when an invalid model instance is passed."""
-    with pytest.raises(ValueError, match="must be an instance of torch.nn.Module"):
+    with pytest.raises(ValueError, match=r"must be an instance of torch.nn.Module"):
         TorchModelWrapper(model="not a model")
 
 

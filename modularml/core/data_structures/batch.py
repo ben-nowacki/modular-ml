@@ -168,6 +168,7 @@ class BatchOutput:
     sample_uuids: dict[str, Any]
     targets: dict[str, Any] | None = None
     tags: dict[str, Any] | None = None
+    sample_weights: dict[str, Any] = None
 
     def __post_init__(self):
         """

@@ -19,7 +19,7 @@ from modularml.core.loss.loss_collection import LossCollection
 from modularml.core.loss.loss_record import LossRecord
 from modularml.utils.data_format import DataFormat, to_python
 from modularml.utils.exceptions import NotInvertibleError
-from modularml.utils.plotting import format_value_to_sig_digits
+from modularml.utils.formatting import format_value_to_sig_digits
 
 
 class Experiment:
@@ -452,7 +452,7 @@ class Experiment:
         elif isinstance(meta, tuple) and len(meta) == 2 and all(isinstance(x, (str, type(None))) for x in meta):
             fs_label, fss_label = meta
         elif isinstance(meta, str):
-            fs_label, subset_label = meta, None
+            fs_label, _subset_label = meta, None
 
         # Case 3 - Node has multiple sources (ie, node is downstream of a MergeStage)
         else:

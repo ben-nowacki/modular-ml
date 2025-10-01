@@ -7,14 +7,14 @@
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![PyPI](https://img.shields.io/pypi/v/modularml.svg)](https://pypi.org/project/modularml/)
-[![Docs](https://app.readthedocs.org/projects/modular-ml/badge/?version=latest&style=flat)](https://modular-ml.readthedocs.io/en/latest/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-orange
-)](LICENSE)
+[![codecov](https://codecov.io/github/REIL-UConn/modular-ml/graph/badge.svg?token=Z063M1M6P3)](https://codecov.io/github/REIL-UConn/modular-ml)
+[![Docs](https://readthedocs.org/projects/modular-ml/badge/?version=latest)](https://modular-ml.readthedocs.io/en/latest/?badge=latest)
+[![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg)](LICENSE)
 
 </div>
 
 
-ModularML is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating modular ML pipelines, tailored specifically for research and scientific workflows. 
+ModularML is a flexible, backend-agnostic machine learning framework for designing, training, and evaluating modular ML pipelines, tailored specifically for research and scientific workflows.
 It enables rapid experimentation with complex model architectures, supports domain-specific feature engineering, and provides full reproducibility through configuration-driven declaration.
 
 > ModularML provides a plug-and-play ecosystem of interoperable components for data preprocessing, sampling, modeling, training, and evaluation — all wrapped in a unified experiment container.
@@ -97,14 +97,12 @@ If you use ModularML in your research, please cite the following:
   year         = {2025},
   note         = {https://github.com/REIL-UConn/modular-ml},
 } -->
-<!-- 
+<!--
 ## The Team
-ModularML was initiated in 2025 by Ben Nowacki as part of graduate research at the University of Connecticut. 
+ModularML was initiated in 2025 by Ben Nowacki as part of graduate research at the University of Connecticut.
 It is actively developed in collaboration with researchers and contributors across academia and industry, including partners from the Honda Research Institute, MathWorks, and the University of South Carolina.
 
 The project is community-driven and welcomes contributors interested in building modular, reproducible ML workflows for science and engineering. -->
 
 ## License
 **[Apache 2.0](https://github.com/REIL-UConn/modular-ml/license)**
-
-

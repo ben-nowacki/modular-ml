@@ -23,6 +23,11 @@ class SegmentedScaler(BaseEstimator, TransformerMixin):
     """
 
     def __init__(self, boundaries: tuple[int], scaler: Any | None = None):
+        if 0 not in boundaries:
+            raise ValueError("Boundaries must start at 0")
+        if any(boundaries[i] >= boundaries[i + 1] for i in range(len(boundaries) - 1)):
+            raise ValueError("Boundaries must be strictly ascending")
+
         self.boundaries = boundaries
         self.scaler = scaler if scaler is not None else MinMaxScaler()
         self._segment_scalers: list[Any] = []
@@ -30,6 +35,9 @@ class SegmentedScaler(BaseEstimator, TransformerMixin):
     def fit(self, X: np.ndarray, y: np.ndarray | None = None):
         self._segment_scalers.clear()
 
+        if X.shape[1] != self.boundaries[-1]:
+            msg = f"Last boundary does not match feature length: {self.boundaries[-1]} != {X.shape[1]}"
+            raise ValueError(msg)
         for i in range(len(self.boundaries) - 1):
             start, end = self.boundaries[i], self.boundaries[i + 1]
             segment = X[:, start:end]

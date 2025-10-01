@@ -292,7 +292,7 @@ class GraphIR:
                         src_shape = str(mg._nodes[src.label].feature_shape)
                     elif isinstance(mg._nodes[src.label], ModelStage | MergeStage):
                         src_shape = str(mg._nodes[src.label].output_shape)
-                except:
+                except:  # noqa: E722
                     src_shape = None
 
                 e = EdgeIR(

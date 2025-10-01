@@ -88,11 +88,11 @@ class SampleCollection:
 
     @property
     def sample_uuids(self) -> list[str]:
-        return list(self._uuid_sample_map.keys())
+        return [s.uuid for s in self.samples]
 
     @property
     def sample_labels(self) -> list[str]:
-        return list(self._label_sample_map.keys())
+        return [s.label for s in self.samples]
 
     def get_all_features(self, fmt: str | DataFormat = DataFormat.DICT_NUMPY) -> Any:
         """Returns all features across all samples in the specified format."""

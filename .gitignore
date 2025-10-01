@@ -11,6 +11,9 @@
 *.sln.docstates
 *.env
 .DS_Store
+ModularMl.egg-info/*
+dist/*
+downloaded_data/*
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

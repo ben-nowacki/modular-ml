@@ -179,7 +179,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         input_shape: tuple[int, ...] | None = None,
         output_shape: tuple[int, ...] | None = None,
         *,
-        force: bool = False,
+        force: bool = False,  # noqa: ARG002
     ):
         """
         Construct or validate the wrapped PyTorch model.

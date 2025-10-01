@@ -40,6 +40,7 @@ class EvaluationPhase:
                 Keys must be of the form "FeatureSet" or "FeatureSet.subset".
             batch_size (int): Batch size to enforce across all samplers (overrides existing sampler batch sizes).
             losses (list[AppliedLoss], optional): Optional list of loss functions and their input mappings.
+
         """
         self.label = label
 

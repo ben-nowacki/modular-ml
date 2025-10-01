@@ -218,10 +218,10 @@ class GraphNode(ABC):
 
         if (
             self.max_upstream_nodes is not None
-            and len(self._upstream_nodes) >= self.max_upstream_nodes
+            and len(self._upstream_nodes) > self.max_upstream_nodes
             and self._handle_fatal_error(
                 GraphNodeInputError,
-                f"Only {self.max_upstream_nodes} upstream_nodes allowed.",
+                f"Only {self.max_upstream_nodes} upstream_nodes allowed. Received: {self._upstream_nodes}",
                 error_mode,
             )
             is False
@@ -333,7 +333,7 @@ class GraphNode(ABC):
 
         if (
             self.max_downstream_nodes is not None
-            and len(self._downstream_nodes) >= self.max_downstream_nodes
+            and len(self._downstream_nodes) > self.max_downstream_nodes
             and self._handle_fatal_error(
                 GraphNodeOutputError,
                 f"Only {self.max_downstream_nodes} downstream_nodes allowed.",

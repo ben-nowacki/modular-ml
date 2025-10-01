@@ -77,7 +77,7 @@ class PhaseIO:
         # Step 2: Use the first batch from each source
         batch_input = {fs: b[0] for fs, b in batches.items()}
 
-        # TODO: merge policy needs to be check prior to forward pass. Need to:
+        # TODO: merge policy needs to be check prior to forward pass. Need to:  # noqa: FIX002
         #  - For each stage in graph._sorted_stage_labels, get required inputs.
         #  - If multiple inputs, check if suitable merge policy
 
@@ -115,7 +115,7 @@ class PhaseIO:
         # Check is inputs required by AppliedLosses is missing from forward pass
         missing_inputs = required_inputs - available_inputs
         if missing_inputs:
-            msg = f"Missing inputs required by `losses`: {missing_inputs}"
+            msg = f"Missing inputs required by `losses`: {missing_inputs}. Available inputs: {available_inputs}"
             raise ValueError(msg)
 
         self._resolved = True
