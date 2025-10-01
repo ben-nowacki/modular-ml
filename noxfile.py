@@ -1,5 +1,4 @@
 import os
-import sys
 from pathlib import Path
 
 import nox
@@ -27,7 +26,7 @@ def set_env(session, env_dict):
 def run_unit(session):
     """Run unit tests."""
     set_env(session, PROJECT_ENV)
-    session.install("-e", ".[dev]", silent=False)  # editable + dev deps
+    session.install("-e", ".[all,dev]", silent=False)  # editable + dev deps
     session.run("pytest", "-m", "unit")
 
 
@@ -35,7 +34,7 @@ def run_unit(session):
 def run_integration(session):
     """Run integration tests."""
     set_env(session, PROJECT_ENV)
-    session.install("-e", ".[dev]", silent=False)  # editable + dev deps
+    session.install("-e", ".[all,dev]", silent=False)  # editable + dev deps
     session.run("pytest", "-m", "integration")
 
 
@@ -44,7 +43,7 @@ def run_coverage(session):
     """Run tests with coverage tracking."""
     set_env(session, PROJECT_ENV)
     session.install("coverage", "pytest-cov", silent=False)
-    session.install("-e", ".[dev]", silent=False)
+    session.install("-e", ".[all,dev]", silent=False)
     session.run("pytest", "-m", "unit or integration", "--cov=modularml", "--cov-report=xml", "tests/")
 
 
@@ -52,7 +51,7 @@ def run_coverage(session):
 def run_examples(session):
     """Run Jupyter notebook examples with nbmake."""
     set_env(session, PROJECT_ENV)
-    session.install("-e", ".[dev]", "nbmake", silent=False)
+    session.install("-e", ".[all,dev]", "nbmake", silent=False)
     notebooks = session.posargs if session.posargs else ["examples/"]
     session.run("pytest", "--nbmake", *notebooks, external=True)
 
@@ -71,7 +70,7 @@ def dev_env(session):
     session.install("virtualenv")
     session.run("virtualenv", os.fsdecode(VENV_DIR), silent=True)
     python = os.fsdecode(VENV_DIR.joinpath("bin/python"))
-    session.run(python, "-m", "pip", "install", "-e", ".[dev]", external=True)
+    session.run(python, "-m", "pip", "install", "-e", ".[all,dev]", external=True)
 
 
 @nox.session(name="quick", reuse_venv=True)
