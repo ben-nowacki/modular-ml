@@ -78,3 +78,12 @@ def run_all_tests(session):
     """Run unit tests and integration tests."""
     run_unit(session)
     run_integration(session)
+
+
+@nox.session(name="doctests")
+def run_doc_tests(session):
+    """Run the doctests and generate the output(s) in the docs/build/ directory."""
+    set_env(session, PROJECT_ENV)
+    session.install("-e", ".[all,dev]", silent=False)
+    session.run("pytest", "--doctest-modules", "--doctest-plus", "modularml")
+
