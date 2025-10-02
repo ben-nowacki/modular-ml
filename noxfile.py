@@ -44,7 +44,14 @@ def run_coverage(session):
     set_env(session, PROJECT_ENV)
     session.install("coverage", "pytest-cov", silent=False)
     session.install("-e", ".[all,dev]", silent=False)
-    session.run("pytest", "-m", "unit or integration", "--cov=modularml", "--cov-report=xml", "tests/")
+    session.run(
+        "pytest",
+        "-m",
+        "unit or integration",
+        "--cov=modularml",
+        "--cov-report=xml",
+        "tests/",
+    )
 
 
 @nox.session(name="examples")
@@ -87,3 +94,52 @@ def run_doc_tests(session):
     session.install("-e", ".[all,dev]", silent=False)
     session.run("pytest", "--doctest-modules", "--doctest-plus", "modularml")
 
+
+@nox.session(name="docs")
+def build_docs(session):
+    """Run doc tests."""
+    set_env(session, PROJECT_ENV)
+    session.install("-e", ".[docs]", silent=False)
+    session.chdir("docs")
+
+    # Autogenerate API docs
+    session.run(
+        "sphinx-apidoc",
+        "-o",
+        "source/api/autogen",
+        "../modularml",
+        "--templatedir",
+        "_templates/_autogen_api_template",
+        "--force",
+        external=True,
+    )
+
+    sourcedir = "."
+    outputdir = "_build/html"
+
+    # Local development
+    if session.interactive:
+        session.run(
+            "sphinx-autobuild",
+            sourcedir,
+            outputdir,
+            "-b",
+            "html",
+            "-j",
+            "auto",
+            "--open-browser",
+            "-qT",
+        )
+    # Runs in CI only, treating warnings as errors
+    # Run in single-threaded mode, see
+    # https://github.com/pydata/pydata-sphinx-theme/issues/1643
+    else:
+        session.run(
+            "sphinx-build",
+            "-W",
+            "--keep-going",
+            "-b",
+            "html",
+            sourcedir,
+            outputdir,
+        )

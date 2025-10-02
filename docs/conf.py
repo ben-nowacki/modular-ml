@@ -43,35 +43,6 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 master_doc = "index"
 
-autodoc_type_aliases = {
-    "Activation": "modularml.core.Activation",
-    "AppliedLoss": "modularml.core.AppliedLoss",
-    "Batch": "modularml.core.Batch",
-    "ConcatStage": "modularml.core.ConcatStage",
-    "ConditionSplitter": "modularml.core.ConditionSplitter",
-    "Data": "modularml.core.Data",
-    "EvaluationPhase": "modularml.core.EvaluationPhase",
-    "Experiment": "modularml.core.Experiment",
-    "FeatureSet": "modularml.core.FeatureSet",
-    "FeatureSubset": "modularml.core.FeatureSubset",
-    "FeatureTransform": "modularml.core.FeatureTransform",
-    "GraphNode": "modularml.core.GraphNode",
-    "Loss": "modularml.core.Loss",
-    "LossCollection": "modularml.core.LossCollection",
-    "LossRecord": "modularml.core.LossRecord",
-    "ModelGraph": "modularml.core.ModelGraph",
-    "ModelStage": "modularml.core.ModelStage",
-    "Optimizer": "modularml.core.Optimizer",
-    "PairedSampler": "modularml.core.PairedSampler",
-    "RandomSplitter": "modularml.core.RandomSplitter",
-    "Sample": "modularml.core.Sample",
-    "SampleCollection": "modularml.core.SampleCollection",
-    "SimilarityCondition": "modularml.core.SimilarityCondition",
-    "SimpleSampler": "modularml.core.SimpleSampler",
-    "TrainingPhase": "modularml.core.TrainingPhase",
-}
-
-
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 

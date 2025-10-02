@@ -14,7 +14,7 @@
 ModularMl.egg-info/*
 dist/*
 downloaded_data/*
-examples/downloaded_data/*
+docs/source/examples/notebooks/downloaded_data/*
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 
