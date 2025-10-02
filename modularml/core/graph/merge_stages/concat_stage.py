@@ -23,13 +23,19 @@ class ConcatStage(MergeStage):
         (e.g., 'constant', 'reflect', 'replicate', 'circular') and value.
 
     Attributes:
-        concat_axis (int): The axis along which to concatenate inputs.
-        pad_inputs (bool): Whether to pad inputs to align shapes before concatenation.
-        pad_mode (str): Padding mode to use. Options depend on backend.
-        pad_value (float): Constant value to use when `pad_mode='constant'`.
+        label (str): Unique identifier for this node.
+            upstream_nodes (list[str | GraphNode]): Optional list of upstream
+            node labels or references from which inputs will be received.
+        axis (int): The axis along which to concatenate inputs.
+        pad_inputs (bool, optional): Whether to pad inputs before merging. Defaults to False.
+        pad_mode (PadMode, optional): Padding mode ('constant', 'reflect', 'replicate', etc.). Defaults to 'constant'.
+        pad_value (float, optional): Value to use for constant padding. Defaults to 0.0.
+        **kwargs: Additional arguments passed to `MergeStage`.
 
     Example:
-        >>> stage = ConcatStage(label="merge", axis=1, pad_inputs=True, pad_mode="constant", pad_value=0.0)
+    ```python
+        stage = ConcatStage(label="merge", upstreadm_nodes=[...], axis=1, pad_inputs=True, pad_mode="constant", pad_value=0.0)
+    ```
 
     """
 
