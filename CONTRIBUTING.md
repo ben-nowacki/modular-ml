@@ -23,6 +23,8 @@ pip install -e .[dev,all]
    nox -s unit         # unit tests
    nox -s integration  # integration tests (if applicable)
    nox -s examples     # notebook tests
+   nox -s doctests     # doctests
+   nox -s docs         # check that docs build
    ```
 5. **Open a pull request** using the provided [template]([modul](https://github.com/REIL-UConn/modular-ml/pulls))
 
