@@ -1,6 +1,0 @@
-sphinx
-sphinx-rtd-theme
-myst-nb
-nbclient
-ipykernel
-nbformat
