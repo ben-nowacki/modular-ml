@@ -13,7 +13,7 @@ Setup
 
 1. Fork and clone the repository.
 2. Install development dependencies:
-    
+
 .. code-block:: bash
 
     pip install -e .[all,dev]

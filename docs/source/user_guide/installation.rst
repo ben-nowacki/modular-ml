@@ -36,4 +36,3 @@ To verify ModularML is installed correctly:
 .. code-block:: bash
 
    python -c "import modularml as mml; print(mml.__version__)"
-

@@ -42,4 +42,3 @@ Next steps
 
 - See the :doc:`../examples/index` for more detailed tutorials.
 - Review the :doc:`../api/index` for all classes and functions.
-

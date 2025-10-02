@@ -4,7 +4,7 @@
 User Guide
 =====================
 
-This guide introduces the basics of ModularML.  
+This guide introduces the basics of ModularML.
 For API details, see the :doc:`../api/index`.
 
 .. toctree::
@@ -19,4 +19,3 @@ For API details, see the :doc:`../api/index`.
    :maxdepth: 1
 
    contributing
-
