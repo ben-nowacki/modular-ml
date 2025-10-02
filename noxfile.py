@@ -59,7 +59,7 @@ def run_examples(session):
     """Run Jupyter notebook examples with nbmake."""
     set_env(session, PROJECT_ENV)
     session.install("-e", ".[all,dev]", "nbmake", silent=False)
-    notebooks = session.posargs if session.posargs else ["examples/"]
+    notebooks = session.posargs if session.posargs else ["docs/source/examples/notebooks"]
     session.run("pytest", "--nbmake", *notebooks, external=True)
 
 

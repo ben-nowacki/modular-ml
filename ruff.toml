@@ -30,8 +30,8 @@ ignore = [
 
 
 [lint.per-file-ignores]
-"examples/*.ipynb" = ["S310", "N803", ]
+"docs/source/examples/notebooks/*.ipynb" = ["S310", "N803", ]
 "**/preprocessing/*.py" = ["N803", "ARG002", "N806", ]
 "tests/*" = ["INP001", "S101", "PLC0415", "F841", "N803", "ARG001", "ARG002", "N806", ]
-"docs/*" = ["INP001", "A001", "PATH001", ]
+"docs/*" = ["INP001", "A001", "PTH001", ]
 "**/__init__.py" = ["I", "F401", "F841", ]
