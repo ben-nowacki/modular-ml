@@ -49,10 +49,13 @@ class ModelGraph:
         - Provide methods to modify, insert, or replace nodes
         - Support staged training across a modular pipeline
 
-    Typical Usage:
-        >>> graph = ModelGraph(nodes=[fs1, model1, model2], optimizer=shared_optimizer)
-        >>> graph.build_all()
-        >>> graph.train_step(...)
+    Example Usage:
+    ```python
+        fs1, model1, model2 = ..., ..., ...
+        graph = ModelGraph(nodes=[fs1, model1, model2], optimizer=shared_optimizer)
+        graph.build_all()
+        graph.train_step(...)
+    ```
     """
 
     def __init__(self, nodes: list[GraphNode], optimizer: Optimizer | None = None):

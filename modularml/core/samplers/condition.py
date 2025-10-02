@@ -52,12 +52,14 @@ class SimilarityCondition:
 
     Examples:
         >>> cond = SimilarityCondition(field="tags", key="SOH_PCT", mode="similar", tolerance=0.5, weight_mode="linear")
-        >>> cond.score(0.80, 0.82)
-        2.5   # diff=0.02, tol=0.5 -> high weight
-        >>> cond.score(0.80, 0.90)
-        1.0   # diff=0.10, tol=0.5 -> valid but weaker
-        >>> cond.score(0.80, 1.5)
-        0.33  # diff=0.70 > tol=0.5, fallback weight
+        >>> cond.score(0.80, 0.82)  # doctest: +FLOAT_CMP
+        25.0
+
+        >>> cond.score(0.80, 0.90)  # doctest: +FLOAT_CMP
+        5.0
+
+        >>> cond.score(0.80, 1.5)  # doctest: +FLOAT_CMP
+        0.0
 
     """
 

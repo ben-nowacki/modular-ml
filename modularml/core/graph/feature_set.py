@@ -297,16 +297,16 @@ class FeatureSet(SampleCollection, GraphNode):
             - `cell_id` is in [1, 2, 3]
             - `group_id` is greater than 1, and
             - `pulse_type` equals 'charge'.
-        ``` python
-        >>> FeatureSet.filter(cell_id=[1,2,3], group_id=(lambda x: x > 1), pulse_type='charge')
+        ```python
+        FeatureSet.filter(cell_id=[1,2,3], group_id=(lambda x: x > 1), pulse_type='charge')
         ```
 
         Generally, filtering is applied on the attributes of `Sample.tags`, but can \
         also be useful to apply them to the `Sample.target` keys. For example, we \
         might want to filter to a specific state-of-health (soh) range:
-        ``` python
+        ```python
         # Assuming Sample.targets.keys() returns 'soh', ...
-        >>> FeatureSet.filter(soh=lambda x: (x > 85) & (x < 95))
+        FeatureSet.filter(soh=lambda x: (x > 85) & (x < 95))
         ```
         This returns a FeatureSubset that contains a view of the samples in FeatureSet \
         that have a state-of-health between 85% and 95%.
@@ -633,9 +633,11 @@ class FeatureSet(SampleCollection, GraphNode):
         Valid components are "features" or "targets".
 
         Examples:
-            >>> FeatureSet.fit_transform(fit="features", apply="features", transform=...)
-            >>> FeatureSet.fit_transform(fit="train.features", apply="features", transform=...)
-            >>> FeatureSet.fit_transform(fit="train.features.voltage", apply="features.voltage", transform=...)
+            ```python
+            FeatureSet.fit_transform(fit="features", apply="features", transform=...)
+            FeatureSet.fit_transform(fit="train.features", apply="features", transform=...)
+            FeatureSet.fit_transform(fit="train.features.voltage", apply="features.voltage", transform=...)
+            ```
 
         """
         if not isinstance(transform, FeatureTransform):

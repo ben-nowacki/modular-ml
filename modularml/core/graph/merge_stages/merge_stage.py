@@ -23,9 +23,11 @@ class MergeStage(ComputationNode, ABC):
         Subclasses must implement the `apply_merge()` method, which defines how values
         from multiple inputs are combined into a single tensor or structure.
 
-    Examples:
-        >>> class MyConcatStage(MergeStage):
-        >>>     def apply_merge(self, values): return np.concatenate(values, axis=1)
+    Example:
+    ```python
+        class MyConcatStage(MergeStage):
+            def apply_merge(self, values): ...
+    ```
 
     """
 
