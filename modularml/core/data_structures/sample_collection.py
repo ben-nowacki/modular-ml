@@ -33,11 +33,11 @@ class SampleCollection:
         self._label_sample_map: dict[str, Sample] = {s.label: s for s in samples}
 
         # Enforce consistent shapes
-        f_shapes = list({s.feature_shape for s in samples})
+        f_shapes = list({s.feature_shapes for s in samples})
         if len(f_shapes) != 1:
             msg = f"Inconsistent SampleCollection feature shapes: {f_shapes}."
             raise ValueError(msg)
-        t_shapes = list({s.target_shape for s in samples})
+        t_shapes = list({s.target_shapes for s in samples})
         if len(t_shapes) != 1:
             msg = f"Inconsistent SampleCollection target shapes: {t_shapes}."
             raise ValueError(msg)

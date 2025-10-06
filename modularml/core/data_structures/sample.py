@@ -60,18 +60,18 @@ class Sample:
             self.features = {k: v.as_backend(target_backend) for k, v in self.features.items()}
             self.targets = {k: v.as_backend(target_backend) for k, v in self.targets.items()}
 
-        # Enforce consistent shapes
-        f_shapes = [d.shape for d in self.features.values()]
-        if len(set(f_shapes)) > 1:
-            msg = f"Inconsistent feature shapes: {f_shapes}"
-            raise ValueError(msg)
-        self._feature_shape = (len(f_shapes), *tuple(f_shapes[0]))
+        # Enforce consistent shapes?
+        # f_shapes = [d.shape for d in self.features.values()]
+        # if len(set(f_shapes)) > 1:
+        #     msg = f"Inconsistent feature shapes: {f_shapes}"
+        #     raise ValueError(msg)
+        # self._feature_shape = (len(f_shapes), *tuple(f_shapes[0]))
 
-        t_shapes = [d.shape for d in self.targets.values()]
-        if len(set(t_shapes)) > 1:
-            msg = f"Inconsistent target shapes: {t_shapes}"
-            raise ValueError(msg)
-        self._target_shape = (len(t_shapes), *tuple(t_shapes[0]))
+        # t_shapes = [d.shape for d in self.targets.values()]
+        # if len(set(t_shapes)) > 1:
+        #     msg = f"Inconsistent target shapes: {t_shapes}"
+        #     raise ValueError(msg)
+        # self._target_shape = (len(t_shapes), *tuple(t_shapes[0]))
 
     def __repr__(self) -> str:
         def summarize(d: dict[str, Any]) -> dict[str, str]:
@@ -100,12 +100,12 @@ class Sample:
         return list(self.tags.keys())
 
     @property
-    def feature_shape(self) -> tuple[int, ...]:
-        return self._feature_shape
+    def feature_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return tuple(v.shape for v in self.features.values())
 
     @property
-    def target_shape(self) -> tuple[int, ...]:
-        return self._target_shape
+    def target_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return tuple(v.shape for v in self.targets.values())
 
     def get_features(self, key: str) -> Data:
         return self.features.get(key)

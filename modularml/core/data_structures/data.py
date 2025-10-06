@@ -58,7 +58,7 @@ class Data:
         return self._inferred_backend
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, ...]:
         """
         Shape of the wrapped value.
 
