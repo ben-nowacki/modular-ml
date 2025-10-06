@@ -10,7 +10,7 @@ from modularml.utils.data_format import (
     convert_dict_to_format,
     convert_to_format,
     enforce_numpy_shape,
-    format_has_shape,
+    format_requires_compatible_shapes,
     get_data_format_for_backend,
     normalize_format,
     to_list,
@@ -133,10 +133,10 @@ def test_convert_to_format_invalid():
         convert_to_format([1], "invalid")
 
 
-# ---------- format_has_shape / enforce_numpy_shape ----------
-def test_format_has_shape_and_enforce_shape():
-    assert format_has_shape(DataFormat.NUMPY)
-    assert not format_has_shape(DataFormat.DICT)
+# ---------- format_requires_compatible_shapes / enforce_numpy_shape ----------
+def test_format_requires_compatible_shapes_and_enforce_shape():
+    assert format_requires_compatible_shapes(DataFormat.NUMPY)
+    assert not format_requires_compatible_shapes(DataFormat.DICT)
     arr = np.array([1, 2, 3, 4])
     reshaped = enforce_numpy_shape(arr, (2, 2))
     assert reshaped.shape == (2, 2)
