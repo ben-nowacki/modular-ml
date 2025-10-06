@@ -447,25 +447,31 @@ class GraphNode(ABC):
 
     @property
     @abstractmethod
-    def input_shape(self) -> tuple[int, ...] | None:
+    def input_shape_spec(self) -> ShapeSpec | None:
         """
         Shape of input data expected by this node.
 
         Returns:
-            tuple[int, ...] | None: The expected input shape, or None if unknown.
+            ShapeSpec | None: The expected input shape(s), or None if unknown.
 
         """
 
     @property
     @abstractmethod
-    def output_shape(self) -> tuple[int, ...] | None:
+    def output_shape_spec(self) -> ShapeSpec | None:
         """
         Shape of output data produced by this node.
 
         Returns:
-            tuple[int, ...] | None: The output shape, or None if unknown.
+            ShapeSpec | None: The expected output shape(s), or None if unknown.
 
         """
+
+    def get_input_shape(self, key: str) -> tuple[int, ...]:
+        return self.input_shape_spec[key]
+
+    def get_output_shape(self, key: str) -> tuple[int, ...]:
+        return self.output_shape_spec[key]
 
     # ==========================================
     # Internal Helpers
