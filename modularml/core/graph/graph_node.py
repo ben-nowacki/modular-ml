@@ -1,6 +1,7 @@
 import warnings
 from abc import ABC, abstractmethod
 
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.utils.error_handling import ErrorMode
 from modularml.utils.exceptions import GraphNodeInputError, GraphNodeOutputError
 

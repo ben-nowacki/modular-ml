@@ -15,9 +15,9 @@ from modularml.core.loss.loss_collection import LossCollection
 from modularml.core.loss.loss_record import LossRecord
 from modularml.models.wrappers import wrap_model
 from modularml.utils.backend import Backend
+from modularml.utils.data_conversion import convert_to_format
 from modularml.utils.data_format import (
     DataFormat,
-    convert_to_format,
     get_data_format_for_backend,
 )
 from modularml.utils.exceptions import (

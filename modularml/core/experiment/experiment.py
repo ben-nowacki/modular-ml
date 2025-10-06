@@ -13,11 +13,12 @@ from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.experiment.eval_phase import EvaluationPhase
 from modularml.core.experiment.phase_results import EvaluationResult, TrainingResult
 from modularml.core.experiment.training_phase import TrainingPhase
-from modularml.core.graph import ModelGraph
 from modularml.core.graph.feature_set import FeatureSet
+from modularml.core.graph.model_graph import ModelGraph
 from modularml.core.loss.loss_collection import LossCollection
 from modularml.core.loss.loss_record import LossRecord
-from modularml.utils.data_format import DataFormat, to_python
+from modularml.utils.data_conversion import to_python
+from modularml.utils.data_format import DataFormat
 from modularml.utils.exceptions import NotInvertibleError
 from modularml.utils.formatting import format_value_to_sig_digits
 

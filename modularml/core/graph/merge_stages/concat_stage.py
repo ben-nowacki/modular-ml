@@ -6,7 +6,8 @@ import torch
 
 from modularml.core.graph.graph_node import GraphNode
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import convert_to_format, get_data_format_for_backend
+from modularml.utils.data_conversion import convert_to_format
+from modularml.utils.data_format import get_data_format_for_backend
 from modularml.utils.modeling import PadMode, map_pad_mode_to_backend
 
 from .merge_stage import MergeStage

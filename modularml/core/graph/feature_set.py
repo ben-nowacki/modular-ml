@@ -14,7 +14,7 @@ from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.graph.feature_subset import FeatureSubset
-from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.graph_node import GraphNode, ShapeSpec
 from modularml.core.transforms.feature_transform import FeatureTransform
 from modularml.utils.data_format import DataFormat
 from modularml.utils.exceptions import SampleLoadError, SubsetOverlapWarning

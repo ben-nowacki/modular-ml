@@ -3,9 +3,7 @@ from typing import Any
 
 import numpy as np
 
-from modularml.core.data_structures import Sample
-from modularml.core.data_structures.data import Data
-from modularml.core.graph import FeatureSet
+from modularml.core.api import Data, FeatureSet, Sample
 
 rng = np.random.default_rng(seed=13)
 

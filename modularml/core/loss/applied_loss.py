@@ -7,7 +7,8 @@ import torch
 from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.loss.loss import Loss
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import get_data_format_for_backend, to_numpy
+from modularml.utils.data_conversion import to_numpy
+from modularml.utils.data_format import get_data_format_for_backend
 
 
 class AppliedLoss:

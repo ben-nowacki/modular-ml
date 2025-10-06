@@ -1,7 +1,6 @@
 import pytest
 
-from modularml.core.data_structures import Data, Sample
-from modularml.core.graph import FeatureSet
+from modularml.core.api import Data, FeatureSet, Sample
 from tests.shared.data_utils import (
     generate_dummy_data,
     generate_dummy_featureset,

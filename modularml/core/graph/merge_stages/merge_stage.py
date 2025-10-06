@@ -8,7 +8,8 @@ from modularml.core.data_structures.data import Data
 from modularml.core.graph.computation_node import ComputationNode
 from modularml.core.graph.graph_node import GraphNode
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import DataFormat, convert_to_format, get_data_format_for_backend
+from modularml.utils.data_conversion import convert_to_format
+from modularml.utils.data_format import DataFormat, get_data_format_for_backend
 
 
 class MergeStage(ComputationNode, ABC):

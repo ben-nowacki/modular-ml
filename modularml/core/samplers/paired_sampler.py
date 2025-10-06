@@ -11,7 +11,7 @@ from modularml.core.graph.feature_set import FeatureSet
 from modularml.core.graph.feature_subset import FeatureSubset
 from modularml.core.samplers.condition import ConditionBucket, SimilarityCondition
 from modularml.core.samplers.feature_sampler import FeatureSampler
-from modularml.utils.data_format import to_python
+from modularml.utils.data_conversion import to_python
 
 
 class PairedSampler(FeatureSampler):
