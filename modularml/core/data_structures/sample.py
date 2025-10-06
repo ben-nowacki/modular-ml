@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from modularml.core.data_structures.data import Data
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.utils.backend import Backend
 
 
@@ -100,12 +101,18 @@ class Sample:
         return list(self.tags.keys())
 
     @property
-    def feature_shapes(self) -> tuple[tuple[int, ...], ...]:
-        return tuple(v.shape for v in self.features.values())
+    def feature_shape_spec(self) -> ShapeSpec:
+        return ShapeSpec(shapes={k: v.shape for k, v in self.features.items()})
 
     @property
-    def target_shapes(self) -> tuple[tuple[int, ...], ...]:
-        return tuple(v.shape for v in self.targets.values())
+    def target_shape_spec(self) -> ShapeSpec:
+        return ShapeSpec(shapes={k: v.shape for k, v in self.targets.items()})
+
+    def get_feature_shape(self, key: str) -> tuple[int, ...]:
+        return self.feature_shape_spec.get(key)
+
+    def get_target_shape(self, key: str) -> tuple[int, ...]:
+        return self.target_shape_spec.get(key)
 
     def get_features(self, key: str) -> Data:
         return self.features.get(key)
@@ -118,9 +125,9 @@ class Sample:
 
     def to_backend(self, backend: Backend) -> Sample:
         return Sample(
-            features={k: v.to_backend(backend) for k, v in self.features.items()},
-            targets={k: v.to_backend(backend) for k, v in self.targets.items()},
-            tags={k: v.to_backend(backend) for k, v in self.tags.items()},
+            features={k: v.as_backend(backend) for k, v in self.features.items()},
+            targets={k: v.as_backend(backend) for k, v in self.targets.items()},
+            tags={k: v.as_backend(Backend.NONE) for k, v in self.tags.items()},
             label=self.label,
             uuid=self.uuid,
         )
