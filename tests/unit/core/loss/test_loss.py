@@ -8,9 +8,9 @@ from modularml.utils.backend import Backend
 from modularml.utils.exceptions import BackendNotSupportedError, LossError
 
 
-# ------------------------
+# ==========================================================
 # Torch backend tests
-# ------------------------
+# ==========================================================
 @pytest.mark.unit
 def test_torch_loss_mse_forward_pass():
     loss = Loss(name="mse", backend=Backend.TORCH, reduction="mean")
@@ -27,9 +27,9 @@ def test_torch_loss_invalid_name_raises():
         Loss(name="not_a_real_loss", backend=Backend.TORCH)
 
 
-# ------------------------
+# ==========================================================
 # TensorFlow backend tests
-# ------------------------
+# ==========================================================
 @pytest.mark.unit
 def test_tf_loss_mae_forward_pass():
     loss = Loss(name="mae", backend=Backend.TENSORFLOW, reduction="sum")
@@ -45,9 +45,9 @@ def test_tf_loss_invalid_name_raises():
         Loss(name="foo", backend=Backend.TENSORFLOW)
 
 
-# ------------------------
+# ==========================================================
 # Custom loss function
-# ------------------------
+# ==========================================================
 def custom_numpy_loss(y_true, y_pred):
     return float(np.sum((y_true - y_pred) ** 2))
 
@@ -60,9 +60,9 @@ def test_custom_loss_function_infers_backend_none():
     assert out == 0.0
 
 
-# ------------------------
+# ==========================================================
 # Error handling
-# ------------------------
+# ==========================================================
 @pytest.mark.unit
 def test_loss_requires_backend_or_function():
     with pytest.raises(LossError, match="Loss cannot be initiallized"):
@@ -85,9 +85,9 @@ def test_call_wraps_exceptions():
         loss(1, 2)
 
 
-# ------------------------
+# ==========================================================
 # Utility functions
-# ------------------------
+# ==========================================================
 @pytest.mark.unit
 def test_allowed_keywords_and_repr():
     loss = Loss(name="mse", backend=Backend.TORCH)

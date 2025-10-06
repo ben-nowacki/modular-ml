@@ -7,8 +7,6 @@ from modularml.core.graph.merge_stages import ConcatStage
 from modularml.utils.backend import Backend
 from modularml.utils.modeling import PadMode
 
-rng = np.random.default_rng(seed=13)
-
 
 # ----------------------------
 # Fixtures for backends and data
@@ -19,7 +17,7 @@ def backend(request):
 
 
 @pytest.fixture
-def example_inputs(backend):
+def example_inputs(rng, backend):
     if backend == Backend.TORCH:
         return [
             torch.randn(2, 3),
@@ -37,7 +35,7 @@ def example_inputs(backend):
 
 
 @pytest.fixture
-def example_inputs_with_mismatch(backend):
+def example_inputs_with_mismatch(rng, backend):
     if backend == Backend.TORCH:
         return [
             torch.randn(2, 3),
@@ -55,7 +53,7 @@ def example_inputs_with_mismatch(backend):
 
 
 @pytest.fixture
-def example_inputs_with_mismatch_v2(backend):
+def example_inputs_with_mismatch_v2(rng, backend):
     if backend == Backend.TORCH:
         return [
             torch.randn(1, 101),
