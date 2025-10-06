@@ -14,7 +14,12 @@ if TYPE_CHECKING:
 
 
 class RandomSplitter(BaseSplitter):
-    def __init__(self, ratios: dict[str, float], group_by: str | list[str] | None = None, seed: int = 42):
+    def __init__(
+        self,
+        ratios: dict[str, float],
+        group_by: str | list[str] | None = None,
+        seed: int = 13,
+    ):
         """
         Creates a random splitter based on sample ratios.
 
@@ -38,16 +43,7 @@ class RandomSplitter(BaseSplitter):
             raise ValueError(msg)
 
         self.ratios = ratios
-        self.group_by = (
-            group_by
-            if isinstance(group_by, list)
-            else [
-                group_by,
-            ]
-            if isinstance(group_by, str)
-            else None
-        )
-
+        self.group_by = group_by if isinstance(group_by, list) else [group_by] if isinstance(group_by, str) else None
         self.seed = int(seed)
 
     def _get_split_boundaries(self, n: int) -> dict[str, tuple]:
@@ -73,9 +69,12 @@ class RandomSplitter(BaseSplitter):
             dict[str, list[str]]: Mapping from subset name to list of Sample.uuid.
 
         """
-        sample_coll = SampleCollection(samples)
         rng = np.random.default_rng(self.seed)
+        sample_coll = SampleCollection(samples)
 
+        # ==================================================
+        # Case 1: No grouping
+        # ==================================================
         if self.group_by is None:
             uuids = [s.uuid for s in samples]
             rng.shuffle(uuids)
@@ -89,7 +88,9 @@ class RandomSplitter(BaseSplitter):
 
             return split_result
 
-        # Group by tags
+        # ==================================================
+        # Case 2: Group by tags (e.g. by cell_id)
+        # ==================================================
         df_tags = sample_coll.get_all_tags(fmt=DataFormat.PANDAS)
         df_tags["uuid"] = [s.uuid for s in samples]
         grouped = df_tags.groupby(self.group_by)
@@ -97,8 +98,8 @@ class RandomSplitter(BaseSplitter):
         group_keys = list(grouped.groups.keys())
         rng.shuffle(group_keys)
 
-        n_total = len(group_keys)
-        boundaries = self._get_split_boundaries(n_total)
+        n_total_groups = len(group_keys)
+        boundaries = self._get_split_boundaries(n_total_groups)
 
         group_to_split = {}
         for split_name, (start, end) in boundaries.items():
@@ -113,6 +114,9 @@ class RandomSplitter(BaseSplitter):
 
         return dict(split_result)
 
+    # ==================================================
+    # Config serialization
+    # ==================================================
     def get_config(
         self,
     ) -> dict[str, Any]:
@@ -134,4 +138,8 @@ class RandomSplitter(BaseSplitter):
             )
             raise ValueError(msg)
 
-        return cls(ratios=config["ratios"], group_by=config["group_by"], seed=config["seed"])
+        return cls(
+            ratios=config["ratios"],
+            group_by=config["group_by"],
+            seed=config["seed"],
+        )
