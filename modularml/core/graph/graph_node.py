@@ -468,9 +468,13 @@ class GraphNode(ABC):
         """
 
     def get_input_shape(self, key: str) -> tuple[int, ...]:
+        if self.input_shape_spec is None:
+            raise ValueError("Input ShapeSpec is None.")
         return self.input_shape_spec[key]
 
     def get_output_shape(self, key: str) -> tuple[int, ...]:
+        if self.output_shape_spec is None:
+            raise ValueError("Output ShapeSpec is None.")
         return self.output_shape_spec[key]
 
     # ==========================================

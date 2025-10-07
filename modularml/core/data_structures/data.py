@@ -49,9 +49,9 @@ class Data:
             return Backend.TORCH
         if isinstance(self.value, tf.Tensor):
             return Backend.TENSORFLOW
-        if isinstance(self.value, np.ndarray | np.generic):
+        if isinstance(self.value, np.ndarray | np.generic | np.str_):
             return Backend.SCIKIT
-        if isinstance(self.value, int | float | list | bool):
+        if isinstance(self.value, int | float | list | bool | str):
             return Backend.NONE
         msg = f"Unsupported type for Data: {type(self.value)}"
         raise TypeError(msg)
@@ -128,10 +128,38 @@ class Data:
     def __repr__(self):
         return f"Data(backend={self.backend}, shape={self.shape}, dtype={self.dtype})"
 
-    def __eq__(self, other):
-        if isinstance(other, Data):
-            return all(self.value == other.value)
-        return self.value == other
+    def __eq__(self, other):  # noqa: PLR0911
+        """Backend-agnostic equality comparison for scalars, arrays, or tensors."""
+        # Determine comparison target
+        val1 = self.value
+        val2 = other.value if isinstance(other, Data) else other
+
+        # Case 1: PyTorch tensors
+        if torch is not None and (isinstance(val1, torch.Tensor) or isinstance(val2, torch.Tensor)):
+            # Torch broadcasting handles mixed scalar/tensor comparison
+            result = val1 == val2
+            if result.dtype == torch.bool:
+                return bool(torch.all(result))
+            return False
+
+        # Case 2: TensorFlow tensors
+        if tf is not None and (isinstance(val1, tf.Tensor) or isinstance(val2, tf.Tensor)):
+            result = tf.equal(val1, val2)
+            if result.dtype == tf.bool:
+                return bool(tf.reduce_all(result))
+            return False
+
+        # Case 3: NumPy arrays or scalars
+        if isinstance(val1, (np.ndarray, np.generic)) or isinstance(val2, (np.ndarray, np.generic)):
+            try:
+                result = np.equal(val1, val2)
+            except ValueError:
+                # Shape mismatch
+                return False
+            return bool(np.all(result))
+
+        # Case 4: Fallback for plain Python types (int, float, str, bool, etc.)
+        return val1 == val2
 
     def __hash__(self):  # noqa: PLR0911
         """Return a backend-agnostic, content-based hash for the wrapped value."""
