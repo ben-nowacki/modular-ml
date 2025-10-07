@@ -8,6 +8,7 @@ from modularml.core.graph.graph_node import GraphNode
 
 if TYPE_CHECKING:
     from modularml.core.graph.feature_set import FeatureSet
+    from modularml.core.graph.shape_spec import ShapeSpec
     from modularml.core.splitters.splitter import BaseSplitter
 
 
@@ -28,7 +29,18 @@ class FeatureSubset(SampleCollection, GraphNode):
         self._parent_ref = weakref.ref(parent)  # weak ref of parent FeatureSet
         self._sample_uuids = set(sample_uuids)
 
-        subset_samples = [s for s in parent.samples if s.uuid in self._sample_uuids]
+        subset_samples = []
+        invalid_uuids = []
+        for s_uuid in self._sample_uuids:
+            if s_uuid in parent.sample_uuids:
+                subset_samples.append(parent.get_sample_with_uuid(s_uuid))
+            else:
+                invalid_uuids.append(s_uuid)
+        if invalid_uuids:
+            msg = f"Invalid sample_uuids: {invalid_uuids}"
+            raise ValueError(msg)
+        if len(subset_samples) == 0:
+            raise ValueError("Subset sample_uuids do not match any samples in parent.")
         SampleCollection.__init__(self, samples=subset_samples)
 
         invalid_uuids = [s_uuid for s_uuid in self._sample_uuids if s_uuid not in parent.sample_uuids]
@@ -48,13 +60,13 @@ class FeatureSubset(SampleCollection, GraphNode):
         return True  # FeatureSubsets can feed into downstream nodes
 
     @property
-    def input_shape(self) -> tuple[int, ...] | None:
-        return self.feature_shape  # Not applicable
+    def input_shape_spec(self) -> ShapeSpec | None:
+        return None  # Not applicable
 
     @property
-    def output_shape(self) -> tuple[int, ...] | None:
-        # Return shape based on features if available
-        return self.feature_shape
+    def output_shape_spec(self) -> ShapeSpec | None:
+        # Return feature shape (FeatureSet outputs features)
+        return self.feature_shape_spec
 
     @property
     def max_inputs(self) -> int | None:
