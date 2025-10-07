@@ -4,7 +4,7 @@ import tensorflow as tf
 import torch
 
 from modularml.api import Backend, DataFormat
-from modularml.core.api import Data, Sample, SampleCollection
+from modularml.core.api import Sample, SampleCollection
 from modularml.core.graph.shape_spec import ShapeSpec
 from tests.shared.data_utils import generate_dummy_sample
 

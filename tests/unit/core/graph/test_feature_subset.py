@@ -70,7 +70,7 @@ def test_split_method_calls_splitter(monkeypatch, dummy_featureset_numeric):
 
     # Mock parent add_subset and _add_split_config
     fs.add_subset = lambda s: setattr(fs, f"added_{s.label}", True)
-    fs._add_split_config = lambda **kwargs: setattr(fs, "split_config_added", True)
+    fs._add_split_config = lambda **kwargs: setattr(fs, "split_config_added", True)  # noqa: ARG005
 
     new_subsets = subset.split(splitter)
     assert all(isinstance(s, FeatureSubset) for s in new_subsets)

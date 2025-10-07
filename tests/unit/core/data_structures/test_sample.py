@@ -1,5 +1,3 @@
-import copy
-
 import pytest
 
 from modularml.core.data_structures.data import Data

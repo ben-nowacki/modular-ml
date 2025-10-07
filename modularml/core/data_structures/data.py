@@ -163,38 +163,46 @@ class Data:
 
     def __hash__(self):  # noqa: PLR0911
         """Return a backend-agnostic, content-based hash for the wrapped value."""
-        try:
-            # Torch Tensor
-            if torch is not None and isinstance(self.value, torch.Tensor):
-                # safe conversion to CPU, do NOT detach (autograd-safe)
-                val_bytes = self.value.cpu().numpy().tobytes()
-                h = hashlib.sha256(val_bytes).hexdigest()
-                return hash((self.backend, self.shape, str(self.dtype), h))
+        # --- Torch Tensor ---
+        if torch is not None and isinstance(self.value, torch.Tensor):
+            # Move to CPU; do NOT detach to preserve autograd safety
+            val_bytes = self.value.cpu().numpy().tobytes()
+            h = hashlib.sha256(val_bytes).hexdigest()
+            return hash((self.backend, self.shape, str(self.dtype), h))
 
-            # TensorFlow Tensor
-            if tf is not None and isinstance(self.value, tf.Tensor):
-                val_bytes = tf.io.serialize_tensor(self.value).numpy()
-                h = hashlib.sha256(val_bytes).hexdigest()
-                return hash((self.backend, self.shape, str(self.dtype), h))
+        # --- TensorFlow Tensor ---
+        if tf is not None and isinstance(self.value, tf.Tensor):
+            val_bytes = tf.io.serialize_tensor(self.value).numpy()
+            h = hashlib.sha256(val_bytes).hexdigest()
+            return hash((self.backend, self.shape, str(self.dtype), h))
 
-            # NumPy array
-            if isinstance(self.value, np.ndarray):
-                h = hashlib.sha256(self.value.tobytes()).hexdigest()
-                return hash((self.backend, self.shape, str(self.dtype), h))
+        # --- NumPy array ---
+        if isinstance(self.value, np.ndarray):
+            h = hashlib.sha256(self.value.tobytes()).hexdigest()
+            return hash((self.backend, self.shape, str(self.dtype), h))
 
-            # Python primitives (int, float, str, bool, list)
-            if isinstance(self.value, (int, float, bool, str)):
-                return hash((self.backend, self.value, str(self.dtype)))
+        # --- Python primitives ---
+        if isinstance(self.value, (int, float, bool, str)):
+            return hash((self.backend, self.value, str(self.dtype)))
 
-            if isinstance(self.value, list):
-                # convert to tuple for hashing
+        # --- Lists (convert to tuple) ---
+        if isinstance(self.value, list):
+            try:
                 return hash((self.backend, tuple(self.value), str(self.dtype)))
+            except TypeError:
+                # Unhashable element inside list
+                # fallback: use element string representations
+                return hash((self.backend, tuple(map(repr, self.value)), str(self.dtype)))
 
-            # fallback for any other case
-            return hash((self.backend, repr(self.value)))
-        except Exception:
-            # fallback: hash metadata only
-            return hash((self.backend, self.shape, str(self.dtype)))
+        # --- Objects implementing __bytes__ ---
+        if hasattr(self.value, "__bytes__"):
+            val_bytes = bytes(self.value)
+            h = hashlib.sha256(val_bytes).hexdigest()
+            return hash((self.backend, self.shape, str(self.dtype), h))
+
+        # --- Fallback ---
+        # Only use repr() when no other deterministic route exists.
+        return hash((self.backend, repr(self.value), str(self.dtype)))
 
     def __ne__(self, other):
         return not self.__eq__(other)
