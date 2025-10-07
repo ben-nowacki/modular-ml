@@ -26,8 +26,8 @@ class Sample:
     """
 
     features: dict[str, Data]
-    targets: dict[str, Data]
-    tags: dict[str, Data]
+    targets: dict[str, Data] | None = None
+    tags: dict[str, Data] | None = None
 
     label: str | None = None
     uuid: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -42,22 +42,24 @@ class Sample:
             if not isinstance(v, Data):
                 msg = f"Feature '{k}' is not a Data object: {type(v)}"
                 raise TypeError(msg)
-        for k, v in self.targets.items():
-            if not isinstance(v, Data):
-                msg = f"Target '{k}' is not a Data object: {type(v)}"
-                raise TypeError(msg)
-        for k, v in self.tags.items():
-            if not isinstance(v, Data):
-                msg = f"Tag '{k}' is not a Data object: {type(v)}"
-                raise TypeError(msg)
+        if self.targets is not None:
+            for k, v in self.targets.items():
+                if not isinstance(v, Data):
+                    msg = f"Target '{k}' is not a Data object: {type(v)}"
+                    raise TypeError(msg)
+        if self.tags is not None:
+            for k, v in self.tags.items():
+                if not isinstance(v, Data):
+                    msg = f"Tag '{k}' is not a Data object: {type(v)}"
+                    raise TypeError(msg)
 
         # Check for backend consistency
-        data_items = list(self.features.values()) + list(self.targets.values())
+        data_items = [x.values() for x in [self.features, self.targets] if x is not None]
         backends = {d.backend for d in data_items if isinstance(d, Data)}
 
+        # Auto-convert backend to match (should this be removed?)
         if len(backends) > 1:
-            # Choose a target backend (e.g., SCITKIT by default)
-            target_backend = Backend.SCIKIT
+            target_backend = backends[0]  # Choose a target backend
             self.features = {k: v.as_backend(target_backend) for k, v in self.features.items()}
             self.targets = {k: v.as_backend(target_backend) for k, v in self.targets.items()}
 
