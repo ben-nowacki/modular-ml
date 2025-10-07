@@ -4,6 +4,8 @@ from typing import Any
 import numpy as np
 
 from modularml.core.api import Data, FeatureSet, Sample
+from modularml.core.data_structures.batch import Batch
+from modularml.core.data_structures.sample_collection import SampleCollection
 
 rng = np.random.default_rng(seed=13)
 
@@ -146,6 +148,32 @@ def generate_dummy_sample(
     }
 
     return Sample(features=features, targets=targets, tags=tags)
+
+
+def generate_dummy_batch(
+    feature_shape_map: dict[str, tuple[int, ...]] | None = None,
+    target_shape_map: dict[str, tuple[int, ...]] | None = None,
+    tag_type_map: dict[str, str] | None = None,
+    target_type: str = "numeric",  # "numeric" or "categorical"
+    batch_size: int = 8,
+    batch_roles: tuple[str] = ("default"),
+):
+    samples = []
+    for _ in range(batch_size):
+        samples.append(
+            generate_dummy_sample(
+                feature_shape_map=feature_shape_map,
+                target_shape_map=target_shape_map,
+                tag_type_map=tag_type_map,
+                target_type=target_type,
+            ),
+        )
+
+    batch = Batch(
+        role_samples={k: SampleCollection(samples) for k in batch_roles},
+        role_sample_weights={k: np.full(shape=batch_size) for k in batch_roles},
+    )
+    return batch
 
 
 def generate_dummy_featureset(

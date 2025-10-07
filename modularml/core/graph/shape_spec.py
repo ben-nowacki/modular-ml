@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from modularml.utils.exceptions import ShapeSpecError
+
 
 @dataclass
 class ShapeSpec:
@@ -68,7 +70,7 @@ class ShapeSpec:
 
         # 1. Handle trivial case
         if len(all_shapes) == 0:
-            raise ValueError("Cannot compute merged shape for an empty ShapeSpec.")
+            raise ShapeSpecError("Cannot compute merged shape for an empty ShapeSpec.")
         if len(all_shapes) == 1:
             return all_shapes[0]
 
@@ -76,13 +78,13 @@ class ShapeSpec:
         rank = len(all_shapes[0])
         if not all(len(s) == rank for s in all_shapes):
             msg = f"Inconsistent ranks among shapes: {all_shapes}"
-            raise ValueError(msg)
+            raise ShapeSpecError(msg)
 
         # 3. Determine merge axis
         merge_axis = self.merged_axis
         if merge_axis is None:
             msg = f"Cannot determine a unique merge axis for shapes: {all_shapes}"
-            raise ValueError(msg)
+            raise ShapeSpecError(msg)
 
         # 4. Verify compatibility along all other axes
         for axis in range(rank):
@@ -91,7 +93,7 @@ class ShapeSpec:
             dim = all_shapes[0][axis]
             if not all(s[axis] == dim for s in all_shapes):
                 msg = f"Incompatible dimensions on axis {axis} for shapes {all_shapes}"
-                raise ValueError(msg)
+                raise ShapeSpecError(msg)
 
         # 5. Merge along the chosen axis
         merged_dims = list(all_shapes[0])
@@ -186,7 +188,7 @@ class ShapeSpec:
         axis = self.infer_merge_axis_with(other)
         if axis is None:
             msg = f"Cannot merge incompatible ShapeSpecs: {self.shapes} vs {other.shapes}"
-            raise ValueError(msg)
+            raise ShapeSpecError(msg)
 
         first_shape = next(iter(self.shapes.values()))
         other_shape = next(iter(other.shapes.values()))

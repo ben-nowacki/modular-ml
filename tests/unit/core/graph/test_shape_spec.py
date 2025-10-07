@@ -1,6 +1,7 @@
 import pytest
 
 from modularml.core.graph.shape_spec import ShapeSpec
+from modularml.utils.exceptions import ShapeSpecError
 
 # ==========================================================
 # Basic property tests
@@ -20,7 +21,7 @@ def test_single_shape_properties():
 
 def test_empty_shape_spec_raises():
     spec = ShapeSpec({})
-    with pytest.raises(ValueError, match="empty ShapeSpec"):
+    with pytest.raises(ShapeSpecError, match="empty ShapeSpec"):
         _ = spec.merged_shape
 
 
@@ -55,13 +56,13 @@ def test_merged_shape_simple():
 
 def test_merged_shape_different_rank_raises():
     spec = ShapeSpec({"a": (1, 32), "b": (16,)})
-    with pytest.raises(ValueError, match="Inconsistent ranks"):
+    with pytest.raises(ShapeSpecError, match="Inconsistent ranks"):
         _ = spec.merged_shape
 
 
 def test_merged_shape_incompatible_dims_raises():
     spec = ShapeSpec({"a": (2, 32), "b": (1, 16)})
-    with pytest.raises(ValueError, match="Cannot determine a unique merge axis"):
+    with pytest.raises(ShapeSpecError, match="Cannot determine a unique merge axis"):
         _ = spec.merged_shape
 
 
@@ -131,7 +132,7 @@ def test_merged_shape_with_success():
 def test_merged_shape_with_failure():
     a = ShapeSpec({"x": (1, 32)})
     b = ShapeSpec({"y": (1, 16)})
-    with pytest.raises(ValueError, match="Cannot merge incompatible ShapeSpecs"):
+    with pytest.raises(ShapeSpecError, match="Cannot merge incompatible ShapeSpecs"):
         _ = a.merged_shape_with(b)
 
 

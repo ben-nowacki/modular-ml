@@ -135,3 +135,12 @@ class NotInvertibleError(ModularMLError):
         if message is None:
             message = "Failed to apply inverse_transform."
         super().__init__(message)
+
+
+class ShapeSpecError(ModularMLError):
+    """Raised when errors occur relating to invalid ShapeSpecs."""
+
+    def __init__(self, message: str | None = None):
+        if message is None:
+            message = "Invalid ShapeSpec."
+        super().__init__(message)

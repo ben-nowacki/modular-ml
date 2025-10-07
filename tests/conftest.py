@@ -1,7 +1,9 @@
 import pytest
 
 from modularml.core.api import Data, FeatureSet, Sample
+from modularml.core.data_structures.batch import Batch
 from tests.shared.data_utils import (
+    generate_dummy_batch,
     generate_dummy_data,
     generate_dummy_featureset,
     generate_dummy_sample,
@@ -42,6 +44,33 @@ def dummy_sample_numeric() -> Sample:
 def dummy_sample_categorical() -> Sample:
     """A Sample with categorical targets (for classification-style tests)."""
     return generate_dummy_sample(target_type="categorical")
+
+
+# ==========================================================
+# Batch-level
+# ==========================================================
+@pytest.fixture
+def dummy_batch_1role_numeric() -> Batch:
+    """A Batch (len=8, roles='default') with numeric targets (for regression-style tests)."""
+    return generate_dummy_batch()
+
+
+@pytest.fixture
+def dummy_batch_2role_numeric() -> Batch:
+    """A Batch (len=8, roles='anchor'+'pair') with numeric targets (for regression-style tests)."""
+    return generate_dummy_batch(batch_roles=("anchor", "pair"))
+
+
+@pytest.fixture
+def dummy_batch_1role_categorical() -> Sample:
+    """A Batch (len=8, roles='default') with numeric targets (for classification-style tests)."""
+    return generate_dummy_batch(target_type="categorical")
+
+
+@pytest.fixture
+def dummy_batch_2role_categorical() -> Batch:
+    """A Batch (len=8, roles='anchor'+'pair') with categorical targets (for classification-style tests)."""
+    return generate_dummy_batch(batch_roles=("anchor", "pair"), target_type="categorical")
 
 
 # ==========================================================
