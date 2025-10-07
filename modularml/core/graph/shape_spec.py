@@ -63,7 +63,7 @@ class ShapeSpec:
             >>> ShapeSpec({"a": (1, 32), "b": (1, 16)}).merged_shape
             (1, 48)
             >>> ShapeSpec({"a": (8,), "b": (12,)}).merged_shape
-            (20,)
+            (1, 20)
 
         """
         all_shapes = list(self.shapes.values())
@@ -98,7 +98,13 @@ class ShapeSpec:
         # 5. Merge along the chosen axis
         merged_dims = list(all_shapes[0])
         merged_dims[merge_axis] = sum(s[merge_axis] for s in all_shapes)
-        return tuple(merged_dims)
+
+        # 6. Ensure final shape is at least 1d
+        merged_dims = tuple(merged_dims)
+        if len(merged_dims) < 2:
+            merged_dims = (1, *merged_dims)
+
+        return merged_dims
 
     # ==================================================
     # Shape access
@@ -122,6 +128,15 @@ class ShapeSpec:
 
     def __repr__(self) -> str:
         return f"ShapeSpec({self.shapes!r})"
+
+    def __len__(self) -> int:
+        return len(self.shapes)
+
+    def items(self):
+        return self.shapes.items()
+
+    def values(self):
+        return self.shapes.values()
 
     # -------------------------------------------------------------------------
     # Multi-Spec comparison
