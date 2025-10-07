@@ -19,8 +19,8 @@ class SequentialCNN(BaseModel, torch.nn.Module):
     def __init__(
         self,
         *,
-        input_shape: tuple[int] | None = None,
-        output_shape: tuple[int] | None = None,
+        input_shape: tuple[int, ...] | None = None,
+        output_shape: tuple[int, ...] | None = None,
         n_layers: int = 2,
         hidden_dim: int = 16,
         kernel_size: int = 3,
@@ -36,8 +36,8 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         Initialize a sequential 1D CNN model with lazy layer building.
 
         Args:
-            input_shape (tuple[int] | None): Input tensor shape (channels, length).
-            output_shape (tuple[int] | None): Desired output shape (after flattening if enabled).
+            input_shape (tuple[int, ...] | None): Input tensor shape (channels, length).
+            output_shape (tuple[int, ...] | None): Desired output shape (after flattening if enabled).
             n_layers (int): Number of stacked convolutional layers.
             hidden_dim (int): Number of output channels for each Conv1D layer.
             kernel_size (int): Kernel size for convolution.
@@ -53,8 +53,13 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         torch.nn.Module.__init__(self)
         BaseModel.__init__(self, backend=backend)
 
-        self._input_shape = input_shape
-        self._output_shape = output_shape
+        self._input_shape = tuple(input_shape)
+        if len(self._input_shape) < 2:
+            self._input_shape = (1, *self._input_shape)
+
+        self._output_shape = tuple(output_shape)
+        if len(self._output_shape) < 2:
+            self._output_shape = (1, *self._output_shape)
 
         self.config = {
             "n_layers": n_layers,
@@ -86,8 +91,8 @@ class SequentialCNN(BaseModel, torch.nn.Module):
 
     def build(
         self,
-        input_shape: tuple[int] | None = None,
-        output_shape: tuple[int] | None = None,
+        input_shape: tuple[int, ...] | None = None,
+        output_shape: tuple[int, ...] | None = None,
         *,
         force: bool = False,
     ):
@@ -95,8 +100,8 @@ class SequentialCNN(BaseModel, torch.nn.Module):
         Build the CNN layers and optional final linear projection.
 
         Args:
-            input_shape (tuple[int] | None): Input shape (channels, length) to override initial input shape.
-            output_shape (tuple[int] | None): Output shape to override initial output shape.
+            input_shape (tuple[int, ...] | None): Input shape (channels, length) to override initial input shape.
+            output_shape (tuple[int, ...] | None): Output shape to override initial output shape.
             force (bool): If model is already instantiated, force determines whether to reinstantiate with \
                 the new shapes. Defaults to False.
 
@@ -109,12 +114,16 @@ class SequentialCNN(BaseModel, torch.nn.Module):
             if self._input_shape and input_shape != self._input_shape and not force:
                 msg = f"Inconsistent input_shape: {input_shape} vs {self._input_shape}"
                 raise ValueError(msg)
+            if len(input_shape) < 2:
+                self._input_shape = (1, *input_shape)
             self._input_shape = input_shape
 
         if output_shape:
             if self._output_shape and output_shape != self._output_shape and not force:
                 msg = f"Inconsistent output_shape: {output_shape} vs {self._output_shape}"
                 raise ValueError(msg)
+            if len(output_shape) < 2:
+                self._output_shape = (1, *output_shape)
             self._output_shape = output_shape
 
         if self.is_built and not force:

@@ -19,8 +19,8 @@ class SequentialMLP(BaseModel, torch.nn.Module):
     def __init__(
         self,
         *,
-        input_shape: tuple[int] | None = None,
-        output_shape: tuple[int] | None = None,
+        input_shape: tuple[int, ...] | None = None,
+        output_shape: tuple[int, ...] | None = None,
         n_layers: int = 2,
         hidden_dim: int = 32,
         activation: str = "relu",
@@ -34,8 +34,8 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         and dropout. It supports lazy building when input/output shapes are unknown.
 
         Args:
-            input_shape (Tuple[int], optional): Shape of the input excluding batch dim.
-            output_shape (Tuple[int], optional): Shape of the output excluding batch dim.
+            input_shape (tuple[int, ...], optional): Shape of the input excluding batch dim.
+            output_shape (tuple[int, ...], optional): Shape of the output excluding batch dim.
             n_layers (int): Number of fully connected layers.
             hidden_dim (int): Number of hidden units per layer.
             activation (str): Activation function name (e.g., 'relu', 'gelu').
@@ -46,8 +46,13 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         torch.nn.Module.__init__(self)
         BaseModel.__init__(self, backend=backend)
 
-        self._input_shape = input_shape
-        self._output_shape = output_shape
+        self._input_shape = tuple(input_shape)
+        if len(self._input_shape) < 2:
+            self._input_shape = (1, *self._input_shape)
+
+        self._output_shape = tuple(output_shape)
+        if len(self._output_shape) < 2:
+            self._output_shape = (1, *self._output_shape)
 
         self.config = {
             "n_layers": n_layers,
@@ -92,12 +97,16 @@ class SequentialMLP(BaseModel, torch.nn.Module):
             if self._input_shape and input_shape != self._input_shape and not force:
                 msg = f"Inconsistent input_shape: {input_shape} vs {self._input_shape}"
                 raise ValueError(msg)
+            if len(input_shape) < 2:
+                self._input_shape = (1, *input_shape)
             self._input_shape = input_shape
 
         if output_shape:
             if self._output_shape and output_shape != self._output_shape and not force:
                 msg = f"Inconsistent output_shape: {output_shape} vs {self._output_shape}"
                 raise ValueError(msg)
+            if len(output_shape) < 2:
+                self._output_shape = (1, *output_shape)
             self._output_shape = output_shape
 
         if self.is_built and not force:
