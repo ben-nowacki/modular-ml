@@ -4,6 +4,7 @@ from typing import Any
 
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample_collection import SampleCollection
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.utils.exceptions import ShapeSpecError
 
 
@@ -47,23 +48,41 @@ class Batch:
         """
         # Enforce consistent shapes
         try:
-            f_shapes = list({c.feature_shape_spec.merged_shape for c in self.role_samples.values()})
+            # Check that sample collection are consistent shapes
+            for c in self.role_samples.values():
+                _ = c.feature_shape_spec.merged_shape
+            # Check that all roles have same ShapeSpec
+            f_shapes = list({c.feature_shape_spec for c in self.role_samples.values()})
             if len(f_shapes) != 1:
                 msg = f"Inconsistent feature shapes across Batch roles: {f_shapes}."
                 raise ValueError(msg)
-            self._feature_shape = f_shapes[0]
+            # Add batch_size to feature shape
+            batch_size = len(self.role_samples[next(iter(self.role_samples.keys()))])
+            feature_spec = f_shapes[0]
+            for k in feature_spec.shapes:
+                feature_spec.shapes[k] = (batch_size, *(feature_spec.shapes[k]))
+            self._feature_shape = feature_spec
         except ShapeSpecError as e:
             msg = f"Batch features have incompatible shapes. {e}"
             raise RuntimeError(msg) from e
 
         try:
-            t_shapes = list({c.target_shape_spec.merged_shape for c in self.role_samples.values()})
+            # Check that sample collection are consistent shapes
+            for c in self.role_samples.values():
+                _ = c.target_shape_spec.merged_shape
+            # Check that all roles have same ShapeSpec
+            t_shapes = list({c.target_shape_spec for c in self.role_samples.values()})
             if len(t_shapes) != 1:
                 msg = f"Inconsistent target shapes across Batch roles: {t_shapes}."
                 raise ValueError(msg)
-            self._target_shape = t_shapes[0]
+            # Add batch_size to targetshape
+            batch_size = len(self.role_samples[next(iter(self.role_samples.keys()))])
+            target_spec = t_shapes[0]
+            for k in target_spec.shapes:
+                target_spec.shapes[k] = (batch_size, *(target_spec.shapes[k]))
+            self._target_shape = target_spec
         except ShapeSpecError as e:
-            msg = f"Batch features have incompatible shapes. {e}"
+            msg = f"Batch targets have incompatible shapes. {e}"
             raise RuntimeError(msg) from e
 
         # Check weight shapes
@@ -94,26 +113,48 @@ class Batch:
         return list(self.role_samples.keys())
 
     @property
-    def feature_shape(self) -> tuple[int, ...]:
+    def feature_shape_spec(self) -> ShapeSpec:
         """
-        Feature shape shared across all roles.
+        Feature shape shared across all roles (including batch dimension).
 
         Returns:
-            tuple[int, ...]: Shape of features.
+            ShapeSpec: Shape of features.
 
         """
         return self._feature_shape
 
     @property
+    def target_shape_spec(self) -> ShapeSpec:
+        """
+        Target shape shared across all roles (including batch dimension).
+
+        Returns:
+            ShapeSpec: Shape of targets.
+
+        """
+        return self._target_shape
+
+    @property
+    def feature_shape(self) -> tuple[int, ...]:
+        """
+        Feature shape shared across all roles (including batch dimension).
+
+        Returns:
+            tuple[int, ...]: Shape of features.
+
+        """
+        return self._feature_shape.merged_shape
+
+    @property
     def target_shape(self) -> tuple[int, ...]:
         """
-        Target shape shared across all roles.
+        Target shape shared across all roles (including batch dimension).
 
         Returns:
             tuple[int, ...]: Shape of targets.
 
         """
-        return self._target_shape
+        return self._target_shape.merged_shape
 
     @property
     def n_samples(self) -> int:
@@ -227,7 +268,7 @@ class BatchOutput:
     @property
     def feature_shape(self) -> tuple[int, ...]:
         """
-        Shape of the output features.
+        Shape of the output features (including batch dimension).
 
         Returns:
             tuple[int, ...]: The shape tuple of feature tensors.
