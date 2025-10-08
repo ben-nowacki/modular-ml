@@ -287,14 +287,7 @@ class GraphIR:
                 if dst is None:
                     msg = f"Failed to find destination node for {node_lbl}."
                     raise RuntimeError(msg)
-                try:
-                    if isinstance(mg._nodes[src.label], FeatureSet):
-                        src_shape = str(mg._nodes[src.label].feature_shape)
-                    elif isinstance(mg._nodes[src.label], ModelStage | MergeStage):
-                        src_shape = str(mg._nodes[src.label].output_shape)
-                except:  # noqa: E722
-                    src_shape = None
-
+                src_shape = str(mg._nodes[src.label].output_shape_spec.merged_shape)
                 e = EdgeIR(
                     id=f"e{e_id_ctr}",
                     src=src,

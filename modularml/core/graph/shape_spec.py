@@ -72,7 +72,10 @@ class ShapeSpec:
         if len(all_shapes) == 0:
             raise ShapeSpecError("Cannot compute merged shape for an empty ShapeSpec.")
         if len(all_shapes) == 1:
-            return all_shapes[0]
+            shape = all_shapes[0]
+            if len(shape) < 2:
+                return (1, *shape)
+            return shape
 
         # 2. Check rank consistency
         rank = len(all_shapes[0])

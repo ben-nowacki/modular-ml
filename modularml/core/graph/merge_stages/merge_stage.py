@@ -7,6 +7,7 @@ from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.data_structures.data import Data
 from modularml.core.graph.computation_node import ComputationNode
 from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.utils.backend import Backend
 from modularml.utils.data_conversion import convert_to_format
 from modularml.utils.data_format import DataFormat, get_data_format_for_backend
@@ -57,6 +58,8 @@ class MergeStage(ComputationNode, ABC):
                 msg = f"Upstream nodes must be node labels or the nodes themselves. Received: {n}"
                 raise TypeError(msg)
         super().__init__(label=label, upstream_nodes=ups_node_lbls)
+
+        self._input_shapes: tuple[ShapeSpec] | None = None
         self._merged_shape: tuple[int, ...] | None = None
         self._built = False
         self._backend = Backend.NONE
@@ -76,22 +79,28 @@ class MergeStage(ComputationNode, ABC):
         return self._built
 
     @property
-    def input_shape(self) -> tuple[int, ...]:
+    def input_shape_spec(self) -> ShapeSpec:
         """
-        Accessing input_shape is not supported for MergeStage.
+        Returns the shape of the required inputs.
+
+        Returns:
+            ShapeSpec: Each input shape is defined as a separate key in the return ShapeSpec.
+                E.g., ShapeSpec({"_input_0_": (100,), "_input_1_": (100,), "_input_2_": (100,)})
 
         Raises:
-            ValueError: Always raised to indicate this property is invalid for merges.
+            RuntimeError: If the node is not yet built or the input shape is not set.
 
         """
-        msg = (
-            "MergeStages do not have a single input shape. "
-            "Use output_shape or merged_shape to access the final merged shape."
-        )
-        raise ValueError(msg)
+        if self._input_shapes is None:
+            if self.is_built:
+                raise RuntimeError("input_shape is None after MergeStage building.")
+            raise RuntimeError("MergeStage must be built before accessing input_shape")
+
+        shapes = {f"_input_{i:d}": x.merged_shape for i, x in enumerate(self._input_shapes)}
+        return ShapeSpec(shapes)
 
     @property
-    def output_shape(self) -> tuple[int, ...]:
+    def output_shape_spec(self) -> ShapeSpec:
         """
         Returns the final output shape of the merged result.
 
@@ -100,13 +109,13 @@ class MergeStage(ComputationNode, ABC):
             This property can be used by downstream nodes to infer their input shapes.
 
         Returns:
-            tuple[int, ...]: Merged output shape (excluding batch dimension).
+            ShapeSpec: Merged output shape (excluding batch dimension).
 
         """
         return self.merged_shape
 
     @property
-    def merged_shape(self) -> tuple[int, ...]:
+    def merged_shape(self) -> ShapeSpec:
         """
         Returns the shape of the merged output.
 
@@ -115,7 +124,7 @@ class MergeStage(ComputationNode, ABC):
             from all upstream nodes.
 
         Returns:
-            tuple[int, ...]: Merged output shape.
+            ShapeSpec: Merged output shape.
 
         Raises:
             RuntimeError: If the node is not yet built or the merged shape is not set.
@@ -125,7 +134,8 @@ class MergeStage(ComputationNode, ABC):
             if self.is_built:
                 raise RuntimeError("merged_shape is None after MergeStage building.")
             raise RuntimeError("MergeStage must be built before accessing merged_shape")
-        return self._merged_shape
+
+        return ShapeSpec(shapes={"_output_": self._merged_shape})
 
     @abstractmethod
     def apply_merge(self, values: list[Any], *, includes_batch_dim: bool = True) -> Any:
@@ -145,38 +155,46 @@ class MergeStage(ComputationNode, ABC):
     def get_input_batch(self, all_batch_data: dict[str, Batch]) -> Batch | list[Batch]:
         return [all_batch_data[ups_node_lbl] for ups_node_lbl in self.get_upstream_nodes()]
 
-    def infer_output_shapes(
+    def infer_output_shape_spec(
         self,
-        input_shapes: list[tuple[int, ...]],
-    ) -> list[tuple[int, ...]]:
+        input_shapes: list[ShapeSpec],
+    ) -> ShapeSpec:
         """
         Infer output shapes based on input shapes from upstream nodes.
 
         Args:
-            input_shapes (list[tuple[int, ...]]): Shapes from upstream outputs.
+            input_shapes (list[ShapeSpec]): Shapes from upstream outputs.
 
         Returns:
-            list[tuple[int, ...]]: A list with the inferred output shape.
+            ShapeSpec: The inferred output shapes.
 
         Raises:
             RuntimeError: If backend is not yet set.
 
         """
+        if not isinstance(input_shapes, list):
+            input_shapes = [input_shapes]
         if self._backend == Backend.NONE:
             msg = f"Backend not set in MergeStage `{self.label}`. Make sure `.build()` was called."
             raise RuntimeError(msg)
         merged_data = self.apply_merge(
-            values=[np.ones(shape=x) for x in input_shapes],
+            values=[np.ones(shape=x.merged_shape) for x in input_shapes],
             includes_batch_dim=False,
         )
+
+        # If stage returns multiple outputs
         if isinstance(merged_data, list):
-            return [x.shape for x in merged_data]
-        return [convert_to_format(merged_data, fmt=DataFormat.NUMPY).shape]
+            shapes = {f"_output_{i:d}_": tuple(x.shape) for i, x in enumerate(merged_data)}
+            return ShapeSpec(shapes)
+
+        # Else return single shape
+        shapes = {"_output_": convert_to_format(merged_data, fmt=DataFormat.NUMPY).shape}
+        return ShapeSpec(shapes)
 
     def build(
         self,
-        input_shapes: list[tuple[int, ...]],
-        output_shapes: list[tuple[int, ...]] | None = None,
+        input_shapes: list[ShapeSpec] | None,
+        output_shapes: list[ShapeSpec] | None = None,
         *,
         backend: Backend,
     ):
@@ -184,8 +202,8 @@ class MergeStage(ComputationNode, ABC):
         Build the MergeStage and perform shape inference.
 
         Args:
-            input_shapes (list[tuple[int, ...]]): Shapes from upstream outputs.
-            output_shapes (list[tuple[int, ...]] | None): Not supported.
+            input_shapes (list[ShapeSpec]): Shapes from upstream outputs.
+            output_shapes (list[ShapeSpec] | None): Not supported.
             backend (Backend): Backend to use for merging (e.g., TORCH, TENSORFLOW).
 
         Raises:
@@ -197,17 +215,20 @@ class MergeStage(ComputationNode, ABC):
         if input_shapes is None:
             msg = f"MergeStage `{self.label}` requires input_shapes during build."
             raise ValueError(msg)
+        if not isinstance(input_shapes, list):
+            input_shapes = [input_shapes]
 
         if output_shapes is not None:
             msg = f"MergeStage `{self.label}` does not accept output_shapes during build. Received: {output_shapes}"
 
         # Determine merged_shape
-        inferred = self.infer_output_shapes(input_shapes=input_shapes)
-        if len(inferred) > 1:
+        inferred_out_spec = self.infer_output_shape_spec(input_shapes=input_shapes)
+        if len(inferred_out_spec) > 1:
             msg = f"infer_output_shape of MergeStage `{self.label}` resulted in more than one output_shape"
             raise ValueError(msg)
 
-        self._merged_shape = inferred[0]
+        self._input_shapes = input_shapes
+        self._merged_shape = inferred_out_spec.merged_shape
         self._built = True
 
     def forward(
@@ -275,13 +296,13 @@ class MergeStage(ComputationNode, ABC):
                             convert_to_format(
                                 x.features[r],
                                 fmt=get_data_format_for_backend(self._backend),
-                            )  # noqa: COM812
+                            ),
                         )
                         targets.append(
                             convert_to_format(
                                 x.targets[r],
                                 fmt=get_data_format_for_backend(self._backend),
-                            )  # noqa: COM812
+                            ),
                         )
                         sample_uuids.append(x.sample_uuids[r])
 

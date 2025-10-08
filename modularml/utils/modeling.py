@@ -6,6 +6,7 @@ from modularml.core.data_structures.batch import Batch
 from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.utils.backend import Backend
 
 
@@ -69,26 +70,27 @@ def map_pad_mode_to_backend(mode: PadMode, backend: str | Backend) -> str:  # no
             raise ValueError(msg)
 
 
-def make_dummy_data(shape: tuple[int, ...]) -> Data:
+def make_dummy_data(shape: ShapeSpec | tuple[int, ...]) -> Data:
     """
     Creates a dummy `Data` object filled with ones for testing or placeholder use.
 
     Args:
-        shape (tuple[int, ...]): The shape of the data tensor to create.
+        shape (ShapeSpec | tuple[int, ...]): The shape of the data tensor to create.
 
     Returns:
         Data: A `Data` object containing a tensor of ones with the specified shape.
 
     """
-    # Create dummy data
-    d = Data(np.ones(shape=shape))
+    if isinstance(shape, ShapeSpec):
+        shape = shape.merged_shape
 
-    return d
+    return Data(np.ones(shape=shape))
 
 
 def make_dummy_batch(
-    feature_shape: tuple[int, ...],
-    target_shape: tuple[int, ...] = (1, 1),
+    feature_shape: ShapeSpec,
+    target_shape: ShapeSpec | None = None,
+    tag_shape: ShapeSpec | None = None,
     batch_size: int = 8,
 ) -> Batch:
     """
@@ -97,25 +99,33 @@ def make_dummy_batch(
     Each sample contains multiple named feature and target entries, and dummy tags.
 
     Args:
-        feature_shape (tuple[int, ...]): Shape of the feature tensor as (n_features, feature_dim).
-        target_shape (tuple[int, ...], optional): Shape of the target tensor as (n_targets, target_dim). Defaults to (1, 1).
+        feature_shape (ShapeSpec): Feature keys and shape (n_features, feature_dim).
+        target_shape (ShapeSpec | None): Target keys and shape (n_targets, target_dim). \
+            Defaults to ShapeSpec({"Y0": (1, 1)}).
+        tag_shape (ShapeSpec | None): Tag keys and shape. Defaults to \
+            ShapeSpec({"T0": (1, 1), "T1": (1, 1)}).
         batch_size (int, optional): Number of samples in the batch. Defaults to 8.
 
     Returns:
         Batch: A `Batch` object with randomly generated dummy features, targets, and tags.
 
     """
-    sample_coll = SampleCollection(
-        [
-            Sample(
-                features={f"features_{x}": make_dummy_data(shape=feature_shape[1:]) for x in range(feature_shape[0])},
-                targets={f"targets_{x}": make_dummy_data(shape=target_shape[1:]) for x in range(target_shape[0])},
-                tags={"tags_1": make_dummy_data(shape=(1,)), "tags_2": make_dummy_data(shape=(1,))},
-            )
-            for i in range(batch_size)
-        ]  # noqa: COM812
-    )
+    if target_shape is None:
+        target_shape = ShapeSpec({"Y0": (1, 1)})
+    if tag_shape is None:
+        tag_shape = ShapeSpec({"T0": (1, 1), "T1": (1, 1)})
+
+    samples = [
+        Sample(
+            features={k: make_dummy_data(v) for k, v in feature_shape.items()},
+            targets={k: make_dummy_data(v) for k, v in target_shape.items()},
+            tags={k: make_dummy_data(v) for k, v in tag_shape.items()},
+        )
+        for _ in range(batch_size)
+    ]
+    sample_coll = SampleCollection(samples=samples)
+
     return Batch(
         role_samples={"default": sample_coll},
-        label="dummy",
+        label="DummyBatch",
     )

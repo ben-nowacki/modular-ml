@@ -3,6 +3,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from modularml.utils.backend import Backend, infer_backend
 from modularml.utils.data_format import DataFormat, format_requires_compatible_shapes, normalize_format
 
 try:
@@ -409,3 +410,160 @@ def convert_to_format(
 
     msg = f"Unsupported data format: {fmt}"
     raise ValueError(msg)
+
+
+def shapes_similar_except_singleton(shape_a: tuple[int, ...], shape_b: tuple[int, ...]) -> bool:
+    """
+    Returns True if two shapes are equal except for singleton (size-1) dimensions.
+
+    Examples:
+        (32, 1, 4) ≈ (32, 4)        → True
+        (1, 64, 1, 1) ≈ (64,)       → True
+        (16, 8, 4) ≈ (8, 16, 4)     → False  (order mismatch)
+        (32, 2, 4) ≈ (32, 4)        → False  (non-singleton mismatch)
+
+    Args:
+        shape_a (tuple[int]): First shape.
+        shape_b (tuple[int]): Second shape.
+
+    Returns:
+        bool: True if the shapes are equivalent ignoring singleton dims.
+
+    """
+    # Remove singleton dimensions
+    reduced_a = tuple(dim for dim in shape_a if dim != 1)
+    reduced_b = tuple(dim for dim in shape_b if dim != 1)
+
+    return reduced_a == reduced_b
+
+
+def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
+    """
+    Align the *ranks* (number of dimensions) of two array-like objects.
+
+    This function ensures both arrays have the same number of dimensions by inserting singleton
+    axes (using backend-safe operations like `unsqueeze` or `expand_dims`). It does **not**
+    permute or reshape non-singleton dimensions, and it preserves autograd in all supported
+    backends.
+
+    The operation is symmetric; the array with the smaller rank is modified so that both
+    arrays end up with the same shape, as long as they are compatible under singleton
+    expansion. If both arrays already have the same rank and shape, they are returned
+    unchanged.
+
+    Examples:
+        >>> import numpy as np
+        >>> a = np.random.random(size=(32, 1, 100))
+        >>> b = np.random.random(size=(32, 100))
+        >>> a.shape, b.shape
+        ((32, 1, 100), (32, 100))
+        >>> a2, b2 = align_ranks(a, b)
+        >>> a2.shape, b2.shape
+        ((32, 1, 100), (32, 1, 100))
+
+    Constraints:
+        - Only singleton (size-1) dimensions are added or removed.
+        - Arrays with mismatched non-singleton sizes (e.g. (32,1,4) vs (32,1))
+          will raise a ValueError.
+        - The total number of elements (`prod(shape)`) must match.
+        - Does not detach tensors or break computational graphs.
+
+    Args:
+        arr1 (Any):
+            First array-like object (must expose `.shape`).
+        arr2 (Any):
+            Second array-like object (must expose `.shape`).
+        backend (Backend | None):
+            Backend identifier determining which framework (Torch, TensorFlow, NumPy)
+            operations are used. If None, backend is inferred for each array.
+
+    Returns:
+        tuple:
+            A pair `(arr1_aligned, arr2_aligned)` such that `arr1_aligned.shape == arr2_aligned.shape`.
+
+    Raises:
+        ValueError:
+            - If arrays have equal rank but different shapes.
+            - If shapes cannot be aligned by inserting/removing only singleton dimensions.
+        TypeError:
+            If an unsupported backend is provided.
+        ImportError:
+            If the specified backend is unavailable (e.g., PyTorch not installed).
+        RuntimeError:
+            If alignment fails despite matching total element counts.
+
+    Notes:
+        - This function is intended for internal use in loss computation or tensor comparison,
+          where user-defined models may add trailing singleton axes (e.g., via Conv1D or Linear).
+        - Only the array with the smaller rank is modified; the other is returned unchanged.
+        - Autograd gradients are preserved (no `.detach()`, `.numpy()`, or graph breakage).
+
+    """
+    from math import prod  # noqa: PLC0415
+
+    def _modify_arr(arr, singleton_idxs: list[int], arr_backend: Backend | None = None):
+        """Insert singletons at each index in `singleton_idxs`."""
+        if arr_backend is None:
+            arr_backend = infer_backend(arr)
+
+        if arr_backend == Backend.TORCH:
+            if torch is None:
+                msg = f"PyTorch is not installed but a backend of {Backend.TORCH} was used."
+                raise ImportError(msg)
+            arr = convert_to_format(arr, fmt=DataFormat.TORCH)
+            for idx in singleton_idxs:
+                arr = arr.unsqueeze(idx)
+            return arr
+        if arr_backend == Backend.TENSORFLOW:
+            if tf is None:
+                msg = f"TensorFlow is not installed but a backend of {Backend.TENSORFLOW} was used."
+                raise ImportError(msg)
+            arr = convert_to_format(arr, fmt=DataFormat.TENSORFLOW)
+            for idx in singleton_idxs:
+                arr = tf.expand_dims(arr, axis=idx)
+            return arr
+        if arr_backend in (Backend.SCIKIT, Backend.NONE):
+            arr = convert_to_format(arr, fmt=DataFormat.NUMPY)
+            for idx in singleton_idxs:
+                arr = np.expand_dims(arr, axis=idx)
+            return arr
+        msg = f"Unsupported backend: {arr_backend}"
+        raise TypeError(msg)
+
+    shape_1, shape_2 = arr1.shape, arr2.shape
+
+    # If already aligned, return or reshape
+    if len(shape_1) == len(shape_2):
+        if shape_1 != shape_2:
+            raise ValueError("Arrays are the same rank but not in the same order.")
+        return arr1, arr2
+
+    # Ranks cannot be matched via singleton additions/subtractions
+    if prod(shape_1) != prod(shape_2):
+        msg = f"Arrays cannot be aligned via addition or removal of singletons: {shape_1} & {shape_2}"
+        raise ValueError(msg)
+
+    # Use highest rank as reference (ref), other as comparison (cmp)
+    ref, cmp = shape_2, shape_1
+    if len(shape_1) > len(shape_2):
+        ref, cmp = shape_1, shape_2
+
+    # For each item in ref, see if cmp matches:
+    cmp_assignments = -1 * np.ones(shape=len(ref))  # each element corresponds to index in ref
+    for i in range(len(cmp)):
+        for j in range(i, len(ref)):
+            if cmp[i] == ref[j]:
+                cmp_assignments[j] = j
+                break
+
+    # The index of each -1 element is where a singleton needs to be inserted
+    idxs = np.argwhere(cmp_assignments == -1).reshape(-1).tolist()
+    if len(shape_1) > len(shape_2):  # arr1 is ref, modify arr2
+        arr2 = _modify_arr(arr2, singleton_idxs=idxs, arr_backend=backend)
+    else:  # arr2 is ref, modify arr1
+        arr1 = _modify_arr(arr1, singleton_idxs=idxs, arr_backend=backend)
+
+    if arr1.shape != arr2.shape:
+        raise RuntimeError("Failed to match ranks.")
+
+    return arr1, arr2
