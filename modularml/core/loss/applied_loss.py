@@ -7,7 +7,8 @@ import torch
 from modularml.core.data_structures.batch import Batch, BatchOutput
 from modularml.core.loss.loss import Loss
 from modularml.utils.backend import Backend
-from modularml.utils.data_format import get_data_format_for_backend, to_numpy
+from modularml.utils.data_conversion import align_ranks, to_numpy
+from modularml.utils.data_format import get_data_format_for_backend
 
 
 class AppliedLoss:
@@ -241,6 +242,15 @@ class AppliedLoss:
             else:
                 msg = f"AppliedLoss input key does not exist in batch_input or model_outputs: {node}"
                 raise ValueError(msg)
+
+        # Ensure all kwargs have matching shapes
+        ref_key = next(iter(kwargs.keys()))
+        for k in [x for x in kwargs if x != ref_key]:
+            kwargs[ref_key], kwargs[k] = align_ranks(
+                kwargs[ref_key],
+                kwargs[k],
+                backend=self.backend,
+            )
 
         # Average all sample weights (per-sample weights across all inputs)
         mean_weights = None

@@ -3,7 +3,8 @@ from dataclasses import dataclass
 import pandas as pd
 
 from modularml.core.data_structures.batch import Batch, BatchOutput
-from modularml.utils.data_format import DataFormat, to_python
+from modularml.utils.data_conversion import to_python
+from modularml.utils.data_format import DataFormat
 
 
 @dataclass

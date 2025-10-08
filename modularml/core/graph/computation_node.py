@@ -3,6 +3,7 @@ from typing import Any
 
 from modularml.core.data_structures.batch import Batch
 from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.shape_spec import ShapeSpec
 
 
 class ComputationNode(GraphNode):
@@ -73,23 +74,23 @@ class ComputationNode(GraphNode):
 
     @property
     @abstractmethod
-    def input_shape(self) -> tuple[int, ...] | None:
+    def input_shape_spec(self) -> ShapeSpec | None:
         """
         Shape of input data expected by this node.
 
         Returns:
-            tuple[int, ...] | None: The expected input shape, or None if unknown.
+            ShapeSpec | None: The expected input shape(s), or None if unknown.
 
         """
 
     @property
     @abstractmethod
-    def output_shape(self) -> tuple[int, ...] | None:
+    def output_shape_spec(self) -> ShapeSpec | None:
         """
         Shape of output data produced by this node.
 
         Returns:
-            tuple[int, ...] | None: The output shape, or None if unknown.
+            ShapeSpec | None: The expected output shape(s), or None if unknown.
 
         """
 
@@ -97,19 +98,19 @@ class ComputationNode(GraphNode):
     # ComputationNode Interface
     # ==========================================
     @abstractmethod
-    def infer_output_shapes(
+    def infer_output_shape_spec(
         self,
-        input_shapes: list[tuple[int, ...]],
-    ) -> list[tuple[int, ...]]:
+        input_shapes: list[ShapeSpec],
+    ) -> ShapeSpec:
         """
         Infer the output shapes of this node based on the given input shapes.
 
         Args:
-            input_shapes (list[tuple[int, ...]]): List of input shapes feeding into this node.
+            input_shapes (list[ShapeSpec]): Input shapes feeding into this node.
                 I.e., a list of upstream node output shapes.
 
         Returns:
-            list[tuple[int, ...]]: Inferred output shapes.
+            ShapeSpec: Inferred output shapes.
 
         Raises:
             NotImplementedError: If the node cannot infer the shape without being built.
@@ -146,17 +147,17 @@ class ComputationNode(GraphNode):
     @abstractmethod
     def build(
         self,
-        input_shapes: list[tuple[int, ...]] | None = None,
-        output_shapes: list[tuple[int, ...]] | None = None,
+        input_shapes: list[ShapeSpec] | None = None,
+        output_shapes: list[ShapeSpec] | None = None,
         **kwargs,
     ):
         """
         Construct the internal logic of this node using the provided input and output shapes.
 
         Args:
-            input_shapes (list[tuple[int, ...]] | None): List of input tensor shapes.
+            input_shapes (list[ShapeSpec] | None): List of input shapes.
                 Used to initialize models or internal transformation logic.
-            output_shapes (list[tuple[int, ...]] | None): Optional list of expected output shapes.
+            output_shapes (list[ShapeSpec] | None): Optional list of expected output shapes.
                 May be used to constrain or validate internal shape inference.
             **kwargs: Additional key-word arguments specific to each subclass.
 

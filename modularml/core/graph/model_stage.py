@@ -11,13 +11,14 @@ from modularml.core.data_structures.step_result import StepResult
 from modularml.core.graph.computation_node import ComputationNode
 from modularml.core.graph.graph_node import GraphNode
 from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.core.loss.loss_collection import LossCollection
 from modularml.core.loss.loss_record import LossRecord
 from modularml.models.wrappers import wrap_model
 from modularml.utils.backend import Backend
+from modularml.utils.data_conversion import convert_to_format
 from modularml.utils.data_format import (
     DataFormat,
-    convert_to_format,
     get_data_format_for_backend,
 )
 from modularml.utils.exceptions import (
@@ -94,34 +95,34 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
     # ComputationNode Interface
     # ==========================================
     @property
-    def input_shape(self) -> tuple[int, ...]:
+    def input_shape_spec(self) -> ShapeSpec:
         """
         Returns the input shape of the model after building.
 
         Returns:
-            tuple[int, ...]: Input shape (excluding batch dimension).
+            ShapeSpec: Input shape spec (excluding batch dimension).
 
         """
         if self._model.input_shape is None:
             if self.is_built:
                 raise RuntimeError("Input shape is None after model building.")
             raise RuntimeError("Model must be built before accessing input_shape")
-        return self._model.input_shape
+        return ShapeSpec(shapes={"_input_": self._model.input_shape})
 
     @property
-    def output_shape(self) -> tuple[int, ...]:
+    def output_shape_spec(self) -> ShapeSpec:
         """
         Returns the output shape of the model after building.
 
         Returns:
-            tuple[int, ...]: Output shape (excluding batch dimension).
+            ShapeSpec: Output shape spec (excluding batch dimension).
 
         """
         if self._model.output_shape is None:
             if self.is_built:
                 raise RuntimeError("Output shape is None after model building.")
             raise RuntimeError("Model must be built before accessing output_shape")
-        return self._model.output_shape
+        return ShapeSpec(shapes={"_output_": self._model.output_shape})
 
     @property
     def max_upstream_nodes(self) -> int:
@@ -138,10 +139,10 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         """
         return self._model.is_built
 
-    def infer_output_shapes(
+    def infer_output_shape_spec(
         self,
-        input_shapes: list[tuple[int, ...]],
-    ) -> list[tuple[int, ...]]:
+        input_shapes: list[ShapeSpec],
+    ) -> ShapeSpec:
         """
         Infer the expected output shape of this ModelStage without building the backend model.
 
@@ -160,33 +161,40 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             - This does NOT instantiate or build the backend model.
 
         Args:
-            input_shapes (list[tuple[int, ...]]): A list of input shapes from upstream stages.
-                Must contain exactly one element for ModelStage.
+            input_shapes (list[ShapeSpec]): Input shapes from upstream stages.
+                ModelStage's expect exactly one element.
 
         Returns:
-            list[tuple[int, ...]]: The inferred output shapes.
+            ShapeSpec: The inferred output shapes.
 
         Raises:
             ValueError: If multiple input shapes are provided or output shape cannot be inferred.
 
         """
+        if not isinstance(input_shapes, list):
+            input_shapes = [input_shapes]
         if self.max_upstream_nodes is not None and len(input_shapes) > self.max_upstream_nodes:
-            msg = f"ModelStage only support a single input. Received: {input_shapes}"
+            msg = f"ModelStage only support a single input. Received {len(input_shapes)}: {input_shapes}"
             raise ValueError(msg)
 
         # Return output_shape is already known
         try:
-            outshape = self.output_shape
-            if outshape is not None:
-                return [outshape]
+            out_spec = self.output_shape_spec
+            if out_spec is not None:
+                return out_spec
         except RuntimeError:
             pass
 
         # Pass inferencing task to BaseModel (if supports it)
-        if hasattr(self._model, "infer_output_shapes"):
-            return self._model.infer_output_shapes(input_shapes[0])
-        if hasattr(self._model, "infer_output_shape"):
-            return [self._model.infer_output_shape(input_shapes[0])]
+        if hasattr(self._model, "infer_output_shapes"):  # returns list of shapes
+            shapes = {
+                f"_output_{i:d}_": x
+                for i, x in enumerate(self._model.infer_output_shapes(input_shapes[0].merged_shape))
+            }
+            return ShapeSpec(shapes)
+
+        if hasattr(self._model, "infer_output_shape"):  # returns single shape
+            return ShapeSpec({"_output_": self._model.infer_output_shape(input_shapes[0].merged_shape)})
 
         # Otherwise, raise error
         msg = f"Cannot infer output shape for ModelStage `{self.label}`."
@@ -194,8 +202,8 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
 
     def build(
         self,
-        input_shapes: list[tuple[int, ...]] | None = None,
-        output_shapes: list[tuple[int, ...]] | None = None,
+        input_shapes: list[ShapeSpec] | None = None,
+        output_shapes: list[ShapeSpec] | None = None,
         *,
         force: bool = False,
     ):
@@ -208,10 +216,10 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
         - Constructs the optimizer if defined, based on the model backend.
 
         Args:
-            input_shapes (list[tuple[int, ...]]):
+            input_shapes (list[ShapeSpec]):
                 A list of input shapes from upstream stages. Must contain exactly one element.
 
-            output_shapes (list[tuple[int, ...]] | None, optional):
+            output_shapes (list[ShapeSpec] | None, optional):
                 The expected output shapes of this stage. If provided, it must contain exactly
                 one element. If not provided, the BaseModel must be capable of inferring it
                 internally or during construction.
@@ -230,11 +238,16 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
               been resolved upstream by the ModelGraph.
 
         """
+        if input_shapes is not None and not isinstance(input_shapes, list):
+            input_shapes = [input_shapes]
+        if output_shapes is not None and not isinstance(output_shapes, list):
+            output_shapes = [output_shapes]
+
         if self.max_upstream_nodes is not None and len(input_shapes) > self.max_upstream_nodes:
             msg = f"ModelStage only support a single input. Received: {input_shapes}"
             raise ValueError(msg)
         if len(input_shapes) == 0:
-            msg = f"ModelStage({self.label}) must be provided exactly one input_shape. Received: {input_shapes}"
+            msg = f"ModelStage({self.label}) must be provided exactly one input_shape. Received {len(input_shapes)}: {input_shapes}"
             raise ValueError(msg)
         input_shape = input_shapes[0]
 
@@ -243,13 +256,17 @@ class ModelStage(ComputationNode, TrainableMixin, EvaluableMixin):
             and self.max_downstream_nodes is not None
             and len(output_shapes) > self.max_downstream_nodes
         ):
-            msg = f"ModelStage only supports a single output. Received: {output_shapes}"
+            msg = f"ModelStage only supports a single output. Received {len(output_shapes)}: {output_shapes}"
             raise ValueError(msg)
         output_shape = output_shapes[0] if output_shapes is not None else None
 
         # Build underlying BaseModel if not already built
         if (not self._model.is_built) or force:
-            self._model.build(input_shape=input_shape, output_shape=output_shape, force=force)
+            self._model.build(
+                input_shape=input_shape.merged_shape,
+                output_shape=output_shape.merged_shape,
+                force=force,
+            )
 
         # Build optimizer if defined
         if self._optimizer is not None:

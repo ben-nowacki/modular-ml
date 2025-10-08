@@ -29,6 +29,7 @@ def output_shape():
 
 
 # === Eager mode ===
+@pytest.mark.unit
 def test_eager_instantiation_with_valid_shapes(input_shape, output_shape):
     """Test build and forward pass with a pre-instantiated model and correct shapes."""
     model = SimpleMLP(input_shape, output_shape)
@@ -43,6 +44,7 @@ def test_eager_instantiation_with_valid_shapes(input_shape, output_shape):
     assert y.shape == (2, *output_shape)
 
 
+@pytest.mark.unit
 def test_eager_instantiation_with_output_shape_mismatch_raises(input_shape, output_shape):
     """Test that a shape mismatch raises an error in eager mode."""
     model = SimpleMLP(input_shape, (3,))
@@ -53,6 +55,7 @@ def test_eager_instantiation_with_output_shape_mismatch_raises(input_shape, outp
 
 
 # === Lazy mode ===
+@pytest.mark.unit
 def test_lazy_instantiation_with_shape_injection(input_shape, output_shape):
     """Test lazy instantiation with correct shape injection and valid forward pass."""
     wrapper = TorchModelWrapper(
@@ -72,6 +75,7 @@ def test_lazy_instantiation_with_shape_injection(input_shape, output_shape):
     assert y.shape == (4, *output_shape)
 
 
+@pytest.mark.unit
 def test_lazy_instantiation_with_explicit_kwargs_override(input_shape, output_shape):
     """Test that explicitly passed kwargs override injection, and that shape mismatch causes a runtime error."""
     wrapper = TorchModelWrapper(
@@ -92,6 +96,7 @@ def test_lazy_instantiation_with_explicit_kwargs_override(input_shape, output_sh
     assert wrapper.model.linear.out_features == 321
 
 
+@pytest.mark.unit
 def test_lazy_instantiation_with_incorrect_injection_keys(input_shape, output_shape):
     """Test that incorrect inject keys raise a ValueError when model_class does not accept them."""
     wrapper = TorchModelWrapper(
@@ -104,6 +109,7 @@ def test_lazy_instantiation_with_incorrect_injection_keys(input_shape, output_sh
         wrapper.build(input_shape=input_shape, output_shape=output_shape)
 
 
+@pytest.mark.unit
 def test_lazy_instantiation_with_unused_shape_injection_warnings(input_shape, output_shape):
     """Test that unused shape injections raise RuntimeWarnings but do not crash."""
     wrapper = TorchModelWrapper(
@@ -123,6 +129,7 @@ def test_lazy_instantiation_with_unused_shape_injection_warnings(input_shape, ou
     assert all(issubclass(w.category, RuntimeWarning) for w in record)
 
 
+@pytest.mark.unit
 def test_lazy_instantiation_with_correct_keys_no_warnings(input_shape, output_shape):
     """Test lazy instantiation with correctly specified shape injection keys and no warnings."""
     wrapper = TorchModelWrapper(
@@ -134,18 +141,21 @@ def test_lazy_instantiation_with_correct_keys_no_warnings(input_shape, output_sh
 
 
 # === Input Validation Tests ===
+@pytest.mark.unit
 def test_missing_model_and_class_raises():
     """Test error when neither model nor model_class is provided."""
     with pytest.raises(ValueError, match="Must provide either"):
         TorchModelWrapper()
 
 
+@pytest.mark.unit
 def test_invalid_model_type_raises():
     """Test error when an invalid model instance is passed."""
     with pytest.raises(ValueError, match=r"must be an instance of torch.nn.Module"):
         TorchModelWrapper(model="not a model")
 
 
+@pytest.mark.unit
 def test_invalid_model_class_type_raises():
     """Test error when model_class is not callable."""
     with pytest.raises(ValueError, match="model_class must be callable"):

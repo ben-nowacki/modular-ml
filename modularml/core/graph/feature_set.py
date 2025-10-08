@@ -14,7 +14,7 @@ from modularml.core.data_structures.data import Data
 from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
 from modularml.core.graph.feature_subset import FeatureSubset
-from modularml.core.graph.graph_node import GraphNode
+from modularml.core.graph.graph_node import GraphNode, ShapeSpec
 from modularml.core.transforms.feature_transform import FeatureTransform
 from modularml.utils.data_format import DataFormat
 from modularml.utils.exceptions import SampleLoadError, SubsetOverlapWarning
@@ -154,13 +154,13 @@ class FeatureSet(SampleCollection, GraphNode):
         return True  # FeatureSets can feed into downstream nodes
 
     @property
-    def input_shape(self) -> tuple[int, ...] | None:
+    def input_shape_spec(self) -> ShapeSpec | None:
         return None  # Not applicable
 
     @property
-    def output_shape(self) -> tuple[int, ...] | None:
-        # Return shape based on features if available
-        return self.feature_shape
+    def output_shape_spec(self) -> ShapeSpec | None:
+        # Return feature shape (FeatureSet outputs features)
+        return self.feature_shape_spec
 
     @property
     def max_inputs(self) -> int | None:
@@ -351,6 +351,8 @@ class FeatureSet(SampleCollection, GraphNode):
             if match:
                 filtered_sample_uuids.append(sample.uuid)
 
+        if len(filtered_sample_uuids) == 0:
+            raise ValueError("No samples match the provided conditions.")
         new_fs = FeatureSet(
             label="filtered",
             samples=[copy.deepcopy(self.get_sample_with_uuid(uuid=s_uuid)) for s_uuid in filtered_sample_uuids],

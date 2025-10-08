@@ -3,8 +3,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from modularml.core.data_structures.data import Data
-from modularml.core.data_structures.sample import Sample
 from modularml.core.data_structures.sample_collection import SampleCollection
+from modularml.core.graph.shape_spec import ShapeSpec
+from modularml.utils.exceptions import ShapeSpecError
 
 
 @dataclass
@@ -46,17 +47,43 @@ class Batch:
 
         """
         # Enforce consistent shapes
-        f_shapes = list({c.feature_shape for c in self.role_samples.values()})
-        if len(f_shapes) != 1:
-            msg = f"Inconsistent feature shapes across Batch roles: {f_shapes}."
-            raise ValueError(msg)
-        self._feature_shape = f_shapes[0]
+        try:
+            # Check that sample collection are consistent shapes
+            for c in self.role_samples.values():
+                _ = c.feature_shape_spec.merged_shape
+            # Check that all roles have same ShapeSpec
+            f_shapes = list({c.feature_shape_spec for c in self.role_samples.values()})
+            if len(f_shapes) != 1:
+                msg = f"Inconsistent feature shapes across Batch roles: {f_shapes}."
+                raise ValueError(msg)
+            # Add batch_size to feature shape
+            batch_size = len(self.role_samples[next(iter(self.role_samples.keys()))])
+            feature_spec = f_shapes[0]
+            for k in feature_spec.shapes:
+                feature_spec.shapes[k] = (batch_size, *(feature_spec.shapes[k]))
+            self._feature_shape = feature_spec
+        except ShapeSpecError as e:
+            msg = f"Batch features have incompatible shapes. {e}"
+            raise RuntimeError(msg) from e
 
-        t_shapes = list({c.target_shape for c in self.role_samples.values()})
-        if len(t_shapes) != 1:
-            msg = f"Inconsistent target shapes across Batch roles: {t_shapes}."
-            raise ValueError(msg)
-        self._target_shape = t_shapes[0]
+        try:
+            # Check that sample collection are consistent shapes
+            for c in self.role_samples.values():
+                _ = c.target_shape_spec.merged_shape
+            # Check that all roles have same ShapeSpec
+            t_shapes = list({c.target_shape_spec for c in self.role_samples.values()})
+            if len(t_shapes) != 1:
+                msg = f"Inconsistent target shapes across Batch roles: {t_shapes}."
+                raise ValueError(msg)
+            # Add batch_size to targetshape
+            batch_size = len(self.role_samples[next(iter(self.role_samples.keys()))])
+            target_spec = t_shapes[0]
+            for k in target_spec.shapes:
+                target_spec.shapes[k] = (batch_size, *(target_spec.shapes[k]))
+            self._target_shape = target_spec
+        except ShapeSpecError as e:
+            msg = f"Batch targets have incompatible shapes. {e}"
+            raise RuntimeError(msg) from e
 
         # Check weight shapes
         if self.role_sample_weights is None:
@@ -86,26 +113,48 @@ class Batch:
         return list(self.role_samples.keys())
 
     @property
-    def feature_shape(self) -> tuple[int, ...]:
+    def feature_shape_spec(self) -> ShapeSpec:
         """
-        Feature shape shared across all roles.
+        Feature shape shared across all roles (including batch dimension).
 
         Returns:
-            tuple[int, ...]: Shape of features.
+            ShapeSpec: Shape of features.
 
         """
         return self._feature_shape
 
     @property
+    def target_shape_spec(self) -> ShapeSpec:
+        """
+        Target shape shared across all roles (including batch dimension).
+
+        Returns:
+            ShapeSpec: Shape of targets.
+
+        """
+        return self._target_shape
+
+    @property
+    def feature_shape(self) -> tuple[int, ...]:
+        """
+        Feature shape shared across all roles (including batch dimension).
+
+        Returns:
+            tuple[int, ...]: Shape of features.
+
+        """
+        return self._feature_shape.merged_shape
+
+    @property
     def target_shape(self) -> tuple[int, ...]:
         """
-        Target shape shared across all roles.
+        Target shape shared across all roles (including batch dimension).
 
         Returns:
             tuple[int, ...]: Shape of targets.
 
         """
-        return self._target_shape
+        return self._target_shape.merged_shape
 
     @property
     def n_samples(self) -> int:
@@ -195,61 +244,15 @@ class BatchOutput:
         else:
             self._target_shape = None
 
-        if self.tags is not None:
-            t_shapes = []
-            for role in self.tags:
-                if isinstance(self.tags[role], dict):
-                    t_shapes.extend([self.tags[role][k].shape for k in self.tags[role]])
-                else:
-                    t_shapes.append(self.tags[role].shape)
-            t_shapes = list(set(t_shapes))
-            if len(t_shapes) != 1:
-                msg = f"Inconsistent tag shapes across Batch roles: {t_shapes}."
-                raise ValueError(msg)
-            self._target_shape = t_shapes[0]
-        else:
-            self._target_shape = None
-
-        # Ensure feature keys = sample uuid keys
-        f_keys = set(self.features.keys())
-        s_keys = set(self.sample_uuids.keys())
-        if f_keys.difference(s_keys):
-            msg = f"features and sample_uuids have differing keys: {f_keys} != {s_keys}."
-            raise ValueError(msg)
-
-    def to_batch(self, label: str | None = None, role_sample_weights=None) -> Batch:
-        """
-        Convert the BatchOutput into a Batch of SampleCollections.
-
-        Args:
-            label (str, optional): Optional label to assign to the Batch.
-            role_sample_weights (dict[str, Data], optional): Optional weights per role.
-
-        Returns:
-            Batch: A reconstructed Batch object.
-
-        """
-        role_samples = {}
-
-        for role in self.available_roles:
-            samples = []
-            for i in range(len(self.features[role])):
-                features = {f"output_{i}": Data(self.features[role][i][j]) for j in range(len(self.features[role][i]))}
-                targets = self.targets
-                if self.targets is not None:
-                    targets = {f"output_{i}": Data(self.targets[role][i][j]) for j in range(len(self.targets[role][i]))}
-                tags = self.tags
-                if self.tags is not None:
-                    tags = {f"output_{i}": Data(self.tags[role][i][j]) for j in range(len(self.tags[role][i]))}
-                samples.append(Sample(features=features, targets=targets, tags=tags))
-
-            role_samples[role] = SampleCollection(samples)
-
-        return Batch(
-            role_samples=role_samples,
-            role_sample_weights=role_sample_weights,
-            label=label,
-        )
+        # Ensure consistent roles across attributes
+        keys = [
+            tuple(x.keys())
+            for x in [self.sample_uuids, self.targets, self.features, self.tags, self.sample_weights]
+            if x is not None
+        ]
+        if len(set(keys)) > 1:
+            msg = "Role names do not match across BatchOutput attributes."
+            raise KeyError(msg)
 
     @property
     def available_roles(self) -> list[str]:
@@ -265,7 +268,7 @@ class BatchOutput:
     @property
     def feature_shape(self) -> tuple[int, ...]:
         """
-        Shape of the output features.
+        Shape of the output features (including batch dimension).
 
         Returns:
             tuple[int, ...]: The shape tuple of feature tensors.

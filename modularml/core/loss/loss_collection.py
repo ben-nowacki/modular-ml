@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from modularml.core.loss.loss_record import LossRecord
-from modularml.utils.data_format import to_python
+from modularml.utils.data_conversion import to_python
 
 
 class LossCollection:

@@ -14,6 +14,7 @@ from modularml.core.graph.graph_node import GraphNode
 from modularml.core.graph.merge_stages.merge_stage import MergeStage
 from modularml.core.graph.mixins import EvaluableMixin, TrainableMixin
 from modularml.core.graph.model_stage import ModelStage
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.core.loss.loss_collection import LossCollection
 from modularml.core.loss.loss_record import LossRecord
 from modularml.utils.backend import Backend, backend_requires_optimizer
@@ -714,11 +715,11 @@ class ModelGraph:
     # ==========================================
     # Graph Construction Helpers
     # ==========================================
-    def _get_input_shapes(self, node: ComputationNode) -> list[tuple[int, ...]]:
+    def _get_input_shapes(self, node: ComputationNode) -> list[ShapeSpec]:
         """Gets all inputs shapes for this node."""
         input_shapes = []
         for inp in node.get_upstream_nodes():
-            out_shape = self._nodes[inp].output_shape
+            out_shape = self._nodes[inp].output_shape_spec
             if out_shape is None:
                 msg = (
                     f"Cannot infer input for node `{node.label}` because the output_shape is "
@@ -799,7 +800,11 @@ class ModelGraph:
         for lbl in self.source_node_labels:
             node = self._nodes[lbl]
             if isinstance(node, FeatureSet):
-                batch = make_dummy_batch(feature_shape=node.feature_shape, batch_size=8)
+                batch = make_dummy_batch(
+                    feature_shape=node.feature_shape_spec,
+                    target_shape=node.target_shape_spec,
+                    batch_size=8,
+                )
                 dummy_input_data[lbl] = batch
 
         # Ensure all nodes are built
@@ -815,20 +820,20 @@ class ModelGraph:
             # Build node with shape inferrence
             if isinstance(node, ComputationNode) and (not node.is_built or reset):
                 # Get all inputs feeding into this node
-                input_shapes: list[tuple[int, ...]] = self._get_input_shapes(node)
+                input_shapes: list[ShapeSpec] = self._get_input_shapes(node)
 
                 # ModelStage support output shape inferrence
                 if isinstance(node, ModelStage):
                     try:
-                        output_shapes: list[tuple[int, ...]] = node.infer_output_shapes(
-                            input_shapes,
-                        )
+                        output_shapes: list[ShapeSpec] = node.infer_output_shape_spec(input_shapes)
                     except ValueError:
                         output_shapes = None
                     # If a leaf ModelStage and failed to infer output_shapes,
                     # force output_shapes to be the accumulated FeatureSet.target_shape
                     if output_shapes is None and isinstance(node, ModelStage):
-                        output_shapes = [cache[node.upstream_node].target_shape]
+                        output_shapes = [
+                            ShapeSpec(shapes={"_output_": cache[node.upstream_node].target_shape}),
+                        ]
 
                     # Build node
                     node.build(
@@ -836,7 +841,11 @@ class ModelGraph:
                         output_shapes=output_shapes,
                         force=reset,
                     )
-                    print(f"Built node `{lbl}` with shapes: {node.input_shape} -> {node.output_shape}")
+                    msg = (
+                        f"Built node `{lbl}` with shapes: {node.input_shape_spec.merged_shape}"
+                        f" -> {node.output_shape_spec.merged_shape}"
+                    )
+                    print(msg)
 
                     # Cache outputs of this newly built node
                     output: BatchOutput = node.forward(node.get_input_batch(cache))
@@ -846,7 +855,11 @@ class ModelGraph:
                 elif isinstance(node, MergeStage):
                     backend = Backend.SCIKIT if self._optimizer is None else self._optimizer.backend
                     node.build(input_shapes=input_shapes, backend=backend)
-                    print(f"Built node `{lbl}` with merged shape: {node.merged_shape}")
+                    msg = (
+                        f"Built node `{lbl}` with shapes: {list(node.input_shape_spec.values())}"
+                        f" -> {node.merged_shape.merged_shape}"
+                    )
+                    print(msg)
 
                     # Cache outputs of this newly built node
                     output: list[BatchOutput] = node.forward(node.get_input_batch(cache))
@@ -943,7 +956,10 @@ class ModelGraph:
         for lbl in self.source_node_labels:
             node = self._nodes[lbl]
             if isinstance(node, FeatureSet):
-                batch = make_dummy_batch(feature_shape=node.feature_shape, batch_size=batch_size)
+                batch = make_dummy_batch(
+                    feature_shape=node.feature_shape_spec,
+                    batch_size=batch_size,
+                )
                 batches[lbl] = batch
 
         res = self.forward(batches)

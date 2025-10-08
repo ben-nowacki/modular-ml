@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from modularml.core.data_structures.data import Data
+from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.utils.backend import Backend
 
 
@@ -25,8 +26,8 @@ class Sample:
     """
 
     features: dict[str, Data]
-    targets: dict[str, Data]
-    tags: dict[str, Data]
+    targets: dict[str, Data] | None = None
+    tags: dict[str, Data] | None = None
 
     label: str | None = None
     uuid: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -41,37 +42,39 @@ class Sample:
             if not isinstance(v, Data):
                 msg = f"Feature '{k}' is not a Data object: {type(v)}"
                 raise TypeError(msg)
-        for k, v in self.targets.items():
-            if not isinstance(v, Data):
-                msg = f"Target '{k}' is not a Data object: {type(v)}"
-                raise TypeError(msg)
-        for k, v in self.tags.items():
-            if not isinstance(v, Data):
-                msg = f"Tag '{k}' is not a Data object: {type(v)}"
-                raise TypeError(msg)
+        if self.targets is not None:
+            for k, v in self.targets.items():
+                if not isinstance(v, Data):
+                    msg = f"Target '{k}' is not a Data object: {type(v)}"
+                    raise TypeError(msg)
+        if self.tags is not None:
+            for k, v in self.tags.items():
+                if not isinstance(v, Data):
+                    msg = f"Tag '{k}' is not a Data object: {type(v)}"
+                    raise TypeError(msg)
 
         # Check for backend consistency
-        data_items = list(self.features.values()) + list(self.targets.values())
+        data_items = [x.values() for x in [self.features, self.targets] if x is not None]
         backends = {d.backend for d in data_items if isinstance(d, Data)}
 
+        # Auto-convert backend to match (should this be removed?)
         if len(backends) > 1:
-            # Choose a target backend (e.g., SCITKIT by default)
-            target_backend = Backend.SCIKIT
+            target_backend = backends[0]  # Choose a target backend
             self.features = {k: v.as_backend(target_backend) for k, v in self.features.items()}
             self.targets = {k: v.as_backend(target_backend) for k, v in self.targets.items()}
 
-        # Enforce consistent shapes
-        f_shapes = [d.shape for d in self.features.values()]
-        if len(set(f_shapes)) > 1:
-            msg = f"Inconsistent feature shapes: {f_shapes}"
-            raise ValueError(msg)
-        self._feature_shape = (len(f_shapes), *tuple(f_shapes[0]))
+        # Enforce consistent shapes?
+        # f_shapes = [d.shape for d in self.features.values()]
+        # if len(set(f_shapes)) > 1:
+        #     msg = f"Inconsistent feature shapes: {f_shapes}"
+        #     raise ValueError(msg)
+        # self._feature_shape = (len(f_shapes), *tuple(f_shapes[0]))
 
-        t_shapes = [d.shape for d in self.targets.values()]
-        if len(set(t_shapes)) > 1:
-            msg = f"Inconsistent target shapes: {t_shapes}"
-            raise ValueError(msg)
-        self._target_shape = (len(t_shapes), *tuple(t_shapes[0]))
+        # t_shapes = [d.shape for d in self.targets.values()]
+        # if len(set(t_shapes)) > 1:
+        #     msg = f"Inconsistent target shapes: {t_shapes}"
+        #     raise ValueError(msg)
+        # self._target_shape = (len(t_shapes), *tuple(t_shapes[0]))
 
     def __repr__(self) -> str:
         def summarize(d: dict[str, Any]) -> dict[str, str]:
@@ -100,12 +103,18 @@ class Sample:
         return list(self.tags.keys())
 
     @property
-    def feature_shape(self) -> tuple[int, ...]:
-        return self._feature_shape
+    def feature_shape_spec(self) -> ShapeSpec:
+        return ShapeSpec(shapes={k: v.shape for k, v in self.features.items()})
 
     @property
-    def target_shape(self) -> tuple[int, ...]:
-        return self._target_shape
+    def target_shape_spec(self) -> ShapeSpec:
+        return ShapeSpec(shapes={k: v.shape for k, v in self.targets.items()})
+
+    def get_feature_shape(self, key: str) -> tuple[int, ...]:
+        return self.feature_shape_spec.get(key)
+
+    def get_target_shape(self, key: str) -> tuple[int, ...]:
+        return self.target_shape_spec.get(key)
 
     def get_features(self, key: str) -> Data:
         return self.features.get(key)
@@ -118,9 +127,9 @@ class Sample:
 
     def to_backend(self, backend: Backend) -> Sample:
         return Sample(
-            features={k: v.to_backend(backend) for k, v in self.features.items()},
-            targets={k: v.to_backend(backend) for k, v in self.targets.items()},
-            tags={k: v.to_backend(backend) for k, v in self.tags.items()},
+            features={k: v.as_backend(backend) for k, v in self.features.items()},
+            targets={k: v.as_backend(backend) for k, v in self.targets.items()},
+            tags={k: v.as_backend(Backend.NONE) for k, v in self.tags.items()},
             label=self.label,
             uuid=self.uuid,
         )

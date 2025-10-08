@@ -4,6 +4,7 @@ from modularml.utils.formatting import format_value_to_sig_digits
 
 
 # ---------- Basic examples from docstring ----------
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("value", "sig_digits", "expected"),
     [
@@ -18,12 +19,14 @@ def test_format_value_examples(value, sig_digits, expected):
 
 
 # ---------- Zero and NaN ----------
+@pytest.mark.unit
 def test_format_value_zero_and_nan():
     assert format_value_to_sig_digits(0.0) == "0"
     assert format_value_to_sig_digits(float("nan")) == "0"
 
 
 # ---------- Negative values ----------
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -36,6 +39,7 @@ def test_format_value_negative_numbers(value, expected):
 
 
 # ---------- Custom sig_digits ----------
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("value", "sig_digits", "expected"),
     [
@@ -49,6 +53,7 @@ def test_format_value_custom_sig_digits(value, sig_digits, expected):
 
 
 # ---------- round_integers flag ----------
+@pytest.mark.unit
 def test_round_integers_false_preserves_integer_part():
     """When round_integers=False, integers are not rounded to sig figs."""
     value = 1235.123
@@ -57,6 +62,7 @@ def test_round_integers_false_preserves_integer_part():
     assert format_value_to_sig_digits(value, sig_digits=2, round_integers=True) == "1200"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("value", "sig_digits", "expected_true", "expected_false"),
     [

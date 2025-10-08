@@ -19,8 +19,8 @@ class SequentialMLP(BaseModel, torch.nn.Module):
     def __init__(
         self,
         *,
-        input_shape: tuple[int] | None = None,
-        output_shape: tuple[int] | None = None,
+        input_shape: tuple[int, ...] | None = None,
+        output_shape: tuple[int, ...] | None = None,
         n_layers: int = 2,
         hidden_dim: int = 32,
         activation: str = "relu",
@@ -34,8 +34,8 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         and dropout. It supports lazy building when input/output shapes are unknown.
 
         Args:
-            input_shape (Tuple[int], optional): Shape of the input excluding batch dim.
-            output_shape (Tuple[int], optional): Shape of the output excluding batch dim.
+            input_shape (tuple[int, ...], optional): Shape of the input excluding batch dim.
+            output_shape (tuple[int, ...], optional): Shape of the output excluding batch dim.
             n_layers (int): Number of fully connected layers.
             hidden_dim (int): Number of hidden units per layer.
             activation (str): Activation function name (e.g., 'relu', 'gelu').
@@ -46,8 +46,13 @@ class SequentialMLP(BaseModel, torch.nn.Module):
         torch.nn.Module.__init__(self)
         BaseModel.__init__(self, backend=backend)
 
-        self._input_shape = input_shape
-        self._output_shape = output_shape
+        self._input_shape = input_shape if input_shape is None else tuple(input_shape)
+        if self._input_shape is not None and len(self._input_shape) < 2:
+            self._input_shape = (1, *self._input_shape)
+
+        self._output_shape = output_shape if output_shape is None else tuple(output_shape)
+        if self._output_shape is not None and len(self._output_shape) < 2:
+            self._output_shape = (1, *self._output_shape)
 
         self.config = {
             "n_layers": n_layers,
@@ -89,12 +94,16 @@ class SequentialMLP(BaseModel, torch.nn.Module):
 
         """
         if input_shape:
+            if len(input_shape) < 2:
+                input_shape = (1, *input_shape)
             if self._input_shape and input_shape != self._input_shape and not force:
                 msg = f"Inconsistent input_shape: {input_shape} vs {self._input_shape}"
                 raise ValueError(msg)
             self._input_shape = input_shape
 
         if output_shape:
+            if len(output_shape) < 2:
+                output_shape = (1, *output_shape)
             if self._output_shape and output_shape != self._output_shape and not force:
                 msg = f"Inconsistent output_shape: {output_shape} vs {self._output_shape}"
                 raise ValueError(msg)
@@ -142,6 +151,10 @@ class SequentialMLP(BaseModel, torch.nn.Module):
             torch.Tensor: Output of shape (batch_size, *output_shape)
 
         """
+        # ensure input is 3D
+        if x.ndim == 2:
+            x = x.unsqueeze(1)  # (batch, 1, length)
+
         if not self.is_built:
             self.build(input_shape=tuple(x.shape[1:]))
 
