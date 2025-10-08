@@ -3,9 +3,10 @@ import pytest
 import tensorflow as tf
 import torch
 
-from modularml.core.graph.merge_stages import ConcatStage
+from modularml.core.graph.merge_stages.concat_stage import ConcatStage
 from modularml.utils.backend import Backend
 from modularml.utils.modeling import PadMode
+from tests.shared.data_utils import rng
 
 
 # ----------------------------
@@ -17,7 +18,7 @@ def backend(request):
 
 
 @pytest.fixture
-def example_inputs(rng, backend):
+def example_inputs(backend):
     if backend == Backend.TORCH:
         return [
             torch.randn(2, 3),
@@ -35,7 +36,7 @@ def example_inputs(rng, backend):
 
 
 @pytest.fixture
-def example_inputs_with_mismatch(rng, backend):
+def example_inputs_with_mismatch(backend):
     if backend == Backend.TORCH:
         return [
             torch.randn(2, 3),
@@ -53,7 +54,7 @@ def example_inputs_with_mismatch(rng, backend):
 
 
 @pytest.fixture
-def example_inputs_with_mismatch_v2(rng, backend):
+def example_inputs_with_mismatch_v2(backend):
     if backend == Backend.TORCH:
         return [
             torch.randn(1, 101),
@@ -73,6 +74,7 @@ def example_inputs_with_mismatch_v2(rng, backend):
 # ----------------------------
 # Basic test: concat without padding
 # ----------------------------
+@pytest.mark.unit
 def test_concat_no_padding(backend, example_inputs):
     stage = ConcatStage(label="concat", axis=1, upstream_nodes=["dummy1", "dummy2"])
     stage._backend = backend
@@ -82,6 +84,7 @@ def test_concat_no_padding(backend, example_inputs):
     assert out.shape == (2, 8)
 
 
+@pytest.mark.unit
 def test_concat_no_padding_mismatch_inputs(backend, example_inputs_with_mismatch):
     stage = ConcatStage(label="concat", axis=1, upstream_nodes=["dummy1", "dummy2"])
     stage._backend = backend
@@ -93,6 +96,7 @@ def test_concat_no_padding_mismatch_inputs(backend, example_inputs_with_mismatch
 # ----------------------------
 # Test: invalid backend raises
 # ----------------------------
+@pytest.mark.unit
 def test_invalid_backend_raises():
     stage = ConcatStage(label="bad", axis=1, upstream_nodes=["dummy1", "dummy2"])
     stage._backend = "invalid-backend"
@@ -105,6 +109,7 @@ def test_invalid_backend_raises():
 # ----------------------------
 # Test: concat with padding
 # ----------------------------
+@pytest.mark.unit
 def test_concat_axis1_with_constant_padding(backend, example_inputs_with_mismatch):
     stage = ConcatStage(
         label="concat",

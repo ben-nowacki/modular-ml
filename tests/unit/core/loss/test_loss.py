@@ -3,7 +3,7 @@ import pytest
 import tensorflow as tf
 import torch
 
-from modularml.core.loss import Loss
+from modularml.core.loss.loss import Loss
 from modularml.utils.backend import Backend
 from modularml.utils.exceptions import BackendNotSupportedError, LossError
 

@@ -3,22 +3,24 @@ import pytest
 from modularml.core.graph.shape_spec import ShapeSpec
 from modularml.utils.exceptions import ShapeSpecError
 
+
 # ==========================================================
 # Basic property tests
 # ==========================================================
-
-
+@pytest.mark.unit
 def test_unique_shapes():
     spec = ShapeSpec({"a": (1, 32), "b": (1, 32), "c": (1, 16)})
     assert spec.unique_shapes == {(1, 32), (1, 16)}
 
 
+@pytest.mark.unit
 def test_single_shape_properties():
     spec = ShapeSpec({"a": (10, 4)})
     assert spec.merged_axis == -1
     assert spec.merged_shape == (10, 4)
 
 
+@pytest.mark.unit
 def test_empty_shape_spec_raises():
     spec = ShapeSpec({})
     with pytest.raises(ShapeSpecError, match="empty ShapeSpec"):
@@ -28,8 +30,7 @@ def test_empty_shape_spec_raises():
 # ==========================================================
 # Merged axis inference
 # ==========================================================
-
-
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("shapes", "expected_axis"),
     [
@@ -47,19 +48,20 @@ def test_merged_axis_inference(shapes, expected_axis):
 # ==========================================================
 # Merged shape computation
 # ==========================================================
-
-
+@pytest.mark.unit
 def test_merged_shape_simple():
     spec = ShapeSpec({"a": (1, 32), "b": (1, 16)})
     assert spec.merged_shape == (1, 48)
 
 
+@pytest.mark.unit
 def test_merged_shape_different_rank_raises():
     spec = ShapeSpec({"a": (1, 32), "b": (16,)})
     with pytest.raises(ShapeSpecError, match="Inconsistent ranks"):
         _ = spec.merged_shape
 
 
+@pytest.mark.unit
 def test_merged_shape_incompatible_dims_raises():
     spec = ShapeSpec({"a": (2, 32), "b": (1, 16)})
     with pytest.raises(ShapeSpecError, match="Cannot determine a unique merge axis"):
@@ -69,8 +71,7 @@ def test_merged_shape_incompatible_dims_raises():
 # ==========================================================
 # Indexing and equality
 # ==========================================================
-
-
+@pytest.mark.unit
 def test_get_and_index_access():
     spec = ShapeSpec({"x": (8, 16)})
     assert spec["x"] == (8, 16)
@@ -79,6 +80,7 @@ def test_get_and_index_access():
         _ = spec["nonexistent"]
 
 
+@pytest.mark.unit
 def test_equality_and_hash():
     a = ShapeSpec({"a": (1, 32)})
     b = ShapeSpec({"a": (1, 32)})
@@ -91,8 +93,7 @@ def test_equality_and_hash():
 # ==========================================================
 # Cross-Spec merge compatibility
 # ==========================================================
-
-
+@pytest.mark.unit
 def test_compatible_merge_with_true_and_false():
     a = ShapeSpec({"x": (1, 32)})
     b = ShapeSpec({"x": (1, 64)})
@@ -102,6 +103,7 @@ def test_compatible_merge_with_true_and_false():
     assert not a.compatible_merge_with(c)  # different keys
 
 
+@pytest.mark.unit
 def test_infer_merge_axis_with():
     a = ShapeSpec({"x": (1, 32)})
     b = ShapeSpec({"x": (1, 64)})
@@ -112,6 +114,7 @@ def test_infer_merge_axis_with():
     assert a.infer_merge_axis_with(a) == -1
 
 
+@pytest.mark.unit
 def test_infer_merge_axis_with_incompatible():
     a = ShapeSpec({"x": (1, 32)})
     b = ShapeSpec({"y": (2, 32)})
@@ -121,14 +124,14 @@ def test_infer_merge_axis_with_incompatible():
 # ==========================================================
 # Merged shape across two ShapeSpecs
 # ==========================================================
-
-
+@pytest.mark.unit
 def test_merged_shape_with_success():
     a = ShapeSpec({"x": (1, 32)})
     b = ShapeSpec({"x": (1, 64)})
     assert a.merged_shape_with(b) == (1, 96)
 
 
+@pytest.mark.unit
 def test_merged_shape_with_failure():
     a = ShapeSpec({"x": (1, 32)})
     b = ShapeSpec({"y": (1, 16)})
@@ -139,13 +142,13 @@ def test_merged_shape_with_failure():
 # ==========================================================
 # Edge cases
 # ==========================================================
-
-
+@pytest.mark.unit
 def test_merged_axis_multiple_differences_is_none():
     spec = ShapeSpec({"a": (2, 32), "b": (1, 16)})
     assert spec.merged_axis is None
 
 
+@pytest.mark.unit
 def test_repr_contains_keys():
     spec = ShapeSpec({"v": (1, 32)})
     rep = repr(spec)

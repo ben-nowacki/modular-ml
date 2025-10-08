@@ -25,6 +25,7 @@ def make_sample_collection(n=3):
 # ==========================================================
 # Initialization
 # ==========================================================
+@pytest.mark.unit
 def test_init_valid():
     coll = make_sample_collection(5)
     assert isinstance(coll, SampleCollection)
@@ -32,16 +33,19 @@ def test_init_valid():
     assert all(isinstance(s, Sample) for s in coll)
 
 
+@pytest.mark.unit
 def test_init_invalid_type():
     with pytest.raises(TypeError, match="must be of type Sample"):
         SampleCollection(samples=[1, 2, 3])
 
 
+@pytest.mark.unit
 def test_init_empty_collection():
     with pytest.raises(ValueError, match="at least one Sample"):
         SampleCollection(samples=[])
 
 
+@pytest.mark.unit
 def test_inconsistent_feature_shape_raises():
     s1 = generate_dummy_sample(target_type="numeric", feature_shape_map={"X1": (1, 100)})
     s2 = generate_dummy_sample(target_type="numeric", feature_shape_map={"X1": (1, 50)})
@@ -50,6 +54,7 @@ def test_inconsistent_feature_shape_raises():
         SampleCollection([s1, s2])
 
 
+@pytest.mark.unit
 def test_inconsistent_target_shape_raises():
     s1 = generate_dummy_sample(target_type="numeric", target_shape_map={"T1": (1, 100)})
     s2 = generate_dummy_sample(target_type="numeric", target_shape_map={"T1": (1, 50)})
@@ -61,6 +66,7 @@ def test_inconsistent_target_shape_raises():
 # ==========================================================
 # Basic operations
 # ==========================================================
+@pytest.mark.unit
 def test_len_and_indexing():
     coll = make_sample_collection(5)
     assert len(coll) == 5
@@ -69,6 +75,7 @@ def test_len_and_indexing():
     assert s0.label == "L0"
 
 
+@pytest.mark.unit
 def test_get_by_uuid_and_label():
     coll = make_sample_collection(5)
     first_uuid = coll.samples[0].uuid
@@ -81,6 +88,7 @@ def test_get_by_uuid_and_label():
     assert s_by_label.label == first_label
 
 
+@pytest.mark.unit
 def test_get_samples_with_uuid_subset():
     coll = make_sample_collection(5)
     uuids = [s.uuid for s in coll.samples[:2]]
@@ -89,6 +97,7 @@ def test_get_samples_with_uuid_subset():
     assert len(sub_coll) == 2
 
 
+@pytest.mark.unit
 def test_get_samples_with_label_subset():
     coll = make_sample_collection(5)
     labels = [s.label for s in coll.samples[:2]]
@@ -97,6 +106,7 @@ def test_get_samples_with_label_subset():
     assert len(sub_coll) == 2
 
 
+@pytest.mark.unit
 def test_repr_and_iteration():
     coll = make_sample_collection(5)
     rep = repr(coll)
@@ -110,6 +120,7 @@ def test_repr_and_iteration():
 # ==========================================================
 # Property accessors
 # ==========================================================
+@pytest.mark.unit
 def test_property_accessors():
     coll = make_sample_collection(3)
     assert coll.feature_keys == ["X1", "X2"]
@@ -124,6 +135,7 @@ def test_property_accessors():
     assert coll.target_shape_spec == t_shape_spec
 
 
+@pytest.mark.unit
 def test_get_feature_and_target_shape():
     coll = make_sample_collection(1)
     assert coll.get_feature_shape("X1") == (1, 100)
@@ -135,6 +147,7 @@ def test_get_feature_and_target_shape():
 # ==========================================================
 # Data retrieval
 # ==========================================================
+@pytest.mark.unit
 def test_get_all_features_dict_numpy():
     coll = make_sample_collection(3)
     out = coll.get_all_features(fmt=DataFormat.DICT_NUMPY)
@@ -143,6 +156,7 @@ def test_get_all_features_dict_numpy():
     assert out["X1"].shape[0] == len(coll)
 
 
+@pytest.mark.unit
 def test_get_all_targets_and_tags():
     coll = make_sample_collection(3)
     out_targets = coll.get_all_targets(fmt=DataFormat.DICT_NUMPY)
@@ -153,6 +167,7 @@ def test_get_all_targets_and_tags():
     assert len(out_tags["T_FLOAT"]) == len(coll)
 
 
+@pytest.mark.unit
 def test_get_all_features_invalid_format_raises():
     coll = make_sample_collection(1)
     with pytest.raises(ValueError, match="Unknown data format: invalid"):
@@ -162,6 +177,7 @@ def test_get_all_features_invalid_format_raises():
 # ==========================================================
 # Backend conversion and copying
 # ==========================================================
+@pytest.mark.unit
 def test_to_backend_torch_and_tensorflow():
     coll = make_sample_collection(2)
 
@@ -174,6 +190,7 @@ def test_to_backend_torch_and_tensorflow():
     assert len(tf_coll) == len(coll)
 
 
+@pytest.mark.unit
 def test_copy_creates_new_instances():
     coll = make_sample_collection(2)
     copied = coll.copy()

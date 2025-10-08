@@ -7,6 +7,7 @@ from modularml.core.splitters.cross_validation import CrossValidationSplitter
 # ==========================================================
 # Basic K-fold splitting (no grouping)
 # ==========================================================
+@pytest.mark.unit
 def test_cross_validation_basic(dummy_featureset_numeric):
     """Test basic K-fold split correctness and disjointness."""
     splitter = CrossValidationSplitter(n_folds=5, seed=123)
@@ -31,6 +32,7 @@ def test_cross_validation_basic(dummy_featureset_numeric):
 # ==========================================================
 # Grouped K-fold splitting
 # ==========================================================
+@pytest.mark.unit
 def test_cross_validation_grouped(dummy_featureset_numeric):
     """Ensure group-based splitting keeps groups intact."""
     # Add cell_id tag grouping to simulate multiple groups
@@ -60,6 +62,7 @@ def test_cross_validation_grouped(dummy_featureset_numeric):
 # ==========================================================
 # Reproducibility
 # ==========================================================
+@pytest.mark.unit
 def test_cross_validation_reproducibility(dummy_featureset_numeric):
     """Cross-validation should be reproducible given the same seed."""
     splitter_a = CrossValidationSplitter(n_folds=4, seed=123)
@@ -73,6 +76,7 @@ def test_cross_validation_reproducibility(dummy_featureset_numeric):
         assert folds_a[key] == folds_b[key]
 
 
+@pytest.mark.unit
 def test_cross_validation_different_seed_changes_split(dummy_featureset_numeric):
     """Changing the seed should yield different splits."""
     splitter_a = CrossValidationSplitter(n_folds=4, seed=123)
@@ -88,6 +92,7 @@ def test_cross_validation_different_seed_changes_split(dummy_featureset_numeric)
 # ==========================================================
 # Config serialization
 # ==========================================================
+@pytest.mark.unit
 def test_cross_validation_config_roundtrip():
     """Test that get_config() and from_config() are symmetric."""
     splitter = CrossValidationSplitter(n_folds=3, group_by="cell_id", seed=99)
@@ -104,6 +109,7 @@ def test_cross_validation_config_roundtrip():
 # ==========================================================
 # Edge cases
 # ==========================================================
+@pytest.mark.unit
 def test_cross_validation_invalid_fold_count():
     """Ensure invalid fold count raises ValueError."""
     with pytest.raises(ValueError, match="n_folds must be >= 2 for cross-validation"):

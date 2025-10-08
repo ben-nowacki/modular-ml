@@ -6,6 +6,7 @@ from modularml.core.api import FeatureSet, FeatureSubset
 # ==========================================================
 # Initialization & Basic Properties
 # ==========================================================
+@pytest.mark.unit
 def test_featuresubset_init(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     uuids = [s.uuid for s in fs.samples[:10]]
@@ -22,6 +23,7 @@ def test_featuresubset_init(dummy_featureset_numeric):
     assert repr(subset).startswith("FeatureSubset(")
 
 
+@pytest.mark.unit
 def test_featuresubset_invalid_uuids_raise(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     bad_uuids = ["not-a-real-uuid"]
@@ -29,6 +31,7 @@ def test_featuresubset_invalid_uuids_raise(dummy_featureset_numeric):
         FeatureSubset(label="bad", parent=fs, sample_uuids=bad_uuids)
 
 
+@pytest.mark.unit
 def test_featuresubset_dead_parent_raises(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     uuids = [s.uuid for s in fs.samples[:3]]
@@ -43,6 +46,7 @@ def test_featuresubset_dead_parent_raises(dummy_featureset_numeric):
 # ==========================================================
 # Disjointness Checking
 # ==========================================================
+@pytest.mark.unit
 def test_is_disjoint_with(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     s1 = FeatureSubset(label="A", parent=fs, sample_uuids=[s.uuid for s in fs.samples[:5]])
@@ -56,6 +60,7 @@ def test_is_disjoint_with(dummy_featureset_numeric):
 # ==========================================================
 # Split & Random Split
 # ==========================================================
+@pytest.mark.unit
 def test_split_method_calls_splitter(monkeypatch, dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     uuids = [s.uuid for s in fs.samples[:20]]
@@ -79,6 +84,7 @@ def test_split_method_calls_splitter(monkeypatch, dummy_featureset_numeric):
     assert hasattr(fs, "added_fold2")
 
 
+@pytest.mark.unit
 def test_split_random_creates_subsets(monkeypatch, dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     uuids = [s.uuid for s in fs.samples[: len(fs) // 4]]
@@ -113,6 +119,7 @@ def test_split_random_creates_subsets(monkeypatch, dummy_featureset_numeric):
 # ==========================================================
 # Config Serialization
 # ==========================================================
+@pytest.mark.unit
 def test_get_config_and_from_config(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     uuids = [s.uuid for s in fs.samples[:5]]
@@ -129,6 +136,7 @@ def test_get_config_and_from_config(dummy_featureset_numeric):
     assert subset2.parent == fs
 
 
+@pytest.mark.unit
 def test_from_config_wrong_parent_raises(dummy_featureset_numeric):
     fs1 = dummy_featureset_numeric
     fs2 = FeatureSet.from_dict(label="Other", data={"x": [1, 2, 3], "y": [4, 5, 6]}, feature_keys="x", target_keys="y")

@@ -1,4 +1,3 @@
-import warnings
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +11,7 @@ from modularml.utils.exceptions import SampleLoadError, SubsetOverlapWarning
 # ==========================================================
 # Initialization & Basic Properties
 # ==========================================================
+@pytest.mark.unit
 def test_featureset_init(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     assert isinstance(fs, FeatureSet)
@@ -24,6 +24,7 @@ def test_featureset_init(dummy_featureset_numeric):
     assert repr(fs).startswith("FeatureSet")
 
 
+@pytest.mark.unit
 def test_clear_subsets(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     fs._subsets["train"] = "dummy"
@@ -36,6 +37,7 @@ def test_clear_subsets(dummy_featureset_numeric):
 # ==========================================================
 # Subset Management
 # ==========================================================
+@pytest.mark.unit
 def test_add_and_get_subset(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     subset = FeatureSubset(label="train", sample_uuids=[s.uuid for s in fs.samples[:5]], parent=fs)
@@ -45,6 +47,7 @@ def test_add_and_get_subset(dummy_featureset_numeric):
     assert fs.n_subsets == 1
 
 
+@pytest.mark.unit
 def test_add_duplicate_subset_raises(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     subset = FeatureSubset(label="train", sample_uuids=[s.uuid for s in fs.samples[:5]], parent=fs)
@@ -53,16 +56,17 @@ def test_add_duplicate_subset_raises(dummy_featureset_numeric):
         fs.add_subset(subset)
 
 
+@pytest.mark.unit
 def test_add_overlapping_subset_warns(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     s1 = FeatureSubset(label="train", sample_uuids=[s.uuid for s in fs.samples[:5]], parent=fs)
     s2 = FeatureSubset(label="val", sample_uuids=[s.uuid for s in fs.samples[4:10]], parent=fs)
     fs.add_subset(s1)
-    with warnings.catch_warnings(record=True) as w:
+    with pytest.warns(SubsetOverlapWarning, match="overlapping samples"):
         fs.add_subset(s2)
-        assert any(issubclass(wi.category, SubsetOverlapWarning) for wi in w)
 
 
+@pytest.mark.unit
 def test_get_invalid_subset_raises(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     with pytest.raises(ValueError, match="not a valid subset"):
@@ -72,6 +76,7 @@ def test_get_invalid_subset_raises(dummy_featureset_numeric):
 # ==========================================================
 # Filtering
 # ==========================================================
+@pytest.mark.unit
 def test_filter_tags(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     tag_key = next(iter(fs.samples[0].tags.keys()))
@@ -81,6 +86,7 @@ def test_filter_tags(dummy_featureset_numeric):
     assert len(filtered) >= 1
 
 
+@pytest.mark.unit
 def test_filter_callable(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     feat_key = next(iter(fs.samples[0].features.keys()))
@@ -88,6 +94,7 @@ def test_filter_callable(dummy_featureset_numeric):
     assert isinstance(filtered, FeatureSet)
 
 
+@pytest.mark.unit
 def test_filter_nonexistent_key_raises(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     with pytest.raises(ValueError, match="No samples match the provided conditions"):
@@ -97,6 +104,7 @@ def test_filter_nonexistent_key_raises(dummy_featureset_numeric):
 # ==========================================================
 # Constructors
 # ==========================================================
+@pytest.mark.unit
 def test_from_dict_constructor():
     data = {"x": [1, 2, 3], "y": [10, 20, 30], "tag": ["a", "b", "c"]}
     fs = FeatureSet.from_dict(label="test", data=data, feature_keys="x", target_keys="y", tag_keys="tag")
@@ -107,12 +115,14 @@ def test_from_dict_constructor():
     assert list(fs.tag_keys) == ["tag"]
 
 
+@pytest.mark.unit
 def test_from_dict_inconsistent_lengths_raises():
     data = {"x": [1, 2, 3], "y": [1, 2]}
     with pytest.raises(ValueError, match="Inconsistent list lengths"):
         FeatureSet.from_dict("bad", data=data, feature_keys="x", target_keys="y")
 
 
+@pytest.mark.unit
 def test_from_pandas_constructor():
     df = pd.DataFrame({"f": [1, 2, 3], "t": [4, 5, 6], "tag": ["a", "b", "c"]})
     fs = FeatureSet.from_pandas(label="pd", df=df, feature_cols="f", target_cols="t", tag_cols="tag")
@@ -124,6 +134,7 @@ def test_from_pandas_constructor():
 # ==========================================================
 # Spec Parsing
 # ==========================================================
+@pytest.mark.unit
 def test_parse_spec_valid(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     fs._subsets["train"] = "dummy"  # mock valid subset name
@@ -133,6 +144,7 @@ def test_parse_spec_valid(dummy_featureset_numeric):
     assert fs._parse_spec(f"train.features.{fkey}") == ("train", "features", fkey)
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("invalid", ["badcomponent", "train.invalid", "train.features.badkey"])
 def test_parse_spec_invalid(dummy_featureset_numeric, invalid):
     fs = dummy_featureset_numeric
@@ -144,6 +156,7 @@ def test_parse_spec_invalid(dummy_featureset_numeric, invalid):
 # ==========================================================
 # Save / Load Samples
 # ==========================================================
+@pytest.mark.unit
 def test_save_and_load_samples(tmp_path, dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     file_path = tmp_path / "samples"
@@ -156,6 +169,7 @@ def test_save_and_load_samples(tmp_path, dummy_featureset_numeric):
 # ==========================================================
 # Config Serialization
 # ==========================================================
+@pytest.mark.unit
 def test_get_and_from_config(tmp_path, dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     file_path = tmp_path / "samples"
@@ -166,12 +180,14 @@ def test_get_and_from_config(tmp_path, dummy_featureset_numeric):
     assert len(fs2.samples) == len(fs.samples)
 
 
+@pytest.mark.unit
 def test_from_config_missing_path_raises():
     cfg = {"label": "x", "sample_data": None}
     with pytest.raises(ValueError, match="missing 'sample_data'"):
         FeatureSet.from_config(cfg)
 
 
+@pytest.mark.unit
 def test_from_config_load_failure(tmp_path):
     bad_path = tmp_path / "missing"
     cfg = {"label": "x", "sample_data": str(bad_path)}
@@ -179,6 +195,7 @@ def test_from_config_load_failure(tmp_path):
         FeatureSet.from_config(cfg)
 
 
+@pytest.mark.unit
 def test_to_serializable_and_back(dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     obj = fs.to_serializable()
@@ -191,6 +208,7 @@ def test_to_serializable_and_back(dummy_featureset_numeric):
 # ==========================================================
 # Joblib Save / Load
 # ==========================================================
+@pytest.mark.unit
 def test_save_and_load_joblib(tmp_path, dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     path = tmp_path / "fs.joblib"
@@ -201,6 +219,7 @@ def test_save_and_load_joblib(tmp_path, dummy_featureset_numeric):
     assert loaded.label == fs.label
 
 
+@pytest.mark.unit
 def test_save_overwrite_and_fileexists(tmp_path, dummy_featureset_numeric):
     fs = dummy_featureset_numeric
     path = tmp_path / "fs.joblib"
@@ -211,6 +230,7 @@ def test_save_overwrite_and_fileexists(tmp_path, dummy_featureset_numeric):
     assert Path(path).exists()
 
 
+@pytest.mark.unit
 def test_load_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         FeatureSet.load(tmp_path / "doesnotexist")
@@ -219,6 +239,7 @@ def test_load_missing_file_raises(tmp_path):
 # ==========================================================
 # Transform Record Lifecycle
 # ==========================================================
+@pytest.mark.unit
 def test_transform_record_serialization(tmp_path):
     from modularml.core.graph.feature_set import TransformRecord
     from modularml.core.transforms.feature_transform import FeatureTransform

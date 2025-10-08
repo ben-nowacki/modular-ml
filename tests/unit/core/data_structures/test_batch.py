@@ -10,6 +10,7 @@ from tests.shared.data_utils import rng
 # ==========================================================
 # Batch construction and validation
 # ==========================================================
+@pytest.mark.unit
 def test_batch_init_valid(dummy_featureset_numeric):
     """A Batch should initialize correctly with consistent shapes."""
     fs = dummy_featureset_numeric
@@ -24,6 +25,7 @@ def test_batch_init_valid(dummy_featureset_numeric):
     assert all(r in batch.role_sample_weights for r in batch.available_roles)
 
 
+@pytest.mark.unit
 def test_batch_inconsistent_feature_shape_raises(dummy_featureset_numeric):
     """Batch should raise ValueError if feature shapes differ across roles."""
     fs = dummy_featureset_numeric
@@ -43,6 +45,7 @@ def test_batch_inconsistent_feature_shape_raises(dummy_featureset_numeric):
         _ = Batch(role_samples={"a": sc1, "b": sc2})
 
 
+@pytest.mark.unit
 def test_batch_inconsistent_target_shape_raises(dummy_featureset_numeric):
     """Batch should raise RuntimeError if target shapes differ across roles."""
     fs = dummy_featureset_numeric
@@ -61,6 +64,7 @@ def test_batch_inconsistent_target_shape_raises(dummy_featureset_numeric):
         _ = Batch(role_samples={"a": sc})
 
 
+@pytest.mark.unit
 def test_batch_missing_weight_key_raises(dummy_featureset_numeric):
     """Batch should raise KeyError if weights missing for any role."""
     fs = dummy_featureset_numeric
@@ -70,6 +74,7 @@ def test_batch_missing_weight_key_raises(dummy_featureset_numeric):
         Batch(role_samples={"anchor": sc, "pos": sc}, role_sample_weights=weights)
 
 
+@pytest.mark.unit
 def test_batch_weight_length_mismatch_raises(dummy_featureset_numeric):
     """Batch should raise ValueError if sample weights length mismatched."""
     fs = dummy_featureset_numeric
@@ -79,6 +84,7 @@ def test_batch_weight_length_mismatch_raises(dummy_featureset_numeric):
         Batch(role_samples={"anchor": sc, "pos": sc}, role_sample_weights=weights)
 
 
+@pytest.mark.unit
 def test_batch_properties(dummy_featureset_numeric):
     """Check feature/target shapes and len are derived correctly."""
     fs = dummy_featureset_numeric
@@ -106,6 +112,7 @@ def make_batch_output():
     )
 
 
+@pytest.mark.unit
 def test_batchoutput_init_valid():
     bo = make_batch_output()
     assert isinstance(bo, BatchOutput)
@@ -114,6 +121,7 @@ def test_batchoutput_init_valid():
     assert isinstance(bo.target_shape, tuple)
 
 
+@pytest.mark.unit
 def test_batchoutput_inconsistent_feature_shape_raises():
     # Ensure feature shapes are consistent across roles
     x1 = rng.random(size=(3, 2))
@@ -123,6 +131,7 @@ def test_batchoutput_inconsistent_feature_shape_raises():
         BatchOutput(features={"a": x1, "b": x2}, sample_uuids={"a": uuids, "b": uuids})
 
 
+@pytest.mark.unit
 def test_batchoutput_inconsistent_target_shape_raises():
     # Ensure targets shapes are consistent across roles
     x = rng.random(size=(3, 2))
@@ -137,6 +146,7 @@ def test_batchoutput_inconsistent_target_shape_raises():
         )
 
 
+@pytest.mark.unit
 def test_batchoutput_mismatched_keys_raises():
     x = rng.random(size=(3, 2))
     uuids = [f"u{i}" for i in range(3)]

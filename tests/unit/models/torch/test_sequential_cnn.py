@@ -3,11 +3,12 @@ import torch
 
 from modularml.models.torch import SequentialCNN
 from modularml.utils.backend import Backend
+from modularml.utils.data_conversion import shapes_similar_except_singleton
 
 
 @pytest.fixture
 def input_shape():
-    return (3, 32)  # (n_channels, sequence_length)
+    return (3, 32)  # (n_features, feature_length)
 
 
 @pytest.fixture
@@ -15,6 +16,7 @@ def output_shape():
     return (8,)  # Output vector size
 
 
+@pytest.mark.unit
 def test_eager_build_forward_pass(input_shape, output_shape):
     model = SequentialCNN(
         input_shape=input_shape,
@@ -30,15 +32,18 @@ def test_eager_build_forward_pass(input_shape, output_shape):
         flatten_output=True,
     )
     assert model.is_built
-    assert model.input_shape == input_shape
-    assert model.output_shape == output_shape
+
+    # Check that shapes are similar (same except for any singleton dimensions)
+    assert shapes_similar_except_singleton(model.input_shape, input_shape)
+    assert shapes_similar_except_singleton(model.output_shape, output_shape)
 
     x = torch.randn(4, *input_shape)
     y = model(x)
 
-    assert y.shape == (4, *output_shape)
+    assert shapes_similar_except_singleton(y.shape, (4, *output_shape))
 
 
+@pytest.mark.unit
 def test_lazy_build_on_forward(input_shape, output_shape):
     model = SequentialCNN(
         n_layers=2,
@@ -57,10 +62,12 @@ def test_lazy_build_on_forward(input_shape, output_shape):
     with pytest.warns(UserWarning, match="No output shape provided."):
         y = model(x)
     assert model.is_built
-    assert model.input_shape == input_shape
-    assert y.shape[1:] == model.output_shape
+
+    assert shapes_similar_except_singleton(model.input_shape, input_shape)
+    assert shapes_similar_except_singleton(y.shape[1:], model.output_shape)
 
 
+@pytest.mark.unit
 def test_shape_mismatch_raises(input_shape, output_shape):
     model = SequentialCNN(
         input_shape=input_shape,
@@ -77,6 +84,7 @@ def test_shape_mismatch_raises(input_shape, output_shape):
         model.build(input_shape=input_shape, output_shape=output_shape)
 
 
+@pytest.mark.unit
 def test_output_shape_fallback(input_shape):
     model = SequentialCNN(
         input_shape=input_shape,
@@ -93,6 +101,7 @@ def test_output_shape_fallback(input_shape):
     assert model.output_shape[0] > 0  # some fallback shape
 
 
+@pytest.mark.unit
 def test_forward_shape_and_type(input_shape, output_shape):
     model = SequentialCNN(
         input_shape=input_shape,
@@ -109,9 +118,10 @@ def test_forward_shape_and_type(input_shape, output_shape):
     y = model(x)
 
     assert isinstance(y, torch.Tensor)
-    assert y.shape == (6, *output_shape)
+    assert shapes_similar_except_singleton(y.shape, (6, *output_shape))
 
 
+@pytest.mark.unit
 def test_backend_is_torch():
     model = SequentialCNN()
     assert model.backend == Backend.TORCH

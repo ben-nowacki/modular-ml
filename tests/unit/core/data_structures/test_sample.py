@@ -9,6 +9,7 @@ from modularml.utils.backend import Backend
 # ==========================================================
 # Initialization and validation
 # ==========================================================
+@pytest.mark.unit
 def test_valid_sample_initialization(dummy_data_float):
     sample = Sample(
         features={"voltage": dummy_data_float},
@@ -24,6 +25,7 @@ def test_valid_sample_initialization(dummy_data_float):
     assert sample.label == "test_sample"
 
 
+@pytest.mark.unit
 def test_invalid_uuid_type(dummy_data_float):
     with pytest.raises(TypeError, match="Sample ID must be a string"):
         Sample(
@@ -34,6 +36,7 @@ def test_invalid_uuid_type(dummy_data_float):
         )
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("field_name", ["features", "targets", "tags"])
 def test_invalid_data_type_in_fields(dummy_data_float, field_name):
     kwargs = {
@@ -49,6 +52,7 @@ def test_invalid_data_type_in_fields(dummy_data_float, field_name):
 # ==========================================================
 # Property methods
 # ==========================================================
+@pytest.mark.unit
 def test_feature_target_tag_keys(dummy_sample_numeric):
     sample = dummy_sample_numeric
     assert isinstance(sample.feature_keys, list)
@@ -57,6 +61,7 @@ def test_feature_target_tag_keys(dummy_sample_numeric):
     assert isinstance(sample.tag_keys, list)
 
 
+@pytest.mark.unit
 def test_shape_spec_properties(dummy_sample_numeric):
     fspec = dummy_sample_numeric.feature_shape_spec
     tspec = dummy_sample_numeric.target_shape_spec
@@ -66,6 +71,7 @@ def test_shape_spec_properties(dummy_sample_numeric):
     assert set(tspec.shapes.keys()) == set(dummy_sample_numeric.targets.keys())
 
 
+@pytest.mark.unit
 def test_get_feature_and_target_shapes(dummy_sample_numeric):
     key_f = next(iter(dummy_sample_numeric.features))
     key_t = next(iter(dummy_sample_numeric.targets))
@@ -75,6 +81,7 @@ def test_get_feature_and_target_shapes(dummy_sample_numeric):
     assert isinstance(shape_t, tuple)
 
 
+@pytest.mark.unit
 def test_getters_return_correct_data(dummy_sample_numeric):
     key_f = next(iter(dummy_sample_numeric.features))
     key_t = next(iter(dummy_sample_numeric.targets))
@@ -84,6 +91,7 @@ def test_getters_return_correct_data(dummy_sample_numeric):
     assert isinstance(dummy_sample_numeric.get_tags(key_tag), Data)
 
 
+@pytest.mark.unit
 def test_repr_contains_label_and_id(dummy_sample_numeric):
     rep = repr(dummy_sample_numeric)
     assert "Sample(" in rep
@@ -96,6 +104,7 @@ def test_repr_contains_label_and_id(dummy_sample_numeric):
 # ==========================================================
 # Backend conversion and copy
 # ==========================================================
+@pytest.mark.unit
 def test_to_backend_returns_new_sample(dummy_sample_numeric):
     sample = dummy_sample_numeric
     converted = sample.to_backend(Backend.TORCH)
@@ -104,6 +113,7 @@ def test_to_backend_returns_new_sample(dummy_sample_numeric):
     assert all(isinstance(v, Data) for v in converted.features.values())
 
 
+@pytest.mark.unit
 def test_copy_creates_independent_object(dummy_sample_numeric):
     sample = dummy_sample_numeric
     copied = sample.copy()
@@ -122,6 +132,7 @@ def test_copy_creates_independent_object(dummy_sample_numeric):
 # ==========================================================
 # Edge cases
 # ==========================================================
+@pytest.mark.unit
 def test_empty_fields_raise_type_error():
     """If any of features/targets/tags missing Data, raise immediately."""
     with pytest.raises(TypeError):

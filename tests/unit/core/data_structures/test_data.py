@@ -11,24 +11,28 @@ from modularml.utils.data_format import infer_data_type
 # ==========================================================
 # Backend inference
 # ==========================================================
+@pytest.mark.unit
 def test_infer_backend_numpy():
     arr = np.array([1, 2, 3])
     d = Data(arr)
     assert d.backend == Backend.SCIKIT
 
 
+@pytest.mark.unit
 def test_infer_backend_torch():
     t = torch.tensor([1.0, 2.0])
     d = Data(t)
     assert d.backend == Backend.TORCH
 
 
+@pytest.mark.unit
 def test_infer_backend_tensorflow():
     t = tf.constant([1.0, 2.0])
     d = Data(t)
     assert d.backend == Backend.TENSORFLOW
 
 
+@pytest.mark.unit
 def test_infer_backend_primitives():
     d = Data([1, 2, 3])
     assert d.backend == Backend.NONE
@@ -40,6 +44,7 @@ def test_infer_backend_primitives():
     assert d3.backend == Backend.NONE
 
 
+@pytest.mark.unit
 def test_infer_backend_invalid_type():
     class Dummy:
         pass
@@ -51,6 +56,7 @@ def test_infer_backend_invalid_type():
 # ==========================================================
 # Shape / dtype properties
 # ==========================================================
+@pytest.mark.unit
 def test_shape_and_dtype_numpy():
     arr = np.array([[1, 2, 3], [4, 5, 6]], dtype=np.float64)
     d = Data(arr)
@@ -58,6 +64,7 @@ def test_shape_and_dtype_numpy():
     assert d.dtype == np.float64
 
 
+@pytest.mark.unit
 def test_shape_and_dtype_torch():
     t = torch.ones((4, 2), dtype=torch.float32)
     d = Data(t)
@@ -65,6 +72,7 @@ def test_shape_and_dtype_torch():
     assert d.dtype == torch.float32
 
 
+@pytest.mark.unit
 def test_shape_and_dtype_tensorflow():
     t = tf.ones((3, 3), dtype=tf.float64)
     d = Data(t)
@@ -72,6 +80,7 @@ def test_shape_and_dtype_tensorflow():
     assert d.dtype == tf.float64
 
 
+@pytest.mark.unit
 def test_shape_and_dtype_list():
     d = Data([[1, 2], [3, 4]])
     assert d.shape == (2, 2)
@@ -81,6 +90,7 @@ def test_shape_and_dtype_list():
 # ==========================================================
 # Indexing / length / equality
 # ==========================================================
+@pytest.mark.unit
 def test_len_and_getitem_numpy():
     arr = np.arange(10)
     d = Data(arr)
@@ -90,12 +100,14 @@ def test_len_and_getitem_numpy():
     np.testing.assert_array_equal(sliced.value, arr[0:5])
 
 
+@pytest.mark.unit
 def test_len_invalid_type():
     d = Data(5)
     with pytest.raises(TypeError, match="has no length"):
         _ = len(d)
 
 
+@pytest.mark.unit
 def test_equality_and_comparison():
     d1 = Data(np.array([1, 2, 3]))
     d2 = Data(np.array([1, 2, 3]))
@@ -106,6 +118,7 @@ def test_equality_and_comparison():
 # ==========================================================
 # Raw conversions
 # ==========================================================
+@pytest.mark.unit
 def test_to_numpy_from_torch():
     t = torch.tensor([[1.0, 2.0]])
     d = Data(t)
@@ -114,6 +127,7 @@ def test_to_numpy_from_torch():
     np.testing.assert_allclose(np_arr, np.array([[1.0, 2.0]]))
 
 
+@pytest.mark.unit
 def test_to_torch_from_numpy():
     arr = np.array([[1, 2]], dtype=np.float64)
     d = Data(arr)
@@ -122,6 +136,7 @@ def test_to_torch_from_numpy():
     assert torch.allclose(t, torch.tensor([[1.0, 2.0]]))
 
 
+@pytest.mark.unit
 def test_to_tensorflow_from_numpy():
     arr = np.array([[1.0, 2.0]])
     d = Data(arr)
@@ -133,6 +148,7 @@ def test_to_tensorflow_from_numpy():
 # ==========================================================
 # to_backend conversions (dtype inference)
 # ==========================================================
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("val", "expected_type"),
     [
@@ -148,6 +164,7 @@ def test_to_backend_torch_dtype_inference(val, expected_type):
     assert out.dtype == expected_type
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("val", "expected_type"),
     [
@@ -164,6 +181,7 @@ def test_to_backend_tensorflow_dtype_inference(val, expected_type):
     assert out.dtype == expected_type
 
 
+@pytest.mark.unit
 def test_to_backend_scikit_dtype_inference():
     d = Data(np.array(["x", "y"]))
     out = d.to_backend(Backend.SCIKIT)
@@ -171,6 +189,7 @@ def test_to_backend_scikit_dtype_inference():
     assert out.dtype.type == np.str_
 
 
+@pytest.mark.unit
 def test_to_backend_torch_string_raises():
     d = Data(np.array(["a", "b"]))
     with pytest.raises(TypeError, match="Cannot convert string data to PyTorch tensor"):
@@ -180,6 +199,7 @@ def test_to_backend_torch_string_raises():
 # ==========================================================
 # Wrapped conversions
 # ==========================================================
+@pytest.mark.unit
 def test_as_numpy_and_torch_and_tf():
     arr = np.array([1.0, 2.0, 3.0])
     d = Data(arr)
@@ -200,6 +220,7 @@ def test_as_numpy_and_torch_and_tf():
 # ==========================================================
 # Repr / hash / ordering
 # ==========================================================
+@pytest.mark.unit
 def test_repr_and_hash():
     d = Data(np.array([1.0]))
     rep = repr(d)
@@ -208,6 +229,7 @@ def test_repr_and_hash():
     _ = hash(d)  # should not raise
 
 
+@pytest.mark.unit
 def test_comparison_operators():
     d1 = Data(5)
     d2 = Data(3)
@@ -220,6 +242,7 @@ def test_comparison_operators():
 # ==========================================================
 # Integration: infer_data_type consistency
 # ==========================================================
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("val", "expected"),
     [

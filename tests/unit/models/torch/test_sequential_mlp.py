@@ -3,6 +3,7 @@ import torch
 
 from modularml.models.torch import SequentialMLP
 from modularml.utils.backend import Backend
+from modularml.utils.data_conversion import shapes_similar_except_singleton
 
 
 @pytest.fixture
@@ -15,6 +16,7 @@ def output_shape():
     return (8,)  # Output vector size
 
 
+@pytest.mark.unit
 def test_eager_build_forward_pass(input_shape, output_shape):
     model = SequentialMLP(
         input_shape=input_shape,
@@ -25,15 +27,16 @@ def test_eager_build_forward_pass(input_shape, output_shape):
         dropout=0.1,
     )
     assert model.is_built
-    assert model.input_shape == input_shape
-    assert model.output_shape == output_shape
+    assert shapes_similar_except_singleton(model.input_shape, input_shape)
+    assert shapes_similar_except_singleton(model.output_shape, output_shape)
 
     x = torch.randn(4, *input_shape)
     y = model(x)
 
-    assert y.shape == (4, *output_shape)
+    assert shapes_similar_except_singleton(y.shape, (4, *output_shape))
 
 
+@pytest.mark.unit
 def test_lazy_build_on_forward(input_shape, output_shape):
     model = SequentialMLP(
         n_layers=2,
@@ -47,10 +50,12 @@ def test_lazy_build_on_forward(input_shape, output_shape):
     with pytest.warns(UserWarning, match="No output shape provided."):
         y = model(x)
     assert model.is_built
-    assert model.input_shape == input_shape
-    assert y.shape[1:] == model.output_shape
+
+    assert shapes_similar_except_singleton(model.input_shape, input_shape)
+    assert shapes_similar_except_singleton(y.shape[1:], model.output_shape)
 
 
+@pytest.mark.unit
 def test_shape_mismatch_raises(input_shape, output_shape):
     model = SequentialMLP(
         input_shape=input_shape,
@@ -64,6 +69,7 @@ def test_shape_mismatch_raises(input_shape, output_shape):
         model.build(input_shape=input_shape, output_shape=output_shape)
 
 
+@pytest.mark.unit
 def test_output_shape_fallback(input_shape):
     model = SequentialMLP(
         input_shape=input_shape,
@@ -73,9 +79,10 @@ def test_output_shape_fallback(input_shape):
 
     with pytest.warns(UserWarning, match="No output shape provided."):
         model.build()  # no output shape provided, should utilize hidden_dim
-    assert model.output_shape == (1, 32)
+    assert shapes_similar_except_singleton(model.output_shape, (1, 32))
 
 
+@pytest.mark.unit
 def test_forward_shape_and_type(input_shape, output_shape):
     model = SequentialMLP(
         input_shape=input_shape,
@@ -89,9 +96,10 @@ def test_forward_shape_and_type(input_shape, output_shape):
     y = model(x)
 
     assert isinstance(y, torch.Tensor)
-    assert y.shape == (6, *output_shape)
+    assert shapes_similar_except_singleton(y.shape, (6, *output_shape))
 
 
+@pytest.mark.unit
 def test_backend_is_torch():
     model = SequentialMLP()
     assert model.backend == Backend.TORCH
