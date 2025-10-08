@@ -184,10 +184,17 @@ class ConcatStage(MergeStage):
 
         # Apply backend-specific concatentation function (to ensure no breakage of gradients)
         if self._backend == Backend.TORCH:
+            if includes_batch_dim and all(v.ndim < 3 for v in values):
+                values = [v.unsqueeze(1) for v in values]  # (batch, 1, length)
             return torch.concatenate(tensors=values, dim=self.concat_axis + int(includes_batch_dim))
+
         if self._backend == Backend.TENSORFLOW:
+            if includes_batch_dim and all(v.ndim < 3 for v in values):
+                values = [tf.expand_dims(v, axis=1) for v in values]  # (batch, 1, length)
             return tf.concat(values=values, axis=self.concat_axis + int(includes_batch_dim))
         if self._backend == Backend.SCIKIT:
+            if includes_batch_dim and all(v.ndim < 3 for v in values):
+                values = [np.expand_dims(v, axis=1) for v in values]  # (batch, 1, length)
             return np.concatenate(values, axis=self.concat_axis + int(includes_batch_dim))
 
         msg = f"Unsupported backend for concatenation: {self._backend}"
