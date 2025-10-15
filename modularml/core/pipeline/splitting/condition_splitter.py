@@ -4,11 +4,8 @@ import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pyarrow as pa
 
-from modularml.core.data.sample_schema import FEATURES_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
 from modularml.core.pipeline.splitting.base_splitter import BaseSplitter
-from modularml.utils.data_format import ensure_list
 from modularml.utils.exceptions import SubsetOverlapWarning
 
 if TYPE_CHECKING:

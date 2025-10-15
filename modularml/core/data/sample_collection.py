@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
-from modularml.components.shape_spec import ShapeSpec
 from modularml.core.data.sample_schema import (
     DTYPE_POSTFIX,
     FEATURES_COLUMN,
@@ -28,7 +27,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import pandas as pd
-    import pyarrow as pa
 
 
 @dataclass
