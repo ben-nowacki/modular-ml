@@ -10,6 +10,7 @@ class ShapeSpec:
     """Describes per-feature input/output shapes for a node."""
 
     shapes: dict[str, tuple[int, ...]]
+    num_samples: int
 
     # ==================================================
     # Basic properties

@@ -1,7 +1,9 @@
 import warnings
 from abc import ABC, abstractmethod
 
-from modularml.core.graph.shape_spec import ShapeSpec
+from modularml.components.shape_spec import ShapeSpec
+from modularml.core.data.sample_schema import INVALID_LABEL_CHARACTERS
+from modularml.utils.data_format import ensure_list
 from modularml.utils.error_handling import ErrorMode
 from modularml.utils.exceptions import GraphNodeInputError, GraphNodeOutputError
 
@@ -38,33 +40,28 @@ class GraphNode(ABC):
         """
         self._label = label
 
-        # Normalize upstream_nodes
-        if upstream_nodes is None:
-            self._upstream_nodes: list[str] = []
-        elif isinstance(upstream_nodes, str):
-            self._upstream_nodes = [upstream_nodes]
-        elif isinstance(upstream_nodes, list):
-            self._upstream_nodes = upstream_nodes
-        else:
-            msg = f"`upstream_nodes` must be str, list[str], or None. Got: {type(upstream_nodes)}"
-            raise TypeError(msg)
+        # Normalize inputs as lists
+        self._upstream_nodes = ensure_list(upstream_nodes)
+        self._downstream_nodes = ensure_list(downstream_nodes)
 
+        # Validate label and connections
+        self._validate_label()
+        self._validate_connections()
+
+    def _validate_label(self):
+        if any(ch in self.label for ch in INVALID_LABEL_CHARACTERS):
+            msg = (
+                f"The label contains invalid characters: `{self.label}`. "
+                f"Label cannot contain any of: {list(INVALID_LABEL_CHARACTERS)}"
+            )
+            raise ValueError(msg)
+
+    def _validate_connections(self):
         # Enforce max_upstream_nodes
         if self.max_upstream_nodes is not None and len(self._upstream_nodes) > self.max_upstream_nodes:
             msg = f"{len(self._upstream_nodes)} upstream_nodes provided, but max_upstream_nodes = {self.max_upstream_nodes}"
             if self._handle_fatal_error(GraphNodeInputError, msg, ErrorMode.RAISE) is False:
                 self._upstream_nodes = self._upstream_nodes[: self.max_upstream_nodes]
-
-        # Normalize downstream_nodes
-        if downstream_nodes is None:
-            self._downstream_nodes: list[str] = []
-        elif isinstance(downstream_nodes, str):
-            self._downstream_nodes = [downstream_nodes]
-        elif isinstance(downstream_nodes, list):
-            self._downstream_nodes = downstream_nodes
-        else:
-            msg = f"`downstream_nodes` must be str, list[str], or None. Got: {type(downstream_nodes)}"
-            raise TypeError(msg)
 
         # Enforce max_downstream_nodes
         if self.max_downstream_nodes is not None and len(self._downstream_nodes) > self.max_downstream_nodes:
@@ -87,6 +84,7 @@ class GraphNode(ABC):
     def label(self, new_label: str):
         """Get or set the unique label for this node."""
         self._label = new_label
+        self._validate_label()
 
     @property
     def max_upstream_nodes(self) -> int | None:
