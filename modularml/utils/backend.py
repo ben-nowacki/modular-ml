@@ -52,7 +52,7 @@ def infer_backend(obj: Any) -> Backend:
 
     """
     try:
-        import torch  # noqa: PLC0415
+        import torch
 
         if isinstance(obj, torch.Tensor | torch.nn.Module) or (
             isinstance(obj, type) and issubclass(obj, torch.nn.Module)
@@ -62,7 +62,7 @@ def infer_backend(obj: Any) -> Backend:
         pass
 
     try:
-        import tensorflow as tf  # noqa: PLC0415
+        import tensorflow as tf
 
         if isinstance(obj, tf.Tensor | tf.keras.Model) or (isinstance(obj, type) and issubclass(obj, tf.keras.Model)):
             return Backend.TENSORFLOW
@@ -70,7 +70,7 @@ def infer_backend(obj: Any) -> Backend:
         pass
 
     try:
-        from sklearn.base import BaseEstimator  # noqa: PLC0415
+        from sklearn.base import BaseEstimator
 
         if isinstance(obj, BaseEstimator) or (isinstance(obj, type) and issubclass(obj, BaseEstimator)):
             return Backend.SCIKIT
