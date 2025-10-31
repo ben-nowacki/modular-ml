@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modularml.core.pipeline.splitting.base_splitter import BaseSplitter
-from modularml.utils.exceptions import SubsetOverlapWarning
+from modularml.utils.exceptions import SplitOverlapWarning
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -82,14 +82,11 @@ class ConditionSplitter(BaseSplitter):
                 A mapping of subset label to either FeatureSetViews or index arrays.
 
         """
-        # Convert view to FeatureSet so can use .filter method
-        fs_view = view.to_featureset()
-
         split_indices: dict[str, np.ndarray] = {}
         sample_to_subsets: dict[int, list[str]] = {}
         for sub_label, sub_conds in self.conditions.items():
             # Filter the source FeatureSet directly
-            filt_view = fs_view.filter(**sub_conds)
+            filt_view = view.filter(**sub_conds)
             filt_view.label = sub_label
 
             # Map absolute indices of filtered view to relative indices of given view
@@ -119,7 +116,7 @@ class ConditionSplitter(BaseSplitter):
             )
             warnings.warn(
                 msg,
-                category=SubsetOverlapWarning,
+                category=SplitOverlapWarning,
                 stacklevel=2,
             )
 
