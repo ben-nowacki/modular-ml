@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import ast
 import uuid
+from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pyarrow as pa
 
 from modularml.core.data.sample_schema import (
@@ -567,3 +570,55 @@ class SampleCollection:
 
         """
         return self.table.flatten().to_pandas()
+
+
+def _evaluate_filter_conditions(
+    collection: SampleCollection,
+    **conditions: dict[str, Any | list[Any] | Callable],
+) -> np.ndarray:
+    """
+    Evaluate filtering conditions and return a boolean mask of matching rows.
+
+    Used internally by both FeatureSet.filter() and FeatureSetView.filter().
+    """
+    # Start with all all rows included
+    mask = np.ones(collection.n_samples, dtype=bool)
+
+    # Check available keys
+    # We want to search this in tag -> feature -> target order
+    ordered_domains = [
+        (TAGS_COLUMN, collection.tag_keys),
+        (FEATURES_COLUMN, collection.feature_keys),
+        (TARGETS_COLUMN, collection.target_keys),
+    ]
+    all_domains = OrderedDict(ordered_domains)
+
+    for key, cond in conditions.items():
+        # Find pyarrow domain that matches this key (use first match)
+        domain_of_key = next((d for d, d_keys in all_domains.items() if key in d_keys), None)
+        if domain_of_key is None:
+            msg = (
+                f"Key '{key}' not found in features, targets, or tags. "
+                f"Use `.tag_keys`, `.feature_keys`, or `.target_keys` to see available keys."
+            )
+            raise KeyError(msg)
+
+        # Filter pyarrow table to column specified by 'key'
+        col_data = collection._domain_dataframe(domain=domain_of_key, keys=[key]).to_numpy()
+
+        # Evaluate condition
+        if callable(cond):
+            try:
+                local_mask = np.asarray(cond(col_data))
+            except Exception as e:
+                msg = f"Failed to apply callable conditon for key '{key}': {e}"
+                raise ValueError(msg) from e
+        elif isinstance(cond, list | tuple | set | np.ndarray):
+            local_mask = np.isin(col_data, cond, assume_unique=False)
+        else:
+            local_mask = col_data == cond
+
+        # Combine with global mask
+        mask &= local_mask.reshape(collection.n_samples)
+
+    return mask
