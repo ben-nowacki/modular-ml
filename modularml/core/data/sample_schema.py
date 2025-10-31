@@ -80,25 +80,9 @@ class SampleSchema:
             msg = f"Schema keys must be unique across features/targets/tags. Duplicated keys: {sorted(duplicates)}"
             raise ValueError(msg)
 
-        # Check for invalid characters
-        invalid_chars = tuple(INVALID_LABEL_CHARACTERS)
-        invalid_keys: list[str] = []
-        for mapping in (self.features, self.targets, self.tags):
-            for name in mapping:
-                if any(name.find(ch) != -1 for ch in invalid_chars):
-                    invalid_keys.append(name)
-        if invalid_keys:
-            msg = (
-                f"The following keys contain invalid characters: {', '.join(invalid_keys)}. "
-                f"Keys cannot contain any of: {list(INVALID_LABEL_CHARACTERS)}"
-            )
-            raise ValueError(msg)
-
-        # Ensure reserved name not used
-        for domain in (self.features, self.targets, self.tags):
-            if SAMPLE_ID_COLUMN in domain:
-                msg = f"`{SAMPLE_ID_COLUMN}` is a reserved column name and cannot appear in schema domains."
-                raise ValueError(msg)
+        # Check for invalid characters and reserved names
+        all_keys = set(self.features.keys()) | set(self.targets.keys()) | set(self.tags.keys())
+        validate_str_list(list(all_keys))
 
     # =================================================================
     # Domain utility methods
@@ -226,3 +210,69 @@ def ensure_sample_id_column(table: pa.Table) -> pa.Table:
     n = table.num_rows
     sample_ids = pa.array([str(uuid.uuid4()) for _ in range(n)], type=pa.string())
     return table.append_column(SAMPLE_ID_COLUMN, sample_ids)
+
+
+def validate_str_list(keys: list[str]):
+    """
+    Validate a list of string keys for naming consistency and safety.
+
+    Description:
+        Ensures that all provided keys meet naming requirements for use in
+        FeatureSet, SampleCollection, or related schema contexts. This function
+        enforces:
+          - Uniqueness of all keys.
+          - Absence of invalid characters (see `INVALID_LABEL_CHARACTERS`).
+          - Exclusion of reserved schema keywords (e.g., `SAMPLE_ID_COLUMN`,
+            `FEATURES_COLUMN`, etc.).
+          - Exclusion of internal metadata prefixes/postfixes used in column
+            naming conventions.
+
+    Args:
+        keys (list[str]):
+            List of strings to validate.
+
+    Raises:
+        ValueError:
+            If any of the following conditions occur:
+              - Duplicate keys are detected.
+              - Keys contain invalid characters.
+              - Keys use reserved schema names or internal label conventions.
+
+    Example:
+        ```python
+        validate_str_list(["cell_id", "cycle_number", "soh"])  # OK
+        validate_str_list(["cell.id", "cycle_number"])  # Raises ValueError
+        ```
+
+    """
+    # Detect duplicate elements in keys
+    if len(set(keys)) != len(keys):
+        msg = "Duplicate elements exist in `keys`."
+        raise ValueError(msg)
+
+    # Check invalid characters
+    invalid_chars = tuple(INVALID_LABEL_CHARACTERS)
+    invalid_keys: list[str] = []
+    for k in keys:
+        if any(k.find(ch) != -1 for ch in invalid_chars):
+            invalid_keys.append(k)
+    if invalid_keys:
+        msg = (
+            f"The following keys contain invalid characters: {', '.join(invalid_keys)}. "
+            f"Keys cannot contain any of: {list(INVALID_LABEL_CHARACTERS)}"
+        )
+        raise ValueError(msg)
+
+    # Ensure reserved names are not used
+    for res_key in (
+        SAMPLE_ID_COLUMN,
+        FEATURES_COLUMN,
+        TARGETS_COLUMN,
+        TAGS_COLUMN,
+        METADATA_PREFIX,
+        DTYPE_POSTFIX,
+        SHAPE_POSTFIX,
+    ):
+        if res_key in keys:
+            msg = f"`{res_key}` is a reserved keyword and cannot be used."
+            raise ValueError(msg)
