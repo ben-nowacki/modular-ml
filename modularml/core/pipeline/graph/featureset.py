@@ -18,7 +18,7 @@ from modularml.core.data.sample_collection import SampleCollection
 from modularml.core.data.sample_schema import FEATURES_COLUMN, SAMPLE_ID_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
 from modularml.utils.data_conversion import to_numpy
 from modularml.utils.data_format import DataFormat, ensure_list
-from modularml.utils.exceptions import SampleLoadError, SubsetOverlapWarning
+from modularml.utils.exceptions import SampleLoadError, SplitOverlapWarning
 from modularml.utils.pyarrow_data import build_sample_schema_table
 
 if TYPE_CHECKING:
@@ -107,7 +107,7 @@ class FeatureSet(SampleCollection, GraphNode):
         SampleCollection.__init__(self, table=table, schema=schema)
         GraphNode.__init__(self, label=label)
 
-        self._subsets: dict[str, FeatureSetView] = {}
+        self._splits: dict[str, FeatureSetView] = {}
         # self._split_configs: list[SplitterRecord] = []
         # self._transform_logs: dict[str, list[TransformRecord]] = {
         #     "features": [],
@@ -328,16 +328,16 @@ class FeatureSet(SampleCollection, GraphNode):
     # FeatureSet Properties & Dunders
     # ==========================================
     @property
-    def available_subsets(self) -> list[str]:
-        return list(self._subsets.keys())
+    def available_splits(self) -> list[str]:
+        return list(self._splits.keys())
 
     @property
-    def subsets(self) -> dict[str, FeatureSetView]:
-        return self._subsets
+    def splits(self) -> dict[str, FeatureSetView]:
+        return self._splits
 
     @property
-    def n_subsets(self) -> int:
-        return len(self.available_subsets)
+    def n_splits(self) -> int:
+        return len(self.available_splits)
 
     def __len__(self) -> int:
         """Returns number of samples in this FeatureSet."""
@@ -347,66 +347,66 @@ class FeatureSet(SampleCollection, GraphNode):
         return f"FeatureSet(label='{self.label}', n_samples={len(self)})"
 
     # ==========================================
-    # Subset (FeatureSetView) Utilities
+    # Split (FeatureSetView) Utilities
     # ==========================================
-    def get_subset(self, name: str) -> FeatureSetView:
+    def get_split(self, name: str) -> FeatureSetView:
         """
-        Returns the specified subset (a FeatureSetView) of this FeatureSet.
+        Returns the specified split (a FeatureSetView) of this FeatureSet.
 
-        Use `FeatureSet.available_subsets` to view available subset names.
+        Use `FeatureSet.available_splits` to view available split names.
 
         Args:
-            name (str): Subset name to return.
+            name (str): Split name to return.
 
         Returns:
             FeatureSetView: A named view of this FeatureSet.
 
         """
-        if name not in self._subsets:
+        if name not in self._splits:
             msg = (
-                f"`{name}` is not a valid subset of {self.label}. "
-                f"Use `FeatureSet.available_subsets` to view available subset names."
+                f"`{name}` is not a valid split of {self.label}. "
+                f"Use `FeatureSet.available_splits` to view available split names."
             )
             raise ValueError(msg)
 
-        return self._subsets[name]
+        return self._splits[name]
 
-    def add_subset(self, subset: FeatureSetView):
+    def add_split(self, split: FeatureSetView):
         """
         Adds a new FeatureSetView.
 
         Args:
-            subset (FeatureSetView): The new view to add.
+            split (FeatureSetView): The new view to add.
 
         """
-        # Check that new subset name is unique
-        if subset.label is None or subset.label in self._subsets:
-            msg = f"Subset label ('{subset.label}') is missing or already exists."
+        # Check that new split name is unique
+        if split.label is None or split.label in self._splits:
+            msg = f"Split label ('{split.label}') is missing or already exists."
             raise ValueError(msg)
 
-        # Check that new subset is a view of this FeatureSet
-        if subset.source is not self:
-            msg = "Subset must be a view of this FeatureSet."
+        # Check that new split is a view of this FeatureSet
+        if split.source is not self:
+            msg = "Split must be a view of this FeatureSet."
             raise ValueError(msg)
 
-        # Check overlap with existing subsets
-        for sub in self._subsets.values():
-            if not subset.is_disjoint_with(sub):
-                overlap: list[int] = subset.get_overlap_with(sub)
+        # Check overlap with existing splits
+        for sub in self._splits.values():
+            if not split.is_disjoint_with(sub):
+                overlap: list[int] = split.get_overlap_with(sub)
                 warnings.warn(
-                    f"\nSubset '{subset.label}' has overlapping samples with existing subset '{sub.label}'.\n"
+                    f"\nSplit '{split.label}' has overlapping samples with existing split '{sub.label}'.\n"
                     f"    (n_overlap = {len(overlap)})\n"
-                    f"    Consider checking for disjoint splits or revising your conditions.",
-                    SubsetOverlapWarning,
+                    f"    Consider checking for disjoint split or revising your conditions.",
+                    SplitOverlapWarning,
                     stacklevel=2,
                 )
 
-        # Add to internal list of subsets
-        self._subsets[subset.label] = subset
+        # Add to internal list of splits
+        self._splits[split.label] = split
 
-    def clear_subsets(self) -> None:
-        """Remove all previously defined subsets."""
-        self._subsets.clear()
+    def clear_splits(self) -> None:
+        """Remove all previously defined splits."""
+        self._splits.clear()
         # self._split_configs = []
 
     # ================================================================================
@@ -538,3 +538,11 @@ class FeatureSet(SampleCollection, GraphNode):
             indices=np.arange(self.n_samples),
             label=self.label,
         )
+
+
+# TASKS:
+# - Splitters can be run directly, but not impemented into FeatureSet yet.
+#   - Need to track splitting history and available splits
+
+# - No support for feature transforms
+#   - Do we use a second copy of SampleCollection? How when inherits?
