@@ -135,6 +135,30 @@ class SampleCollection:
         """List of tag column names defined in the schema."""
         return self.schema.domain_keys(TAGS_COLUMN)
 
+    @property
+    def feature_shapes(self) -> dict[str, tuple[int, ...]]:
+        return self.column_shapes(domain="features")
+
+    @property
+    def target_shapes(self) -> dict[str, tuple[int, ...]]:
+        return self.column_shapes(domain="targets")
+
+    @property
+    def tag_shapes(self) -> dict[str, tuple[int, ...]]:
+        return self.column_shapes(domain="tags")
+
+    @property
+    def feature_dtypes(self) -> dict[str, tuple[int, ...]]:
+        return self.column_dtypes(domain="features")
+
+    @property
+    def target_dtypes(self) -> dict[str, tuple[int, ...]]:
+        return self.column_dtypes(domain="targets")
+
+    @property
+    def tag_dtypes(self) -> dict[str, tuple[int, ...]]:
+        return self.column_dtypes(domain="tags")
+
     # =====================================================================
     # Metadata embedding and access
     # =====================================================================
