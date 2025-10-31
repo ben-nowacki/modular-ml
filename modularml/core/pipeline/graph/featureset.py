@@ -5,7 +5,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -14,11 +14,19 @@ import pyarrow as pa
 # from modularml.core.graph.feature_subset import FeatureSubset
 # from modularml.core.transforms.feature_transform import FeatureTransform
 from modularml.components.graph_node import GraphNode, ShapeSpec
-from modularml.core.data.sample_collection import SampleCollection
-from modularml.core.data.sample_schema import FEATURES_COLUMN, SAMPLE_ID_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
+from modularml.core.data.sample_collection import SampleCollection, _evaluate_filter_conditions
+from modularml.core.data.sample_schema import (
+    FEATURES_COLUMN,
+    SAMPLE_ID_COLUMN,
+    TAGS_COLUMN,
+    TARGETS_COLUMN,
+    validate_str_list,
+)
+from modularml.core.pipeline.splitting.base_splitter import BaseSplitter
 from modularml.utils.data_conversion import to_numpy
 from modularml.utils.data_format import DataFormat, ensure_list
 from modularml.utils.exceptions import SampleLoadError, SplitOverlapWarning
+from modularml.utils.formatting import flatten_dict_paths
 from modularml.utils.pyarrow_data import build_sample_schema_table
 
 if TYPE_CHECKING:
@@ -90,13 +98,16 @@ if TYPE_CHECKING:
 # ============================================================================
 # FeatureSet
 # ============================================================================
-class FeatureSet(SampleCollection, GraphNode):
+class FeatureSet(GraphNode):
     """
-    Arrow-backed FeatureSet wrapping a SampleCollection.
+    Arrow-backed FeatureSet.
 
     Acts as the first data node in a ModularML pipeline. Contains data,
     subset definitions, and transformation/splitting logic.
     """
+
+    _default_collection_key: str = "original"
+    _transformed_collection_key: str = "transformed"
 
     def __init__(
         self,
@@ -104,10 +115,20 @@ class FeatureSet(SampleCollection, GraphNode):
         table: pa.Table,
         schema: SampleSchema | None = None,
     ):
-        SampleCollection.__init__(self, table=table, schema=schema)
-        GraphNode.__init__(self, label=label)
+        super().__init__(label=label)
+        # Construct new FeatureSet using some original (ie unscaled) data (passed as PyArrow.Table)
+        # Table can have its own schema, otherwise uses the default SampleSchema class
 
-        self._splits: dict[str, FeatureSetView] = {}
+        # Stores the underlying data as keyed versions
+        self._collections: dict[str, SampleCollection] = {
+            self._default_collection_key: SampleCollection(table=table, schema=schema),
+        }
+        self._active_collection: str | None = self._default_collection_key
+
+        # Stores splits of any sample collection version
+        # Outer dict keyed by collection, inner by split name
+        self._splits: dict[str, dict[str, FeatureSetView]] = {}
+
         # self._split_configs: list[SplitterRecord] = []
         # self._transform_logs: dict[str, list[TransformRecord]] = {
         #     "features": [],
@@ -328,48 +349,257 @@ class FeatureSet(SampleCollection, GraphNode):
     # FeatureSet Properties & Dunders
     # ==========================================
     @property
-    def available_splits(self) -> list[str]:
-        return list(self._splits.keys())
+    def available_collections(self) -> list[str]:
+        return list(self._collections.keys())
 
     @property
-    def splits(self) -> dict[str, FeatureSetView]:
-        return self._splits
+    def available_splits(self) -> dict[str, list[str]]:
+        """
+        All available splits organized by collection.
+
+        Returns:
+            dict[str, list[str]]:
+                Mapping from collection key to list of split names.
+
+        Example:
+            ```python
+            fs.available_splits
+            # -> {"original": ["train", "val"], "transformed": ["train", "val", "test"]}
+            ```
+
+        """
+        all_splits = {k: list(self._splits[k].keys()) for k in self._splits}
+        return all_splits
+
+    def get_available_splits(self, collection_key: str | None = None) -> list[str]:
+        """
+        Get available splits for a specific collection.
+
+        Args:
+            collection_key (str | None, optional):
+                Name of the collection to query. If omitted, uses the active
+                collection (`self._active_key`) but raises a warning recommending
+                explicit specification.
+
+        Returns:
+            list[str]: List of split names for the specified collection.
+
+        Raises:
+            KeyError: If the collection does not exist.
+
+        Example:
+            ```python
+            fs.get_available_splits("original")
+            fs.get_available_splits()  # Infers active collection (and raises warning)
+            ```
+
+        """
+        # Handle implicit collection access
+        if collection_key is None:
+            if self._active_collection is None:
+                raise KeyError("No active collection set; please specify `collection_key` explicitly.")
+            warnings.warn(
+                f"Using active collection '{self._active_collection}' implicitly. Explicitly specify `collection_key` for clarity.",
+                category=UserWarning,
+                stacklevel=2,
+            )
+            collection_key = self._active_collection
+
+        try:
+            return list(self._splits[collection_key].keys())
+        except KeyError:
+            msg = f"Collection '{collection_key}' not found in FeatureSet. Available: {list(self._collections.keys())}"
+            raise KeyError(msg) from None
 
     @property
-    def n_splits(self) -> int:
-        return len(self.available_splits)
+    def n_splits(self) -> dict[str, int]:
+        """
+        Number of available splits per collection.
+
+        Returns:
+            dict[str, int]:
+                Mapping from collection key to number of defined splits.
+
+        Example:
+            ```python
+            fs.n_splits
+            # -> {"original": 2, "transformed": 3}
+            ```
+
+        """
+        return {coll: len(self._splits[coll]) for coll in self._splits}
+
+    def get_n_splits(self, collection_key: str | None = None) -> int:
+        """
+        Get the number of splits in a specific collection.
+
+        Args:
+            collection_key (str | None, optional):
+                Name of the collection to query. If omitted, uses the active
+                collection (`self._active_key`) but raises a warning recommending
+                explicit specification.
+
+        Returns:
+            int: Number of splits in the specified collection.
+
+        Raises:
+            KeyError: If the collection does not exist.
+
+        Example:
+            ```python
+            fs.get_n_splits("original")
+            fs.get_n_splits()  # Infers active collection (and raises warning)
+            ```
+
+        """
+        # Handle implicit collection access
+        if collection_key is None:
+            active = getattr(self, "_active_key", None)
+            if active is None:
+                raise KeyError("No active collection set; please specify `collection_key` explicitly.")
+            warnings.warn(
+                f"Using active collection '{active}' implicitly. Explicitly specify `collection_key` for clarity.",
+                category=UserWarning,
+                stacklevel=2,
+            )
+            collection_key = active
+
+        try:
+            return len(self._splits[collection_key])
+        except KeyError:
+            msg = f"Collection '{collection_key}' not found in FeatureSet. Available: {list(self._collections.keys())}"
+            raise KeyError(msg) from None
+
+    def __getitem__(self, key: str) -> FeatureSetView:
+        """Alias for get_split(key)."""
+        return self.get_split(key)
 
     def __len__(self) -> int:
         """Returns number of samples in this FeatureSet."""
-        return self.n_samples
+        return self._collections[self._default_collection_key].n_samples
 
     def __repr__(self):
         return f"FeatureSet(label='{self.label}', n_samples={len(self)})"
 
     # ==========================================
+    # SampleCollection Accessors
+    # ==========================================
+    @property
+    def original(self) -> SampleCollection:
+        return self._collections[self._default_collection_key]
+
+    @property
+    def transformed(self) -> SampleCollection:
+        return self._collections[self._transformed_collection_key]
+
+    @property
+    def active(self) -> SampleCollection:
+        return self._collections[self._active_key]
+
+    def set_active(self, collection_key: str) -> None:
+        if collection_key not in self._collections:
+            msg = f"No SampleCollection named '{collection_key}'"
+            raise KeyError(msg)
+        self._active_key = collection_key
+
+    def get_collection(self, collection_key: str) -> SampleCollection:
+        if collection_key not in self._collections:
+            msg = f"No SampleCollection named '{collection_key}'"
+            raise KeyError(msg)
+        return self._collections[collection_key]
+
+    # ==========================================
     # Split (FeatureSetView) Utilities
     # ==========================================
-    def get_split(self, name: str) -> FeatureSetView:
+    def get_split(
+        self,
+        key: str | None = None,
+        *,
+        collection_key: str | None = None,
+        split_name: str | None = None,
+    ) -> FeatureSetView:
         """
-        Returns the specified split (a FeatureSetView) of this FeatureSet.
+        Retrieve a split (FeatureSetView) by name or namespace.
 
-        Use `FeatureSet.available_splits` to view available split names.
+        Description:
+            Provides flexible lookup for FeatureSet splits, supporting several
+            access styles while maintaining clear semantics:
+            1. Explicit (recommended)
+                `get_split(collection_key="original", split_name="train")`
+                Retrieves the "train" split from the "original" collection.
+            2. Namespaced key
+                `get_split("original.train")`
+                Automatically parses the dotted key into ("original", "train").
+            3. Implicit active collection
+                `get_split("train")`
+                Uses the active collection key (`self._active_key`) implicitly.
+                This is allowed but raises a warning recommending explicit usage.
 
         Args:
-            name (str): Split name to return.
+            key (str | None, optional):
+                A single key string. May be a dotted name ("original.train")
+                or a bare split name ("train"), in which case the active collection
+                is assumed.
+            collection_key (str | None, optional):
+                Name of the collection to query (e.g., "original").
+                Must be provided if `key` is not given.
+            split_name (str | None, optional):
+                Name of the split (e.g., "train"). Must be provided when using
+                explicit access mode.
 
         Returns:
-            FeatureSetView: A named view of this FeatureSet.
+            FeatureSetView:
+                The requested FeatureSetView.
+
+        Raises:
+            ValueError:
+                If argument combinations are invalid or ambiguous.
+            KeyError:
+                If the requested split or collection does not exist.
+
+        Example:
+            ```python
+            fs.get_split(collection_key="original", split_name="train")  # recommended
+            fs.get_split("original.train")  # shorthand
+            fs.get_split("train")  # infers active collection (warning raised)
+            ```
 
         """
-        if name not in self._splits:
-            msg = (
-                f"`{name}` is not a valid split of {self.label}. "
-                f"Use `FeatureSet.available_splits` to view available split names."
-            )
-            raise ValueError(msg)
+        # Validate argument combinations
+        provided = [arg is not None for arg in (key, collection_key, split_name)]
+        if sum(provided) == 0:
+            raise ValueError("Must provide either `key` or (`collection_key` + `split_name`).")
+        if key and (collection_key or split_name):
+            raise ValueError("Cannot mix positional `key` with explicit `collection_key` or `split_name`.")
 
-        return self._splits[name]
+        # Case 1: single composite or bare key
+        if key is not None:
+            if "." in key:  # e.g. "original.train"
+                coll, split = key.split(".", 1)
+            else:
+                coll = self._active_collection
+                if coll is None:
+                    msg = f"No active collection defined. Explicitly specify collection_key when calling get_split('{key}')."
+                    raise ValueError(msg)
+                warnings.warn(
+                    f"Inferred active collection '{coll}' for split '{key}'. "
+                    "This is allowed but explicit specification is recommended.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                split = key
+        else:
+            # Case 2: fully explicit
+            if not (collection_key and split_name):
+                raise ValueError("Must provide both `collection_key` and `split_name` for explicit access.")
+            coll, split = collection_key, split_name
+
+        # Lookup
+        try:
+            return self._splits[coll][split]
+        except KeyError:
+            msg = f"Split '{split}' not found in collection '{coll}'. Available: {self.available_splits}"
+            raise KeyError(msg) from None
 
     def add_split(self, split: FeatureSetView):
         """
@@ -379,45 +609,76 @@ class FeatureSet(SampleCollection, GraphNode):
             split (FeatureSetView): The new view to add.
 
         """
-        # Check that new split name is unique
-        if split.label is None or split.label in self._splits:
+        # Check that split references this instance and collection exists
+        if split.source is not self:
+            msg = f"New split `{split.label}` is not a view of this FeatureSet instance."
+            raise ValueError(msg)
+        if split.collection_key not in self._collections:
+            msg = (
+                f"New split `{split.label}` references a collection that does not exist in this FeatureSet: "
+                f"`{split.collection_key}`."
+            )
+            raise ValueError(msg)
+
+        # Check that split name is unique
+        if split.collection_key not in self._splits:
+            self._splits[split.collection_key] = {}
+        used_split_names = self.get_available_splits(collection_key=split.collection_key)
+        if split.label is None or split.label in used_split_names:
             msg = f"Split label ('{split.label}') is missing or already exists."
             raise ValueError(msg)
 
-        # Check that new split is a view of this FeatureSet
-        if split.source is not self:
-            msg = "Split must be a view of this FeatureSet."
-            raise ValueError(msg)
+        # Check that new split name follows naming conventions
+        try:
+            validate_str_list(used_split_names + split.label)
+        except ValueError as e:
+            msg = f"Failed to add new split `{split.label}`. {e}"
+            raise RuntimeError(msg) from e
 
-        # Check overlap with existing splits
-        for sub in self._splits.values():
-            if not split.is_disjoint_with(sub):
-                overlap: list[int] = split.get_overlap_with(sub)
+        # Check overlap with existing splits (only within the same collection)
+        for existing_split in self._splits[split.collection_key].values():
+            if not split.is_disjoint_with(existing_split):
+                overlap: list[int] = split.get_overlap_with(existing_split)
                 warnings.warn(
-                    f"\nSplit '{split.label}' has overlapping samples with existing split '{sub.label}'.\n"
+                    f"\nSplit '{split.label}' has overlapping samples with existing split '{existing_split.label}'.\n"
                     f"    (n_overlap = {len(overlap)})\n"
                     f"    Consider checking for disjoint split or revising your conditions.",
                     SplitOverlapWarning,
                     stacklevel=2,
                 )
 
-        # Add to internal list of splits
-        self._splits[split.label] = split
+        # Register new split
+        self._splits[split.collection_key][split.label] = split
 
-    def clear_splits(self) -> None:
-        """Remove all previously defined splits."""
-        self._splits.clear()
-        # self._split_configs = []
+        # Update active collection
+        self.set_active(split.collection_key)
+
+    def clear_splits(self, collection_key: str | None = None) -> None:
+        """
+        Removes all previously defined splits.
+
+        Args:
+            collection_key (str | None, optional):
+                If provided, clears splits only for that collection.
+                If None, clears all splits across all collections.
+
+        """
+        if collection_key is None:
+            self._splits.clear()
+        else:
+            self._splits.pop(collection_key, None)
 
     # ================================================================================
     # Splitting Methods
     # ================================================================================
     def filter(
         self,
+        *,
+        collection_key: str | None = None,
         **conditions: dict[str, Any | list[Any], Callable],
     ) -> FeatureSetView | None:
         """
-        Create a filtered view of this FeatureSet based on tag, feature, or target conditions.
+        Create a filtered view over a specific collection based on tag, feature, or target conditions.
 
         Description:
             Filters the underlying Arrow table according to key-value conditions \
@@ -431,6 +692,8 @@ class FeatureSet(SampleCollection, GraphNode):
             of the current FeatureSet (without copying underlying data).
 
         Args:
+            collection_key (str | None, optional):
+                The collection to filter. If None, uses the inferred active collection.
             **conditions:
                 Mapping of column names (from any domain) to filter criteria.
                 Values may be:
@@ -472,46 +735,17 @@ class FeatureSet(SampleCollection, GraphNode):
         """
         from modularml.core.data.featureset_view import FeatureSetView
 
-        # Start with all rows included
-        mask = np.ones(self.n_samples, dtype=bool)
+        # Resolve target collection
+        if collection_key is None:
+            if self._active_collection is None:
+                raise KeyError("No active collection set; please specify `collection_key`.")
+            collection_key = self._active_collection
 
-        # Check available keys
-        # We want to search this in tag -> feature -> target order
-        ordered_domains = [
-            (TAGS_COLUMN, self.tag_keys),
-            (FEATURES_COLUMN, self.feature_keys),
-            (TARGETS_COLUMN, self.target_keys),
-        ]
-        all_domains = OrderedDict(ordered_domains)
-
-        for key, cond in conditions.items():
-            # Find pyarrow domain that matches this key (use first match)
-            domain_of_key = next(d for d, d_keys in all_domains.items() if key in d_keys)
-            if domain_of_key is None:
-                msg = (
-                    f"Key '{key}' not found in features, targets, or tags. "
-                    f"Use `.tag_keys`, `.feature_keys`, or `.target_keys` to see all available keys."
-                )
-                raise KeyError(msg)
-
-            # Filter pyarrow table to column specified by 'key'
-            col_data = self._domain_dataframe(domain=domain_of_key, keys=[key]).to_numpy()
-
-            # Evaluate condition
-            if callable(cond):
-                try:
-                    local_mask = np.asarray(cond(col_data))
-                except Exception as e:
-                    msg = f"Failed to apply callable conditon for key '{key}': {e}"
-                    raise ValueError(msg) from e
-            elif isinstance(cond, list | tuple | set | np.ndarray):
-                local_mask = np.isin(col_data, cond, assume_unique=False)
-            else:
-                local_mask = col_data == cond
-
-            # Combine with global mask
-            local_mask = local_mask.reshape(self.n_samples)
-            mask &= local_mask
+        # Get mask (np.ndarry of collection indices) using conditions
+        mask = _evaluate_filter_conditions(
+            collection=self._collections[collection_key],
+            conditions=conditions,
+        )
 
         # Convert mask to indices
         selected_indices = np.where(mask)[0]
@@ -525,24 +759,239 @@ class FeatureSet(SampleCollection, GraphNode):
         # Build FeatureSetView using indices
         return FeatureSetView(
             source=self,
+            collection_key=collection_key,
             indices=selected_indices,
             label="filtered",
         )
 
-    def _as_view(self) -> FeatureSetView:
-        """Creates a view over the entire FeatureSet."""
+    def _as_view(self, collection_key: str | None = None) -> FeatureSetView:
+        """
+        Create a full FeatureSetView over a specific collection.
+
+        Args:
+            collection_key (str | None, optional):
+                The name of the collection to view.
+                If None, uses the inferred active collection.
+
+        Returns:
+            FeatureSetView: A view referencing all rows of the given collection.
+
+        """
         from modularml.core.data.featureset_view import FeatureSetView
 
+        if collection_key is None:
+            if self._active_collection is None:
+                raise KeyError("No active collection set; please specify `collection_key`.")
+            collection_key = self._active_collection
+
+        coll = self._collections[collection_key]
         return FeatureSetView(
             source=self,
-            indices=np.arange(self.n_samples),
-            label=self.label,
+            collection_key=collection_key,
+            indices=np.arange(coll.n_samples),
+            label=f"{collection_key}_view",
         )
 
+    def split(
+        self,
+        splitter: BaseSplitter,
+        *,
+        collection_key: str | None = None,
+        return_views: bool = False,
+        register: bool = True,
+    ) -> list[FeatureSetView] | None:
+        """
+        Apply a splitter to this FeatureSet (or one of its collections).
 
-# TASKS:
-# - Splitters can be run directly, but not impemented into FeatureSet yet.
-#   - Need to track splitting history and available splits
+        Description:
+            Runs the provided `BaseSplitter` instance on a view of the specified \
+            collection (e.g., 'original' or 'transformed'). The resulting splits \
+            (and splitter config) are optionally registered into the FeatureSet's \
+            `_splits` registry.
 
-# - No support for feature transforms
-#   - Do we use a second copy of SampleCollection? How when inherits?
+        Args:
+            splitter (BaseSplitter):
+                The splitter instance (e.g., RandomSplitter, ConditionSplitter).
+            collection_key (str | None, optional):
+                Which collection to split. Defaults to the current active collection.
+            return_views (bool, optional):
+                Whether to return FeatureSetViews or not. Defaults to False.
+            register (bool, optional):
+                Whether to record the resulting views and splitter config.
+                Defaults to True.
+
+        Returns:
+            list[FeatureSetView] | None:
+                The created splits are returned only if `return_views=True`.
+
+        Example:
+            ```python
+            splitter = RandomSplitter({"train": 0.8, "val": 0.2}, group_by="cell_id")
+            fs.split(splitter, collection_key="original")
+            ```
+
+        """
+        # Determine which collection to split
+        if collection_key is None:
+            collection_key = self._active_collection
+        if collection_key not in self._collections:
+            msg = f"Collection '{collection_key}' not found. Available: {list(self._collections.keys())}"
+            raise KeyError(msg)
+
+        # Create a view over the collection
+        base_view = self._as_view(collection_key=collection_key)
+
+        # Perform the split (return splits as FeatureSetView instances)
+        results: dict[str, FeatureSetView] = splitter.split(base_view, return_views=True)
+        results = list(results.values())
+
+        # Register splits if requested
+        if register:
+            for split in results:
+                self.add_split(split)
+
+        # Return views if requested
+        if return_views:
+            return results
+
+        return None
+
+    def split_random(
+        self,
+        ratios: Mapping[str, float],
+        *,
+        group_by: str | Sequence[str] | None = None,
+        seed: int = 13,
+        collection_key: str | None = None,
+        return_views: bool = False,
+        register: bool = True,
+    ) -> list[FeatureSetView] | None:
+        """
+        Randomly partition this FeatureSet (or one of its collections) into subsets.
+
+        Description:
+            A convenience wrapper around :class:`RandomSplitter`, which randomly divides \
+            the samples of the specified collection into multiple subsets according to \
+            user-defined ratios (e.g., `{"train": 0.8, "val": 0.2}`).
+
+            Optionally, one or more tag keys can be provided via `group_by` to ensure \
+            that all samples sharing the same tag values (e.g., a common cell ID or batch ID) \
+            are placed into the same subset.
+
+        Args:
+            ratios (Mapping[str, float]):
+                Dictionary mapping subset labels to relative ratios.
+                Must sum to 1.0. Example: `{"train": 0.7, "val": 0.2, "test": 0.1}`.
+            group_by (str | Sequence[str] | None, optional):
+                One or more tag keys to group samples by before splitting.
+                If `None`, samples are split individually.
+            seed (int, optional):
+                Random seed for reproducibility. Defaults to 13.
+            collection_key (str | None, optional):
+                Name of the collection to split (e.g., `"original"` or `"transformed"`).
+                Defaults to the currently active collection.
+            return_views (bool, optional):
+                Whether to return the resulting FeatureSetViews. Defaults to `False`.
+            register (bool, optional):
+                Whether to register the resulting splits and splitter configuration in
+                `FeatureSet._splits` for future reference. Defaults to `True`.
+
+        Returns:
+            list[FeatureSetView] | None:
+                The resulting FeatureSetViews (if `return_views=True`).
+                Otherwise, returns `None`.
+
+        Example:
+            ```python
+            fs.split_random(
+                ratios={"train": 0.8, "val": 0.2},
+                group_by="cell_id",
+                seed=42,
+                collection_key="original",
+            )
+            ```
+
+        """
+        from modularml.core.pipeline.splitting.random_splitter import RandomSplitter
+
+        splitter = RandomSplitter(ratios, group_by=group_by, seed=seed)
+        return self.split(splitter, collection_key=collection_key, return_views=return_views, register=register)
+
+    def split_by_condition(
+        self,
+        conditions: dict[str, dict[str, Any]],
+        *,
+        collection_key: str | None = None,
+        return_views: bool = False,
+        register: bool = True,
+    ) -> list[FeatureSetView] | None:
+        """
+        Split this FeatureSet (or one of its collections) based on logical conditions.
+
+        Description:
+            A convenience wrapper around :class:`ConditionSplitter`, which partitions
+            samples into subsets based on user-defined filter expressions.
+
+            Each subset is defined by a dictionary mapping feature, target, or tag keys
+            to condition values, which may be:
+            - A literal value for equality matching.
+            - A list, tuple, or set of allowed values.
+            - A callable predicate ``f(x) -> bool`` that returns a boolean mask.
+
+            For example:
+            ```python
+            fs.split_by_condition(
+                {
+                    "low_temp": {"temperature": lambda x: x < 20},
+                    "high_temp": {"temperature": lambda x: x >= 20},
+                    "cell_5": {"cell_id": 5},
+                }
+            )
+            ```
+
+            **Note:** Overlapping subsets are permitted, but a warning will be issued
+            if any sample satisfies multiple conditions.
+
+        Args:
+            conditions (Mapping[str, Mapping[str, Any | Sequence | Callable]]):
+                Mapping of subset labels → condition dictionaries.
+                Each condition dictionary maps a key (feature/target/tag name)
+                to a condition (scalar, sequence, or callable).
+            collection_key (str | None, optional):
+                Name of the collection to split (e.g., `"original"` or `"transformed"`).
+                Defaults to the currently active collection.
+            return_views (bool, optional):
+                Whether to return the resulting FeatureSetViews. Defaults to `False`.
+            register (bool, optional):
+                Whether to register the resulting splits and splitter configuration in
+                `FeatureSet._splits` for future reference. Defaults to `True`.
+
+        Returns:
+            list[FeatureSetView] | None:
+                The resulting FeatureSetViews (if `return_views=True`).
+                Otherwise, returns `None`.
+
+        Example:
+            ```python
+            fs.split_by_condition(
+                {
+                    "train": {"cell_type": "A"},
+                    "test": {"cell_type": "B"},
+                }
+            )
+            ```
+
+        """
+        from modularml.core.pipeline.splitting.condition_splitter import ConditionSplitter
+
+        splitter = ConditionSplitter(conditions=conditions)
+        return self.split(splitter, collection_key=collection_key, return_views=return_views, register=register)
+
+
+# TODO: TASKS:
+# - Splitting methods implemented into FeatureSet (not FeatureSetView)
+#   - Need to implement into FeatureSetView
+#   - Also need to track splitting history / config
+
+# - Need to implement FeatureTransform logic
+#   - How to track transform history
