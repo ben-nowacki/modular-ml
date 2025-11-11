@@ -3,33 +3,36 @@ from __future__ import annotations
 import ast
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 
 from modularml.core.data.sample_schema import (
-    DTYPE_POSTFIX,
+    DTYPE_SUFFIX,
     FEATURES_COLUMN,
     METADATA_PREFIX,
     METADATA_SCHEMA_VERSION_KEY,
+    RAW_VARIANT,
     SAMPLE_ID_COLUMN,
     SCHEMA_VERSION,
-    SHAPE_POSTFIX,
+    SHAPE_SUFFIX,
     TAGS_COLUMN,
     TARGETS_COLUMN,
     SampleSchema,
 )
-from modularml.utils.data_conversion import convert_dict_to_format
-from modularml.utils.data_format import DataFormat, ensure_list, normalize_format
-from modularml.utils.shape_utils import get_shape, shape_to_tuple
+from modularml.utils.data_conversion import convert_dict_to_format, convert_to_format, stack_nested_numpy
+from modularml.utils.data_format import DataFormat, ensure_list
+from modularml.utils.pyarrow_data import (
+    get_dtype_of_pyarrow_array,
+    get_shape_of_pyarrow_array,
+    numpy_to_pyarrow_struct_variant,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    import pandas as pd
+    from collections.abc import Callable
 
 
 @dataclass
@@ -115,56 +118,23 @@ class SampleCollection:
                 unique_ids,
             )
 
-    # =====================================================================
-    # Core properties
-    # =====================================================================
-    @property
-    def n_samples(self) -> int:
-        """Total number of rows (samples) in the Arrow table."""
-        return self.table.num_rows
+    def _validate_schema(self):
+        """Ensure required domains and the `sample_id` column exist."""
+        required = {SAMPLE_ID_COLUMN, FEATURES_COLUMN, TARGETS_COLUMN}
+        # optional = {TAGS_COLUMN}
+        actual = set(self.table.column_names)
 
-    @property
-    def feature_keys(self) -> list[str]:
-        """List of feature column names defined in the schema."""
-        return self.schema.domain_keys(FEATURES_COLUMN)
+        missing = required - actual
+        if missing:
+            msg = f"Missing expected columns: {sorted(missing)}"
+            raise ValueError(msg)
 
-    @property
-    def target_keys(self) -> list[str]:
-        """List of target column names defined in the schema."""
-        return self.schema.domain_keys(TARGETS_COLUMN)
+        # If tags missing, inject an empty struct column for schema consistency
+        if TAGS_COLUMN not in actual:
+            empty_struct = pa.struct([])
+            empty_array = pa.array([{}] * self.table.num_rows, type=empty_struct)
+            self.table = self.table.append_column(TAGS_COLUMN, empty_array)
 
-    @property
-    def tag_keys(self) -> list[str]:
-        """List of tag column names defined in the schema."""
-        return self.schema.domain_keys(TAGS_COLUMN)
-
-    @property
-    def feature_shapes(self) -> dict[str, tuple[int, ...]]:
-        return self.column_shapes(domain="features")
-
-    @property
-    def target_shapes(self) -> dict[str, tuple[int, ...]]:
-        return self.column_shapes(domain="targets")
-
-    @property
-    def tag_shapes(self) -> dict[str, tuple[int, ...]]:
-        return self.column_shapes(domain="tags")
-
-    @property
-    def feature_dtypes(self) -> dict[str, tuple[int, ...]]:
-        return self.column_dtypes(domain="features")
-
-    @property
-    def target_dtypes(self) -> dict[str, tuple[int, ...]]:
-        return self.column_dtypes(domain="targets")
-
-    @property
-    def tag_dtypes(self) -> dict[str, tuple[int, ...]]:
-        return self.column_dtypes(domain="tags")
-
-    # =====================================================================
-    # Metadata embedding and access
-    # =====================================================================
     def _embed_metadata(self) -> None:
         """
         Embed ModularML metadata (schema version and per-column shapes) into the Arrow table.
@@ -180,37 +150,34 @@ class SampleCollection:
         # Table version
         meta[METADATA_SCHEMA_VERSION_KEY.encode()] = SCHEMA_VERSION.encode()
 
-        # Column shapes
-        for domain in (FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN):
-            # Check shape metadata
-            shapes = self.column_shapes(domain)
-            for key, shape in shapes.items():
-                meta_key = (f"{METADATA_PREFIX}.{domain}.{key}.{SHAPE_POSTFIX}").encode()
-                meta_val = str(shape).encode()
-                if meta_key in meta and meta_val != meta[meta_key]:
-                    msg = (
-                        f"Meta data already exist for key `{meta_key}` but it does not "
-                        f"match expected value: {meta[meta_key]} != {meta_val}"
-                    )
-                    raise ValueError(msg)
-                meta[meta_key] = meta_val
+        # Domain shapes and dtypes
+        for domain in [FEATURES_COLUMN, TARGETS_COLUMN] + ([TAGS_COLUMN] if self.has_tags else []):
+            # Get shapes and dtypes
+            d_shapes: dict[str, tuple[int, ...]] = self.get_domain_shapes(domain=domain)
+            d_dtypes: dict[str, str] = self.get_domain_dtypes(domain=domain)
+            if d_shapes.keys() != d_dtypes.keys():
+                msg = f"`{domain}` keys differ between shapes and data types."
 
-            # Check dtype metadata
-            dtypes = self.column_dtypes(domain)
-            for key, dtype in dtypes.items():
-                meta_key = (f"{METADATA_PREFIX}.{domain}.{key}.{DTYPE_POSTFIX}").encode()
-                meta_val = str(dtype).encode()
-                if meta_key in meta and meta_val != meta[meta_key]:
-                    msg = (
-                        f"Meta data already exist for key `{meta_key}` but it does not "
-                        f"match expected value: {meta[meta_key]} != {meta_val}"
-                    )
-                    raise ValueError(msg)
-                meta[meta_key] = meta_val
+            # Update meta data
+            for k in d_shapes:
+                for s_dic, suffix in zip((d_shapes, d_dtypes), (SHAPE_SUFFIX, DTYPE_SUFFIX), strict=True):
+                    meta_key = (f"{METADATA_PREFIX}.{domain}.{k}.{suffix}").encode()
+                    meta_val = str(s_dic[k]).encode()
+                    if meta_key in meta and meta_val != meta[meta_key]:
+                        msg = (
+                            f"Meta data already exist for key `{meta_key}` but it does not "
+                            f"match expected value: {meta[meta_key]} != {meta_val}"
+                        )
+                        raise ValueError(msg)
+                    meta[meta_key] = meta_val
 
         # Update table schema
         self.table = self.table.replace_schema_metadata(meta)
 
+    # =====================================================================
+    # Core properties
+    # =====================================================================
+    @property
     def table_version(self) -> str | None:
         """
         Retrieve the ModularML schema version stored in the table metadata.
@@ -223,325 +190,728 @@ class SampleCollection:
         val = meta.get(METADATA_SCHEMA_VERSION_KEY.encode())
         return val.decode() if val else None
 
-    # =====================================================================
-    # Validation
-    # =====================================================================
-    def _validate_schema(self):
-        """Ensure required domains and the `sample_id` column exist."""
-        expected = {SAMPLE_ID_COLUMN, FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN}
-        actual = set(self.table.column_names)
-        missing = expected - actual
-        if missing:
-            msg = f"Missing expected columns: {sorted(missing)}"
-            raise ValueError(msg)
+    @property
+    def n_samples(self) -> int:
+        """Total number of rows (samples) in the Arrow table."""
+        return self.table.num_rows
 
-    # =====================================================================
-    # Domain accessors
-    # =====================================================================
-    def get_features(self, fmt=DataFormat.DICT_NUMPY, *, keys=None):
+    @property
+    def has_tags(self) -> bool:
+        """Return True if tags domain exists and is non-empty."""
+        return TAGS_COLUMN in self.table.column_names and len(self.schema.domain_keys(TAGS_COLUMN)) > 0
+
+    @property
+    def feature_keys(self) -> list[str]:
+        """List of feature column names defined in the schema."""
+        return self.schema.domain_keys(FEATURES_COLUMN)
+
+    @property
+    def target_keys(self) -> list[str]:
+        """List of target column names defined in the schema."""
+        return self.schema.domain_keys(TARGETS_COLUMN)
+
+    @property
+    def tag_keys(self) -> list[str]:
+        """List of tag column names defined in the schema."""
+        return self.schema.domain_keys(TAGS_COLUMN) if self.has_tags else []
+
+    @property
+    def feature_shapes(self) -> dict[str, tuple[int, ...]]:
+        """
+        Mapping of feature column variants to their array shapes.
+
+        Description:
+            Returns a dictionary describing the shape of each feature variant \
+            in the FeatureSet. Keys are formatted as `"column.variant"` and \
+            values are tuples representing the array shape (e.g., `(n_rows, n_features)`).
+
+        Returns:
+            dict[str, tuple[int, ...]]:
+                Mapping of feature column variant names to their shapes.
+
+        Example:
+        ``` python
+            {
+                "voltage.raw": (1000, 1),
+                "voltage.transformed": (1000, 1),
+                "current.raw": (1000, 1)
+            }
+        ```
+
+        """
+        shapes = {}
+        for k in self.feature_keys:
+            for v in self.get_variant_keys(FEATURES_COLUMN, k):
+                shapes[f"{k}.{v}"] = self.get_variant_shape(FEATURES_COLUMN, k, v)
+        return shapes
+
+    @property
+    def target_shapes(self) -> dict[str, tuple[int, ...]]:
+        """
+        Mapping of target column variants to their array shapes.
+
+        Description:
+            Returns a dictionary describing the shape of each target variant \
+            in the FeatureSet. Keys are formatted as `"column.variant"` and \
+            values are tuples representing the array shape (e.g., `(n_rows, n_targets)`).
+
+        Returns:
+            dict[str, tuple[int, ...]]:
+                Mapping of target column variant names to their shapes.
+
+        Example:
+        ``` python
+            {
+                "soh.raw": (1000, 1),
+                "soh.transformed": (1000, 1),
+                "soc.raw": (1000, 1)
+            }
+        ```
+
+        """
+        shapes = {}
+        for k in self.target_keys:
+            for v in self.get_variant_keys(TARGETS_COLUMN, k):
+                shapes[f"{k}.{v}"] = self.get_variant_shape(TARGETS_COLUMN, k, v)
+        return shapes
+
+    @property
+    def tag_shapes(self) -> dict[str, tuple[int, ...]]:
+        """
+        Mapping of tag column variants to their array shapes.
+
+        Description:
+            Returns a dictionary describing the shape of each tag variant \
+            in the FeatureSet. Keys are formatted as `"column.variant"` and \
+            values are tuples representing the array shape (e.g., `(n_rows, n_tags)`).
+
+        Returns:
+            dict[str, tuple[int, ...]]:
+                Mapping of tag column variant names to their shapes.
+
+        Example:
+        ``` python
+            {
+                "str_label.raw": (1000, 1),
+                "str_label.transformed": (1000, 5),
+                "group_id.raw": (1000, 1)
+            }
+        ```
+
+        """
+        if not self.has_tags:
+            return {}
+        shapes = {}
+        for k in self.tag_keys:
+            for v in self.get_variant_keys(TAGS_COLUMN, k):
+                shapes[f"{k}.{v}"] = self.get_variant_shape(TAGS_COLUMN, k, v)
+        return shapes
+
+    @property
+    def feature_dtypes(self) -> dict[str, str]:
+        """
+        Mapping of feature column variants to their array data types.
+
+        Description:
+            Returns a dictionary describing the data type of each feature variant \
+            in the FeatureSet. Keys are formatted as `"column.variant"` and \
+            data types are strings (e.g., "float32").
+
+        Returns:
+            dict[str, str]:
+                Mapping of feature column variant names to their data types (as strings).
+
+        Example:
+        ``` python
+            {
+                "voltage.raw": "float32",
+                "voltage.transformed": "float32",
+            }
+        ```
+
+        """
+        shapes = {}
+        for k in self.feature_keys:
+            for v in self.get_variant_keys(FEATURES_COLUMN, k):
+                shapes[f"{k}.{v}"] = self.get_variant_dtype(FEATURES_COLUMN, k, v)
+        return shapes
+
+    @property
+    def target_dtypes(self) -> dict[str, str]:
+        """
+        Mapping of target column variants to their array data types.
+
+        Description:
+            Returns a dictionary describing the data type of each target variant \
+            in the FeatureSet. Keys are formatted as `"column.variant"` and \
+            data types are strings (e.g., "float32").
+
+        Returns:
+            dict[str, str]:
+                Mapping of target column variant names to their data types (as strings).
+
+        Example:
+        ``` python
+            {
+                "soh.raw": "float32",
+                "soh.transformed": "float32",
+            }
+        ```
+
+        """
+        shapes = {}
+        for k in self.target_keys:
+            for v in self.get_variant_keys(TARGETS_COLUMN, k):
+                shapes[f"{k}.{v}"] = self.get_variant_dtype(TARGETS_COLUMN, k, v)
+        return shapes
+
+    @property
+    def tag_dtypes(self) -> dict[str, str]:
+        """
+        Mapping of tag column variants to their array data types.
+
+        Description:
+            Returns a dictionary describing the data type of each tag variant \
+            in the FeatureSet. Keys are formatted as `"column.variant"` and \
+            data types are strings (e.g., "float32").
+
+        Returns:
+            dict[str, str]:
+                Mapping of tag column variant names to their data types (as strings).
+
+        Example:
+        ``` python
+            {
+                "str_label.raw": "string",
+                "str_label.transformed": "int8",
+            }
+        ```
+
+        """
+        if not self.has_tags:
+            return {}
+        shapes = {}
+        for k in self.tag_keys:
+            for v in self.get_variant_keys(TAGS_COLUMN, k):
+                shapes[f"{k}.{v}"] = self.get_variant_dtype(TAGS_COLUMN, k, v)
+        return shapes
+
+    def get_features(
+        self,
+        fmt: DataFormat = DataFormat.DICT_NUMPY,
+        *,
+        keys: str | list[str] | None = None,
+        variant: str | None = None,
+        include_variant_suffix: bool = False,
+        include_domain_prefix: bool = False,
+    ):
         """
         Retrieve feature data in a chosen format.
 
         Args:
-            fmt: Desired output format (see :class:`DataFormat`).
-            keys: Optional subset of feature keys to return.
+            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
+                Defaults to a single dictionary of numpy arrays.
+            keys (str | list[str] | None): Optional subset of feature keys to return. \
+                If None, all feature keys are returned. Defaults to None.
+            variant (str, optional): The variant (e.g., "raw" or "transformed") of the feature keys to \
+                return. If None, all variants are returned and `include_variant_suffix` is set to True. \
+                If specfied, `keys` must all have matching variants. Defaults to None.
+            include_variant_suffix (bool): Whether to include the variant suffix in the \
+                feature keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
+            include_domain_prefix (bool): Wether to include the domain prefix in the \
+                feature keys (e.g., "voltage" or "features.voltage"). Defaults to False.
 
         Returns:
             Feature data in the requested format.
 
         """
-        return self._get_domain(FEATURES_COLUMN, fmt=fmt, keys=keys)
+        return self.get_domain_data(
+            domain=FEATURES_COLUMN,
+            fmt=fmt,
+            keys=keys,
+            variant=variant,
+            include_variant_suffix=include_variant_suffix,
+            include_domain_prefix=include_domain_prefix,
+        )
 
-    def get_targets(self, fmt=DataFormat.DICT_NUMPY, *, keys=None):
+    def get_targets(
+        self,
+        fmt: DataFormat = DataFormat.DICT_NUMPY,
+        *,
+        keys: str | list[str] | None = None,
+        variant: str | None = None,
+        include_variant_suffix: bool = False,
+        include_domain_prefix: bool = False,
+    ):
         """
         Retrieve target data in a chosen format.
 
         Args:
-            fmt: Desired output format (see :class:`DataFormat`).
-            keys: Optional subset of target keys to return.
+            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
+                Defaults to a single dictionary of numpy arrays.
+            keys (str | list[str] | None): Optional subset of target keys to return. \
+                If None, all target keys are returned. Defaults to None.
+            variant (str, optional): The variant (e.g., "raw" or "transformed") of the target keys to \
+                return. If None, all variants are returned and `include_variant_suffix` is set to True. \
+                If specfied, `keys` must all have matching variants. Defaults to None.
+            include_variant_suffix (bool): Whether to include the variant suffix in the \
+                target keys (e.g., "soh" or "soh.raw"). Defaults to False.
+            include_domain_prefix (bool): Wether to include the domain prefix in the \
+                target keys (e.g., "soh" or "targets.soh"). Defaults to False.
 
         Returns:
             Target data in the requested format.
 
         """
-        return self._get_domain(TARGETS_COLUMN, fmt=fmt, keys=keys)
+        return self.get_domain_data(
+            domain=TARGETS_COLUMN,
+            fmt=fmt,
+            keys=keys,
+            variant=variant,
+            include_variant_suffix=include_variant_suffix,
+            include_domain_prefix=include_domain_prefix,
+        )
 
-    def get_tags(self, fmt=DataFormat.DICT_LIST, *, keys=None):
+    def get_tags(
+        self,
+        fmt: DataFormat = DataFormat.DICT_NUMPY,
+        *,
+        keys: str | list[str] | None = None,
+        variant: str | None = None,
+        include_variant_suffix: bool = False,
+        include_domain_prefix: bool = False,
+    ):
         """
         Retrieve tag data in a chosen format.
 
         Args:
-            fmt: Desired output format (see :class:`DataFormat`).
-            keys: Optional subset of tag keys to return.
+            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
+                Defaults to a single dictionary of numpy arrays.
+            keys (str | list[str] | None): Optional subset of tag keys to return. \
+                If None, all tag keys are returned. Defaults to None.
+            variant (str, optional): The variant (e.g., "raw" or "transformed") of the tag keys to \
+                return. If None, all variants are returned and `include_variant_suffix` is set to True. \
+                If specfied, `keys` must all have matching variants. Defaults to None.
+            include_variant_suffix (bool): Whether to include the variant suffix in the \
+                tag keys (e.g., "cell_id" or "cell_id.raw"). Defaults to False.
+            include_domain_prefix (bool): Wether to include the domain prefix in the \
+                tag keys (e.g., "cell_id" or "tags.cell_id"). Defaults to False.
 
         Returns:
             Tag data in the requested format.
 
         """
-        return self._get_domain(TAGS_COLUMN, fmt=fmt, keys=keys)
-
-    # =====================================================================
-    # Shape utilities
-    # =====================================================================
-    def column_shapes(self, domain: str) -> dict[str, tuple[int, ...]]:
-        """
-        Obtain per-column shapes for a given domain.
-
-        Description:
-            Attempts to read shapes from table metadata. If not found,
-            falls back to inferring shapes directly from stored data.
-
-        Args:
-            domain: One of {"features", "targets", "tags"}.
-
-        Returns:
-            Mapping of column name -> shape tuple.
-
-        """
-        # 1. Check meta-data
-        meta = self.table.schema.metadata or {}
-        shapes: dict[str, tuple[int, ...]] = {}
-
-        req_prefix = f"{METADATA_PREFIX}.{domain}."
-        req_postfix = f".{SHAPE_POSTFIX}"
-        for k, v in meta.items():
-            k_str = k.decode()
-            if k_str.startswith(req_prefix) and k_str.endswith(req_postfix):
-                name = k_str[len(req_prefix) : -len(req_postfix)]
-                shapes[name] = ast.literal_eval(v.decode())
-        if shapes:
-            return shapes
-
-        # 2. Infer shapes directly from stored data (recursive and slow)
-        return self._infer_shapes_from_data(domain)
-
-    def _infer_shapes_from_data(self, domain: str) -> dict[str, tuple[int, ...]]:
-        """
-        Infer column shapes directly from Arrow array contents.
-
-        Args:
-            domain: Domain to inspect.
-
-        Returns:
-            Mapping of column name -> shape tuple inferred from sample data.
-
-        """
-        # Iterate over each column
-        struct_arr = self._struct_array(domain)
-        result: dict[str, tuple[int, ...]] = {}
-        for fld in struct_arr.type:
-            col = struct_arr.field(fld.name)
-            result[fld.name] = self._arrow_column_shape(col)
-        return result
-
-    def _arrow_column_shape(self, column: pa.Array) -> tuple[int, ...]:
-        """
-        Infer the shape of values stored in a given Arrow column.
-
-        Args:
-            column: Arrow array to inspect.
-
-        Returns:
-            Tuple representing array shape, prefixed with number of rows.
-
-        """
-        # Get num rows
-        n = len(column)
-        if n == 0:
-            return (0,)
-
-        # Get data shape
-        detected: tuple[int, ...] | None = None
-        for i in range(min(n, 10)):  # sample first few rows for speed
-            if not column[i].is_valid:
-                continue
-            val = column[i].as_py()
-            s = get_shape(val)
-            s = shape_to_tuple(s.get("__shape__") if isinstance(s, dict) else s)
-            if detected is None:
-                detected = s
-            elif detected != s:
-                detected = None
-                break
-        return (n, *detected) if detected else (n,)
-
-    # =====================================================================
-    # Data type utilities
-    # =====================================================================
-    def column_dtypes(self, domain: str) -> dict[str, str]:
-        """
-        Obtain per-column data types for a given domain.
-
-        Description:
-            Attempts to read data types from table metadata. If not found,
-            falls back to inferring dtypes directly from stored data.
-
-        Args:
-            domain: One of {"features", "targets", "tags"}.
-
-        Returns:
-            Mapping of column name -> dtype string (e.g., "float32", "int64").
-
-        """
-        # 1. Check meta-data
-        meta = self.table.schema.metadata or {}
-        dtypes: dict[str, str] = {}
-
-        req_prefix = f"{METADATA_PREFIX}.{domain}."
-        req_postfix = f".{DTYPE_POSTFIX}"
-        for k, v in meta.items():
-            k_str = k.decode()
-            if k_str.startswith(req_prefix) and k_str.endswith(req_postfix):
-                name = k_str[len(req_prefix) : -len(req_postfix)]
-                dtypes[name] = v.decode()
-        if dtypes:
-            return dtypes
-
-        # 2. Infer dtypes directly from stored data (recursive and slow)
-        return self._infer_dtypes_from_data(domain)
-
-    def _infer_dtypes_from_data(self, domain: str) -> dict[str, str]:
-        """
-        Infer column data types directly from Arrow array contents.
-
-        Description:
-            When metadata is missing, this function inspects the underlying
-            Arrow arrays to infer element data types. The inference follows:
-                - For numeric list arrays: dtype of leaf value type.
-                - For binary-encoded tensors: dtype is unknown ("bytes").
-                - For primitive arrays: Arrow's native type name.
-
-        Args:
-            domain: Domain to inspect (one of "features", "targets", "tags").
-
-        Returns:
-            Mapping of column name -> inferred dtype string.
-
-        """
-        struct_arr = self._struct_array(domain)
-        result: dict[str, str] = {}
-        for fld in struct_arr.type:
-            col = struct_arr.field(fld.name)
-            result[fld.name] = self._arrow_column_dtype(col)
-        return result
-
-    def _arrow_column_dtype(self, column: pa.Array) -> str:
-        """
-        Infer the data type of values stored in a given Arrow column.
-
-        Description:
-            Attempts to resolve the leaf value type for list arrays or
-            returns the primitive Arrow type for flat columns.
-
-        Args:
-            column: PyArrow array to inspect.
-
-        Returns:
-            str: String representing the element data type.
-                 For example, "float32", "int64", or "bytes".
-
-        """
-        t = column.type
-
-        # Case 1: nested list (tensor-like)
-        if pa.types.is_list(t):
-            base = t
-            while pa.types.is_list(base):
-                base = base.value_type
-            return base.to_pandas_dtype().__name__
-
-        # Case 2: binary blobs
-        if pa.types.is_binary(t) or pa.types.is_fixed_size_binary(t):
-            return "bytes"
-
-        # Case 3: primitive (int, float, string, etc.)
-        return str(t)
-
-    # =====================================================================
-    # Domain extraction
-    # =====================================================================
-    def _get_domain(self, domain: str, *, fmt: DataFormat | str, keys: Sequence[str] | None):
-        """
-        Extract a specific domain and convert it to the requested format.
-
-        Args:
-            domain (str): Domain name ("features", "targets", or "tags").
-            fmt (DataFormat | str): Desired output format identifier.
-            keys (Sequence[str] | None): Optional subset of domain columns to select.
-
-        Returns:
-            Domain data converted to the requested format.
-
-        """
-        fmt = normalize_format(fmt)
-        df = self._domain_dataframe(domain, keys)
-        if fmt == DataFormat.PANDAS:
-            return df
-        data_dict = df.to_dict(orient="list")
-
-        # If converting to a tensor-like object, we want to stack along the 1st axis
-        # Eg {"A":(100, 5), "B":(100, 5)} -> shape = (100, *2*, 5)
-        return convert_dict_to_format(
-            data=data_dict,
+        return self.get_domain_data(
+            domain=TAGS_COLUMN,
             fmt=fmt,
-            mode="stack",
-            axis=1,
-            align_singletons=True,
+            keys=keys,
+            variant=variant,
+            include_variant_suffix=include_variant_suffix,
+            include_domain_prefix=include_domain_prefix,
         )
 
-    def _domain_dataframe(self, domain: str, keys: Sequence[str] | None = None) -> pd.DataFrame:
+    # =====================================================================
+    # Domain-level accessors
+    # =====================================================================
+    def get_domain_keys(self, domain: str) -> list[str]:
+        if domain == FEATURES_COLUMN:
+            return self.feature_keys
+        if domain == TARGETS_COLUMN:
+            return self.target_keys
+        if domain == TAGS_COLUMN:
+            return self.tag_keys
+        msg = f"Invalid domain: `{domain}`"
+        raise ValueError(msg)
+
+    def get_domain_shapes(self, domain: str) -> dict[str, tuple[int, ...]]:
+        if domain == FEATURES_COLUMN:
+            return self.feature_shapes
+        if domain == TARGETS_COLUMN:
+            return self.target_shapes
+        if domain == TAGS_COLUMN:
+            return self.tag_shapes
+        msg = f"Invalid domain: `{domain}`"
+        raise ValueError(msg)
+
+    def get_domain_dtypes(self, domain: str) -> dict[str, str]:
+        if domain == FEATURES_COLUMN:
+            return self.feature_dtypes
+        if domain == TARGETS_COLUMN:
+            return self.target_dtypes
+        if domain == TAGS_COLUMN:
+            return self.tag_dtypes
+        msg = f"Invalid domain: `{domain}`"
+        raise ValueError(msg)
+
+    def get_domain_data(
+        self,
+        domain: str,
+        fmt: DataFormat = DataFormat.DICT_NUMPY,
+        *,
+        keys: str | list[str] | None = None,
+        variant: str | None = None,
+        include_variant_suffix: bool = False,
+        include_domain_prefix: bool = False,
+    ):
         """
-        Convert a domain from the Arrow table into a pandas DataFrame.
+        Retrieve domain data in a chosen format.
 
         Args:
-            domain (str): One of {"features", "targets", "tags"}.
-            keys (Sequence[str] | None): Optional subset of domain columns to select.
+            domain (str):
+                domain (str): One of {"features", "targets", "tags"}.
+            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
+                Defaults to a single dictionary of numpy arrays.
+            keys (str | list[str] | None): Optional subset of domain keys to return. \
+                If None, all feature keys are returned. Defaults to None.
+            variant (str, optional): The variant (e.g., "raw" or "transformed") of the domain keys to \
+                return. If None, all variants are returned and `include_variant_suffix` is set to True. \
+                If specfiied, `keys` must all have matching variants. Defaults to None.
+            include_variant_suffix (bool): Whether to include the variant suffix in the \
+                domain keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
+            include_domain_prefix (bool): Wether to include the domain prefix in the \
+                domain keys (e.g., "voltage" or "features.voltage"). Defaults to False.
 
         Returns:
-            Flattened pandas DataFrame with one column per selected key.
-
-        Raises:
-            ValueError: If the domain name is invalid.
-            KeyError: If any requested keys are missing.
+            Domain data in the requested format.
 
         """
         keys = ensure_list(keys)
+        domain_keys = self.get_domain_keys(domain=domain)
+        invalid = set(keys).difference(set(domain_keys))
+        if invalid:
+            msg = f"The following keys do not exist in the `{domain}` domain: {invalid}"
+            raise ValueError(msg)
 
+        if variant is None:
+            include_variant_suffix = True
+
+        res = {}
+        for k in keys or domain_keys:
+            variants = ensure_list(variant) if variant else self.get_variant_keys(domain=domain, key=k)
+            for v in variants:
+                f_key = (
+                    _ensure_domain_prefix(k, domain=domain)
+                    if include_domain_prefix
+                    else _remove_domain_prefix(k, domain=domain)
+                )
+                f_key = (
+                    _ensure_variant_suffix(f_key, variant=v)
+                    if include_variant_suffix
+                    else _remove_variant_suffix(f_key, variant=v)
+                )
+
+                res[f_key] = self.get_variant_data(
+                    domain=domain,
+                    key=k,
+                    variant=v,
+                    fmt=DataFormat.NUMPY,
+                )
+
+        if fmt == DataFormat.DICT_NUMPY:
+            return res
+        return convert_dict_to_format(res, fmt=fmt, mode="stack", axis=1)
+
+    # =====================================================================
+    # Variant-level accessors
+    # =====================================================================
+    def get_variant_keys(self, domain: str, key: str) -> list[str]:
+        """
+        Get available variants for the specified domain and column.
+
+        Args:
+            domain (str): One of {"features", "targets", "tags"}.
+            key (str): Column name with in the specified domain.
+
+        Returns:
+            list[str]: Available variant names for the specified column.
+
+        """
         if domain not in (FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN):
             msg = f"Invalid domain '{domain}'"
             raise ValueError(msg)
-        tbl = self.table.select([domain]).flatten()
-        df: pd.DataFrame = tbl.to_pandas()
+        try:
+            return self.table.column(domain).combine_chunks().field(key).type.names
+        except KeyError as e:
+            msg = f"`{key}` does not exist in the `{domain}` domain."
+            raise ValueError(msg) from e
 
-        # Strip "{domain}." prefix for column names (added during .flatten)
-        colmap = {c: c.split(".")[-1] for c in df.columns}
-        df.rename(columns=colmap, inplace=True)
-
-        # Filter to keys, if provided
-        if keys:
-            missing = [k for k in keys if k not in df.columns]
-            if missing:
-                msg = f"Keys {missing} not in domain '{domain}'"
-                raise KeyError(msg)
-            df = df[keys]
-
-        return df
-
-    def _struct_array(self, domain: str) -> pa.StructArray:
+    def get_variant_shape(self, domain: str, key: str, variant: str) -> tuple[int, ...]:
         """
-        Retrieve the Arrow StructArray corresponding to a domain.
+        Obtain the shape of a specific column and variant.
 
         Args:
-            domain: One of {"features", "targets", "tags"}.
+            domain (str): One of {"features", "targets", "tags"}.
+            key (str): Column name with in the specified domain.
+            variant (str): Column variant (e.g., "raw" or "transformed")
 
         Returns:
-            StructArray combining all chunks for the domain column.
+            tuple[int, ...]: Data shape for specific column and variant.
 
         """
-        col = self.table.column(domain)
-        if col.num_chunks == 1:
-            return col.chunk(0)
-        return col.combine_chunks()
+        # 1. Check meta-data
+        meta = self.table.schema.metadata or {}
+
+        meta_key = f"{METADATA_PREFIX}.{domain}.{key}.{variant}.{SHAPE_SUFFIX}"
+        shape = meta.get(meta_key.encode())
+        if shape:
+            return tuple(ast.literal_eval(shape.decode()))
+
+        # 2. Infer shapes directly from stored data (slow)
+        variant_arr: pa.Array = self.table.column(domain).combine_chunks().field(key).field(variant)
+        return get_shape_of_pyarrow_array(variant_arr, include_nrows=False)
+
+    def get_variant_dtype(self, domain: str, key: str, variant: str) -> str:
+        """
+        Obtain the data type of a specific column and variant.
+
+        Description:
+            Attempts to read data types from table metadata. If not found, \
+            falls back to inferring dtypes directly from stored data.
+
+        Args:
+            domain (str): One of {"features", "targets", "tags"}.
+            key (str): Column name with in the specified domain.
+            variant (str): Column variant (e.g., "raw" or "transformed")
+
+        Returns:
+            Data type string (e.g., "float32", "int64") for specific column and variant.
+
+        """
+        # 1. Check meta-data
+        meta = self.table.schema.metadata or {}
+
+        meta_key = f"{METADATA_PREFIX}.{domain}.{key}.{variant}.{DTYPE_SUFFIX}"
+        dtype = meta.get(meta_key.encode())
+        if dtype:
+            return dtype.decode()
+
+        # 2. Infer data type directly from stored data (slow)
+        variant_arr: pa.Array = self.table.column(domain).combine_chunks().field(key).field(variant)
+        return get_dtype_of_pyarrow_array(variant_arr)
+
+    def get_variant_data(
+        self,
+        domain: str,
+        key: str,
+        variant: str,
+        *,
+        fmt: DataFormat | None = None,
+    ):
+        """
+        Retrieve a single column of data in the chosen format.
+
+        Args:
+            domain (str): One of {"features", "targets", "tags"}.
+            key (str): Column name with in the specified domain.
+            variant (str): Column variant (e.g., "raw" or "transformed")
+            fmt (DataFormat, optional): Desired output format (see :class:`DataFormat`). \
+                If None, the PyArrow view (pa.ListArray) is returned. Defaults to None.
+
+        Returns:
+            Column variant data in the requested format.
+
+        """
+        # Access the variant subfield as an Arrow array
+        pa_arr = self.table.column(domain).combine_chunks().field(key).field(variant)
+
+        # Return raw pyarrow array is no format is specified
+        if fmt is None:
+            return pa_arr
+
+        # Retrieve metadata for decoding
+        shape = self.get_variant_shape(domain=domain, key=key, variant=variant)
+        dtype_str = self.get_variant_dtype(domain=domain, key=key, variant=variant)
+
+        # Handle binary-encoded tensors
+        if pa.types.is_fixed_size_binary(pa_arr.type):
+            try:
+                np_dtype = np.dtype(dtype_str)
+            except Exception as e:
+                msg = f"Invalid dtype string '{dtype_str}' in metadata."
+                raise ValueError(msg) from e
+
+            flat_size = int(np.prod(shape))
+            n_rows = len(pa_arr)
+
+            # Decode each row's binary buffer to an ndarray of the correct dtype/shape
+            decoded = np.empty((n_rows, *tuple(shape)), dtype=np_dtype)
+            for i in range(n_rows):
+                buf = pa_arr[i].as_buffer() if hasattr(pa_arr[i], "as_buffer") else pa_arr[i]
+                if buf is None:
+                    decoded[i] = np.zeros(shape, dtype=np_dtype)
+                    continue
+                row_bytes = np.frombuffer(buf, dtype=np_dtype, count=flat_size)
+                decoded[i] = row_bytes.reshape(shape)
+
+            return convert_to_format(decoded, fmt=fmt)
+
+        # Otherwise PyArrow's `to_numpy` for list-like arrays (1D/2D)
+        # .to_numpy() returns an object-array, we need to convert to proper shape and dtype
+        data = pa_arr.to_numpy(zero_copy_only=False)
+        np_arr = stack_nested_numpy(data, shape)
+        return convert_to_format(np_arr, fmt=fmt)
+
+    # =====================================================================
+    # Controllled Mutation
+    # =====================================================================
+    # PyArrow tables are immutable, meaning any changes require a full
+    # rebuild. This should be done very sparingly.
+    # Current rules are:
+    #   - Only variants of existing domain keys can be added/modified. Examples:
+    #       - You can add/modify a "transformed" variant of an existing key
+    #       - You can't add an entirely new key
+    #   - The "raw" (default) variant cannot be modified
+    #   - Meta data must be rebuilt for any changed columns
+    #   - Any new variants must have the same number of samples
+    #   - Mutations to the `table` attribute must happen inplace
+    def add_variant(
+        self,
+        domain: str,
+        key: str,
+        variant: str,
+        data: np.ndarray,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """
+        Add or overwrite a variant of an existing feature/target/tag key.
+
+        Description:
+            New variants can be added to an existing key. The `"raw"` (default) \
+            variant cannot be overridden.
+
+        Args:
+            domain (str): One of {"features", "targets", "tags"}.
+            key (str): Existing key within the domain (e.g., "voltage").
+            variant (str): Variant name to add or overwrite (e.g., "transformed").
+            data (np.ndarray): NumPy array of shape (n_samples, ...).
+            overwrite (bool, optional): Whether to replace existing variant data if \
+                present. Defaults to False.
+
+        Raises:
+            ValueError: If the key does not exist or variant already exists (and overwrite=False).
+            TypeError: If data is not a numpy array.
+
+        """
+        # Validate domain/key
+        if key not in self.get_domain_keys(domain):
+            msg = f"Cannot add variant for unknown key '{key}' in domain '{domain}'."
+            raise ValueError(msg)
+
+        # Check for valid variant
+        if variant == RAW_VARIANT:
+            msg = f"The default variant ('{RAW_VARIANT}') cannot be modified."
+            raise ValueError(msg)
+
+        # Check type and shape of data
+        if not isinstance(data, np.ndarray):
+            msg = f"Data must be a numpy array. Received: {type(data)}"
+            raise TypeError(msg)
+        if data.shape[0] != self.n_samples:
+            msg = f"Data length {data.shape[0]} does not match number of samples {self.n_samples}."
+            raise ValueError(msg)
+
+        # Build new variant Arrow array
+        _, new_variant_arr, new_meta = numpy_to_pyarrow_struct_variant(
+            name=key,
+            data=data,
+            variant=variant,
+        )
+
+        # Combine existing variants (dict of arrays)
+        domain_arr = self.table.column(domain).combine_chunks()
+        key_struct = domain_arr.field(key)
+        existing_variant_names = key_struct.type.names
+        existing_arrays = [key_struct.field(name) for name in existing_variant_names]
+
+        # Replace existing variant
+        if variant in existing_variant_names:
+            if not overwrite:
+                msg = f"Variant '{variant}' already exists for '{key}'. Set `overwrite=True` to modify."
+                raise ValueError(msg)
+            idx = existing_variant_names.index(variant)
+            existing_arrays[idx] = new_variant_arr.field(variant)
+        # Append new variant
+        else:
+            existing_variant_names = [*list(existing_variant_names), variant]
+            existing_arrays = [*existing_arrays, new_variant_arr.field(variant)]
+
+        # Rebuild the StructArray for this key
+        updated_key_struct = pa.StructArray.from_arrays(existing_arrays, names=existing_variant_names)
+
+        # Replace the key field inside the domain struct
+        new_domain_arrays = []
+        for name in domain_arr.type.names:
+            arr = updated_key_struct if name == key else domain_arr.field(name)
+            new_domain_arrays.append(arr)
+        updated_domain_struct = pa.StructArray.from_arrays(new_domain_arrays, names=domain_arr.type.names)
+
+        # Replace the column in the table
+        idx = self.table.schema.get_field_index(domain)
+        self.table = self.table.set_column(idx, domain, updated_domain_struct)
+
+        # Update metadata
+        meta = dict(self.table.schema.metadata or {})
+        meta.update(new_meta)
+        self.table = self.table.replace_schema_metadata(meta)
+
+    def delete_variant(
+        self,
+        domain: str,
+        key: str,
+        variant: str,
+    ) -> None:
+        """
+        Delete an existing variant of a feature/target/tag key.
+
+        Description:
+            The `"raw"` (default) variant cannot be deleted.
+
+        Args:
+            domain (str): One of {"features", "targets", "tags"}.
+            key (str): Existing key within the domain (e.g., "voltage").
+            variant (str): Variant name to add or overwrite (e.g., "transformed").
+
+        Raises:
+            ValueError: If the key does not exist or variant cannot be deleted.
+
+        """
+        # Validate domain/key
+        if key not in self.get_domain_keys(domain):
+            msg = f"Cannot delete variant for unknown key '{key}' in domain '{domain}'."
+            raise ValueError(msg)
+
+        # Check for valid variant
+        if variant == RAW_VARIANT:
+            msg = f"The default variant ('{RAW_VARIANT}') cannot be deleted."
+            raise ValueError(msg)
+
+        # Get specified variant and domain structs
+        domain_arr = self.table.column(domain).combine_chunks()
+        key_struct = domain_arr.field(key)
+
+        # Remove variant from key struct
+        remaining_names = [v for v in key_struct.type.names if v != variant]
+        remaining_arrays = [key_struct.field(v) for v in remaining_names]
+        updated_key_struct = pa.StructArray.from_arrays(remaining_arrays, names=remaining_names)
+
+        # Replace key in domain struct
+        new_domain_arrays = []
+        for name in domain_arr.type.names:
+            arr = updated_key_struct if name == key else domain_arr.field(name)
+            new_domain_arrays.append(arr)
+        updated_domain_struct = pa.StructArray.from_arrays(new_domain_arrays, names=domain_arr.type.names)
+
+        # Replace in table
+        idx = self.table.schema.get_field_index(domain)
+        self.table = self.table.set_column(idx, domain, updated_domain_struct)
+
+        # Remove metadata entries for this variant
+        meta = dict(self.table.schema.metadata or {})
+        to_delete = [k for k in meta if k.decode().startswith(f"{METADATA_PREFIX}.{domain}.{key}.{variant}.")]
+        for k in to_delete:
+            del meta[k]
+        self.table = self.table.replace_schema_metadata(meta)
 
     # =====================================================================
     # Export / conversion
@@ -561,18 +931,168 @@ class SampleCollection:
             return self.table
         return self.table.select([domain])
 
-    def to_pandas(self) -> pd.DataFrame:
+    def to_dict(self) -> dict[str, np.ndarray]:
         """
-        Convert the entire table into a flattened pandas DataFrame.
+        Convert the entire SampleCollection into a flattened dict of NumPy arrays.
+
+        Description:
+            Returns a unified dict containing all domains (features, targets, \
+            and tags) as columns. Each structured domain (e.g., features struct) \
+            is flattened into individual keys named after their field keys.
 
         Returns:
-            Flattened DataFrame containing all domains.
+            dict[str, np.ndarray]:
+                A flattened dict containing all domains and the sample_id column.
 
         """
-        return self.table.flatten().to_pandas()
+        # Gather domain data (flattened)
+        all_data: dict[str, np.ndarray] = {}
+        for domain in [FEATURES_COLUMN, TARGETS_COLUMN] + ([TAGS_COLUMN] if self.has_tags else []):
+            d_res = self.get_domain_data(
+                domain=domain,
+                fmt=DataFormat.DICT_NUMPY,
+                keys=None,
+                variant=None,
+                include_domain_prefix=True,
+                include_variant_suffix=True,
+            )
+            all_data |= d_res
+
+        # Always include sample_id column (guaranteed unique)
+        if SAMPLE_ID_COLUMN in self.table.column_names:
+            obj_arr = self.table.column(SAMPLE_ID_COLUMN).combine_chunks().to_numpy(zero_copy_only=False)
+            all_data[SAMPLE_ID_COLUMN] = stack_nested_numpy(obj_arr, shape=())
+
+        return all_data
+
+    def to_pandas(
+        self,
+    ) -> pd.DataFrame:
+        """
+        Convert the entire SampleCollection into a flattened pandas DataFrame.
+
+        Description:
+            Returns a unified DataFrame containing all domains (features, targets, \
+            and tags) as columns. Each structured domain (e.g., features struct) \
+            is flattened into individual columns named after their field keys.
+
+        Returns:
+            pd.DataFrame:
+                A flattened DataFrame containing all domains and the sample_id column.
+
+        """
+        # Gather domain data (flattened)
+        all_data: dict[str, np.ndarray] = self.to_dict()
+
+        # Each element may be a multi-dim array, need to separate 1st dimensions
+        reshaped_data = {}
+        for k, v in all_data.items():
+            reshaped_data[k] = list(v)
+        return pd.DataFrame(reshaped_data)
 
 
-def _evaluate_filter_conditions(
+# =========================================================================
+# Helper Methods
+# =========================================================================
+def _remove_domain_prefix(element: str, domain: str) -> str:
+    """Removes the domain prefix from element, if it contains it."""
+    prefix = f"{domain}."
+    return element[element.rindex(prefix) + len(prefix) :] if prefix in element else element
+
+
+def _ensure_domain_prefix(element: str, domain: str) -> str:
+    """Ensures the domain prefix is in element."""
+    prefix = f"{domain}."
+    return element if prefix in element else prefix + element
+
+
+def _remove_variant_suffix(element: str, variant: str) -> str:
+    """Removes the variant suffix from element, if it contains it."""
+    suffix = f".{variant}"
+    return element[: element.rindex(suffix)] if suffix in element else element
+
+
+def _ensure_variant_suffix(element: str, variant: str) -> str:
+    """Ensures the variant suffix is in element."""
+    suffix = f".{variant}"
+    return element if suffix in element else element + suffix
+
+
+def _evaluate_single_condition(col_data: np.ndarray, cond) -> np.ndarray:
+    """
+    Evaluate a filter condition on a column of scalar or array values.
+
+    Args:
+        col_data (np.ndarray | Sequence[Any]):
+            Column values (scalars or arrays).
+        cond (Any | list | tuple | set | callable):
+            The condition to evaluate:
+              - callable(x) -> bool
+              - iterable of allowed values
+              - scalar literal for equality
+
+    Returns:
+        np.ndarray[bool]: Boolean mask indicating rows satisfying the condition.
+
+    """
+    col_data = np.asarray(col_data, dtype=object)
+
+    # 1. Callable condition
+    if callable(cond):
+        # Detect scalar vs array-valued column
+        first_val = col_data[0]
+        if isinstance(first_val, (np.ndarray, list, tuple)):
+            # Apply row-wise for arrays
+            mask = np.fromiter((bool(cond(x)) for x in col_data), dtype=bool, count=len(col_data))
+        else:
+            # Try applying directly to the vector
+            try:
+                mask = np.asarray(cond(col_data))
+                if np.ndim(mask) == 0:  # single scalar result
+                    mask = np.full(len(col_data), bool(mask))
+            except Exception as e:
+                msg = f"Failed to apply callable condition. {e}"
+                raise ValueError(msg) from e
+        return mask
+
+    # 2. Iterable of allowed values
+    if isinstance(cond, (list, tuple, set, np.ndarray)):
+        # For scalar columns -> vectorized np.isin
+        first_val = col_data[0]
+        if not isinstance(first_val, (np.ndarray, list, tuple)):
+            return np.isin(col_data, cond, assume_unique=False)
+
+        # Array-like row values are not supported yet
+        ## This commented out below returns True is any value in the row value is in the provided
+        ## condition value list. Not sure this is what is expected. Likely want an exact match?
+        # # For array-valued rows -> True if *any element* in the row is in cond
+        # allowed = set(cond)
+        # mask = np.fromiter(
+        #     (any(elem in allowed for elem in x) if x is not None else False for x in col_data),
+        #     dtype=bool,
+        #     count=len(col_data),
+        # )
+        raise TypeError("Iterable condition can only be applied to 1-dimensional columns.")
+
+    # 3. Scalar equality condition
+    # For scalar columns -> vectorized equality
+    first_val = col_data[0]
+    if not isinstance(first_val, (np.ndarray, list, tuple)):
+        return np.asarray(col_data) == cond
+
+    # Array-like row values are not supported yet
+    ## This commented out below returns True is any value in the row value is equal to the provided
+    ## condition scalar value. Not sure this is what is expected.
+    # # For array-valued rows -> True if any element equals the scalar
+    # mask = np.fromiter(
+    #     (np.any(np.asarray(x) == cond) if x is not None else False for x in col_data),
+    #     dtype=bool,
+    #     count=len(col_data),
+    # )
+    raise TypeError("Scalar-valued conditions can only be applied to 1-dimensional columns.")
+
+
+def evaluate_filter_conditions(
     collection: SampleCollection,
     **conditions: dict[str, Any | list[Any] | Callable],
 ) -> np.ndarray:
@@ -603,22 +1123,14 @@ def _evaluate_filter_conditions(
             )
             raise KeyError(msg)
 
-        # Filter pyarrow table to column specified by 'key'
-        col_data = collection._domain_dataframe(domain=domain_of_key, keys=[key]).to_numpy()
+        col_data = collection._domain_dataframe(
+            domain=domain_of_key,
+            keys=[key],
+            decode_tensors=True,
+            strip_domain_prefix=True,
+        )[key].to_numpy()
 
-        # Evaluate condition
-        if callable(cond):
-            try:
-                local_mask = np.asarray(cond(col_data))
-            except Exception as e:
-                msg = f"Failed to apply callable conditon for key '{key}': {e}"
-                raise ValueError(msg) from e
-        elif isinstance(cond, list | tuple | set | np.ndarray):
-            local_mask = np.isin(col_data, cond, assume_unique=False)
-        else:
-            local_mask = col_data == cond
-
-        # Combine with global mask
-        mask &= local_mask.reshape(collection.n_samples)
+        cond_mask = _evaluate_single_condition(col_data=col_data, cond=cond)
+        mask &= cond_mask.reshape(collection.n_samples)
 
     return mask
