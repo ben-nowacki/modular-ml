@@ -51,6 +51,12 @@ class SerializableMixin(ABC):
         """Restore the internal state from a dictionary produced by get_state()."""
         ...
 
+    @classmethod
+    def from_state(cls, state: dict):
+        obj = cls.__new__(cls)  # bypass __init__
+        obj.set_state(state)
+        return obj
+
     # ------------------------------------------------------------------
     # Level 2: Bytes
     # ------------------------------------------------------------------
