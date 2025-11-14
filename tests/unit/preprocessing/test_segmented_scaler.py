@@ -29,9 +29,9 @@ def test_segmented_scaler_validates_boundaries_and_shapes():
     X = rng.normal(size=(3, 7))
     # Non-ascending boundaries
     with pytest.raises(ValueError, match=r"Boundaries must be strictly ascending"):
-        SegmentedScaler(boundaries=(0, 5, 5, 7)).fit(X)
+        SegmentedScaler(boundaries=(0, 5, 5, 7), scaler="standardscaler").fit(X)
     # Out of range endpoints
     with pytest.raises(ValueError, match=r"Boundaries must start at 0"):
-        SegmentedScaler(boundaries=(1, 5, 7)).fit(X)
+        SegmentedScaler(boundaries=(1, 5, 7), scaler="standardscaler").fit(X)
     with pytest.raises(ValueError, match=r"Last boundary does not match feature length"):
-        SegmentedScaler(boundaries=(0, 5, 6)).fit(X)
+        SegmentedScaler(boundaries=(0, 5, 6), scaler="standardscaler").fit(X)

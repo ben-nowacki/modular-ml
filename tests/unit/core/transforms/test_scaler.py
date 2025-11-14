@@ -3,7 +3,7 @@ import pytest
 from sklearn.preprocessing import StandardScaler
 
 from modularml.core.transforms.scaler import Scaler
-from modularml.preprocessing import SCALER_REGISTRY
+from modularml.core.transforms.scaler_registry import SCALER_REGISTRY
 
 
 @pytest.fixture

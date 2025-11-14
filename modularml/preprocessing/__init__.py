@@ -1,46 +1,58 @@
-from sklearn.preprocessing import (
-    MaxAbsScaler,
-    MinMaxScaler,
-    Normalizer,
-    PowerTransformer,
-    QuantileTransformer,
-    RobustScaler,
-    StandardScaler,
-)
+# Import registry first
+from modularml.core.transforms.scaler_registry import SCALER_REGISTRY
 
+# Import all scaler modules
+# These imports execute the module-level register() calls.
 from .absolute import Absolute
 from .negate import Negate
 from .per_sample_min_max import PerSampleMinMaxScaler
 from .per_sample_zero import PerSampleZeroStart
 from .segmented_scaler import SegmentedScaler
 
-__all__ = [
+# Optionally import sklearn scalers
+from sklearn.preprocessing import (
+    StandardScaler,
+    MinMaxScaler,
+    MaxAbsScaler,
+    RobustScaler,
+    Normalizer,
+    QuantileTransformer,
+    PowerTransformer,
+)
+
+__all__ = [  # noqa: RUF022
+    # classes
     "Absolute",
-    "MaxAbsScaler",
-    "MinMaxScaler",
     "Negate",
-    "Normalizer",
     "PerSampleMinMaxScaler",
     "PerSampleZeroStart",
-    "PowerTransformer",
-    "QuantileTransformer",
-    "RobustScaler",
     "SegmentedScaler",
+    # sklearn
     "StandardScaler",
+    "MinMaxScaler",
+    "MaxAbsScaler",
+    "RobustScaler",
+    "Normalizer",
+    "QuantileTransformer",
+    "PowerTransformer",
+    # registry
+    "SCALER_REGISTRY",
 ]
 
-
-SCALER_REGISTRY = {
-    "standard": StandardScaler,
-    "minmax": MinMaxScaler,
-    "maxabs": MaxAbsScaler,
-    "robust": RobustScaler,
-    "normalize": Normalizer,
-    "quantile": QuantileTransformer,
-    "power": PowerTransformer,
-    "sample_minmax": PerSampleMinMaxScaler,
-    "sample_zero": PerSampleZeroStart,
-    "negate": Negate,
-    "absolute": Absolute,
-    "segmented": SegmentedScaler,
-}
+# Register sklearn scalers
+SCALER_REGISTRY.update(
+    {
+        "StandardScaler": StandardScaler,
+        "MinMaxScaler": MinMaxScaler,
+        "MaxAbsScaler": MaxAbsScaler,
+        "RobustScaler": RobustScaler,
+        "Normalizer": Normalizer,
+        "QuantileTransformer": QuantileTransformer,
+        "PowerTransformer": PowerTransformer,
+        "PerSampleMinMaxScaler": PerSampleMinMaxScaler,
+        "PerSampleZeroStart": PerSampleZeroStart,
+        "Negate": Negate,
+        "Absolute": Absolute,
+        "SegmentedScaler": SegmentedScaler,
+    },
+)

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from modularml.core.transforms.scaler import Scaler
+from modularml.utils.comparators import deep_equal
+
+if TYPE_CHECKING:
+    from modularml.core.transforms.scaler import Scaler
 
 
 @dataclass
@@ -48,6 +52,38 @@ class ScalerRecord:
     flatten_meta: dict
     scaler_object: Scaler
 
+    def __eq__(self, other):
+        if not isinstance(other, ScalerRecord):
+            msg = f"Cannot compare equality between ScalerRecord and {type(other)}"
+            raise TypeError(msg)
+
+        return (
+            self.order == other.order
+            and self.domain == other.domain
+            and self.keys == other.keys
+            and self.variant_in == other.variant_in
+            and self.variant_out == other.variant_out
+            and self.fit_split == other.fit_split
+            and self.merged_axes == other.merged_axes
+            and self.flatten_meta == other.flatten_meta
+            and deep_equal(self.scaler_object.get_state(), other.scaler_object.get_state()),
+        )
+
+    def __hash__(self):
+        return hash(
+            (
+                self.order,
+                self.domain,
+                self.keys,
+                self.variant_in,
+                self.variant_out,
+                self.fit_split,
+                self.merged_axes,
+                self.flatten_meta,
+                self.scaler_object.get_state(),
+            ),
+        )
+
     # ==========================================
     # SerializableMixin
     # ==========================================
@@ -73,6 +109,8 @@ class ScalerRecord:
 
     def set_state(self, state: dict) -> None:
         """Restore the full ScalerRecord state (including Scaler state)."""
+        from modularml.core.transforms.scaler import Scaler
+
         if state.get("version") != "1.0":
             msg = f"Unsupported version: {state.get('version')}"
             raise NotImplementedError(msg)
@@ -88,3 +126,23 @@ class ScalerRecord:
 
         # scaler reconstruction
         self.scaler_object = Scaler.from_state(state["scaler_state"])
+
+    @classmethod
+    def from_state(cls, state: dict) -> ScalerRecord:
+        from modularml.core.transforms.scaler import Scaler
+
+        if state.get("version") != "1.0":
+            msg = f"Unsupported version: {state.get('version')}"
+            raise NotImplementedError(msg)
+
+        return cls(
+            order=state["order"],
+            domain=state["domain"],
+            keys=state["keys"],
+            variant_in=state["variant_in"],
+            variant_out=state["variant_out"],
+            fit_split=state["fit_split"],
+            merged_axes=state["merged_axes"],
+            flatten_meta=state["flatten_meta"],
+            scaler_object=Scaler.from_state(state["scaler_state"]),
+        )

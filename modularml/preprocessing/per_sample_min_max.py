@@ -22,6 +22,11 @@ class PerSampleMinMaxScaler(BaseEstimator, TransformerMixin):
         self._sample_min = None
         self._sample_range = None
 
+    def get_params(self, deep=True):  # noqa: FBT002
+        params = super().get_params(deep)
+        params["feature_range"] = self.feature_range
+        return params
+
     def fit(self, X, y=None):
         # No global fitting needed for per-sample normalization
         return self

@@ -14,6 +14,10 @@ class PerSampleZeroStart(BaseEstimator, TransformerMixin):
         super().__init__()
         self._x0 = None
 
+    def get_params(self, deep=True):  # noqa: FBT002
+        params = super().get_params(deep)
+        return params
+
     def fit(self, X, y=None):
         # No global fitting needed for per-sample normalization
         return self

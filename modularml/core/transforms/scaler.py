@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from modularml.preprocessing import SCALER_REGISTRY
+from modularml.core.transforms.scaler_registry import SCALER_REGISTRY
 from modularml.utils.serialization import SerializableMixin
 
 if TYPE_CHECKING:
@@ -111,6 +111,9 @@ class Scaler(SerializableMixin):
                 Mapping of registered scaler names to their corresponding classes.
 
         """
+        # Ensure all scalers are registered
+        import modularml.preprocessing  # noqa: F401
+
         return SCALER_REGISTRY
 
     def _validate_scaler(self):
@@ -226,6 +229,9 @@ class Scaler(SerializableMixin):
 
     def set_state(self, state: dict) -> None:
         """Reverse operation of get_state()."""
+        # Ensure all scalers are registered
+        import modularml.preprocessing  # noqa: F401
+
         if state["version"] == "1.0":
             self.scaler_name = state["scaler_name"]
             self.scaler_kwargs = state["scaler_kwargs"]
@@ -242,3 +248,12 @@ class Scaler(SerializableMixin):
             for attr, val in state["learned_attributes"].items():
                 setattr(self._scaler, attr, val)
             self._is_fit = True
+
+    @classmethod
+    def from_state(cls, state: dict) -> Scaler:
+        # Ensure all scalers are registered
+        import modularml.preprocessing  # noqa: F401
+
+        obj = cls.__new__(cls)
+        obj.set_state(state)
+        return obj
