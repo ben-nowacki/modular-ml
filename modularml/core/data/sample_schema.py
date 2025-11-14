@@ -18,14 +18,18 @@ INVALID_LABEL_CHARACTERS: set[str] = {".", " ", "/", "\\", ":"}
 # Metadata keys / prefixes embedded in Arrow tables
 METADATA_PREFIX = "modularml"
 METADATA_SCHEMA_VERSION_KEY = f"{METADATA_PREFIX}.version"
-SHAPE_POSTFIX = "shape"
-DTYPE_POSTFIX = "dtype"
+SHAPE_SUFFIX = "shape"
+DTYPE_SUFFIX = "dtype"
 
-# Canonical domain column names
+# Reserved domain column names
 FEATURES_COLUMN = "features"
 TARGETS_COLUMN = "targets"
 TAGS_COLUMN = "tags"
 SAMPLE_ID_COLUMN = "sample_id"
+
+# Reserved column variants
+RAW_VARIANT = "raw"
+TRANSFORMED_VARIANT = "transformed"
 
 
 # =====================================================================
@@ -51,10 +55,10 @@ class SampleSchema:
 
     """
 
-    # Domain mapping of column name to pyarrow.DataType
-    features: Mapping[str, pa.DataType] = field(default_factory=dict)
-    targets: Mapping[str, pa.DataType] = field(default_factory=dict)
-    tags: Mapping[str, pa.DataType] = field(default_factory=dict)
+    # Mapping: domain -> column name -> column variant -> dtype
+    features: Mapping[str, Mapping[str, pa.DataType]] = field(default_factory=dict)
+    targets: Mapping[str, Mapping[str, pa.DataType]] = field(default_factory=dict)
+    tags: Mapping[str, Mapping[str, pa.DataType]] = field(default_factory=dict)
 
     def __post_init__(self):
         """
@@ -65,10 +69,10 @@ class SampleSchema:
           2. No duplicate column names appear across domains.
           3. Columns names do not contains invalid characters.
         """
-        # Normalize to concrete dicts (so `.keys()` and `.items()` are stable)
-        self.features = dict(self.features)
-        self.targets = dict(self.targets)
-        self.tags = dict(self.tags)
+        # Instantiate dicts
+        self.features = {k: dict(v) for k, v in dict(self.features).items()}
+        self.targets = {k: dict(v) for k, v in dict(self.targets).items()}
+        self.tags = {k: dict(v) for k, v in dict(self.tags).items()}
 
         # Detect duplicate column names across domains
         duplicates = (
@@ -101,6 +105,7 @@ class SampleSchema:
             ValueError: if the domain name is invalid.
 
         """
+        domain = domain.lower()
         if domain == FEATURES_COLUMN:
             return list(self.features.keys())
         if domain == TARGETS_COLUMN:
@@ -110,7 +115,7 @@ class SampleSchema:
         msg = f"Unknown domain '{domain}'. Expected one of: {FEATURES_COLUMN}, {TARGETS_COLUMN}, {TAGS_COLUMN}"
         raise ValueError(msg)
 
-    def domain_types(self, domain: str) -> dict[str, pa.DataType]:
+    def domain_types(self, domain: str) -> dict[str, dict[str, pa.DataType]]:
         """
         Return the {column_name: DataType} mapping for a given domain.
 
@@ -118,9 +123,10 @@ class SampleSchema:
             domain: Domain name ("features", "targets", "tags").
 
         Returns:
-            Mapping of column names to Arrow data types.
+            Mapping of column names to variants to Arrow data types.
 
         """
+        domain = domain.lower()
         if domain == FEATURES_COLUMN:
             return self.features
         if domain == TARGETS_COLUMN:
@@ -130,16 +136,53 @@ class SampleSchema:
         msg = f"Unknown domain '{domain}'. Expected one of: {FEATURES_COLUMN}, {TARGETS_COLUMN}, {TAGS_COLUMN}"
         raise ValueError(msg)
 
+    def variant_keys(self, domain: str, key: str) -> list[str]:
+        """
+        Return available variants for a given column key.
+
+        Args:
+            domain (str): Domain name ("features", "targets", "tags").
+            key (str): Column name in specified domain.
+
+        Returns:
+            list[str]: Variant names
+
+        """
+        dom_types = self.domain_types(domain)
+        if key not in dom_types:
+            msg = f"Column '{key}' not found in domain '{domain}'"
+            raise KeyError(msg)
+        return list(dom_types[key].keys())
+
+    def variant_types(self, domain: str, key: str) -> dict[str, pa.DataType]:
+        """
+        Return the {variant_name: DataType} mapping for a given domain and column.
+
+        Args:
+            domain (str): Domain name ("features", "targets", "tags").
+            key (str): Column name in specified domain.
+
+        Returns:
+            Mapping of variants to Arrow data types.
+
+        """
+        dom_types = self.domain_types(domain)
+        if key not in dom_types:
+            msg = f"Column '{key}' not found in domain '{domain}'"
+            raise KeyError(msg)
+        return dom_types[key]
+
     def struct_type(self, domain: str) -> pa.StructType:
         """
-        Build a `pyarrow.StructType` for a given domain.
+        Build a `pyarrow.StructType` for a given domain, supporting variants.
 
-        This allows a FeatureSet to represent each domain
-        as a single structured Arrow column, e.g.:
-
-        ```
-        features: struct<voltage: list<float32>, current: list<float32>>
-        ```
+        Example:
+            ``` python
+            features: struct<
+                voltage: struct<raw: list<float32>, transformed: list<float32>>,
+                current: struct<raw: list<float32>>
+            >
+            ```
 
         Args:
             domain: One of {"features", "targets", "tags"}.
@@ -148,8 +191,11 @@ class SampleSchema:
             pa.StructType corresponding to that domain.
 
         """
-        domain_types = self.domain_types(domain)
-        fields = [pa.field(name, dtype) for name, dtype in domain_types.items()]
+        dom_types = self.domain_types(domain)
+        fields = []
+        for name, var_types in dom_types.items():
+            subfields = [pa.field(vname, vtype) for vname, vtype in var_types.items()]
+            fields.append(pa.field(name, pa.struct(subfields)))
         return pa.struct(fields)
 
     # =================================================================
@@ -168,14 +214,20 @@ class SampleSchema:
 
         """
 
-        def _extract_struct_type(domain: str) -> dict[str, pa.DataType]:
+        def _extract_struct_type(domain: str) -> dict[str, dict[str, pa.DataType]]:
             if domain not in table.column_names:
                 return {}
             struct_type = table[domain].type
             if not isinstance(struct_type, pa.StructType):
                 msg = f"Column '{domain}' must be a StructType, not {struct_type}."
                 raise TypeError(msg)
-            return {fld.name: fld.type for fld in struct_type}
+            domain_map: dict[str, dict[str, pa.DataType]] = {}
+            for fld in struct_type:
+                if isinstance(fld.type, pa.StructType):
+                    domain_map[fld.name] = {subfield.name: subfield.type for subfield in fld.type}
+                else:
+                    domain_map[fld.name] = {RAW_VARIANT: fld.type}
+            return domain_map
 
         return cls(
             features=_extract_struct_type(FEATURES_COLUMN),
@@ -269,9 +321,11 @@ def validate_str_list(keys: list[str]):
         FEATURES_COLUMN,
         TARGETS_COLUMN,
         TAGS_COLUMN,
+        RAW_VARIANT,
+        TRANSFORMED_VARIANT,
         METADATA_PREFIX,
-        DTYPE_POSTFIX,
-        SHAPE_POSTFIX,
+        DTYPE_SUFFIX,
+        SHAPE_SUFFIX,
     ):
         if res_key in keys:
             msg = f"`{res_key}` is a reserved keyword and cannot be used."

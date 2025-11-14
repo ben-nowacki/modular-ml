@@ -4,6 +4,7 @@ import ast
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -174,6 +175,15 @@ class SampleCollection:
         # Update table schema
         self.table = self.table.replace_schema_metadata(meta)
 
+    def __eq__(self, other):
+        if not isinstance(other, SampleCollection):
+            msg = f"Cannot compare equality between FeatureSet and {type(other)}"
+            raise TypeError(msg)
+
+        return self.table.equals(other.table)
+
+    __hash__ = None
+
     # =====================================================================
     # Core properties
     # =====================================================================
@@ -223,7 +233,8 @@ class SampleCollection:
         Description:
             Returns a dictionary describing the shape of each feature variant \
             in the FeatureSet. Keys are formatted as `"column.variant"` and \
-            values are tuples representing the array shape (e.g., `(n_rows, n_features)`).
+            values are tuples representing the array shape (e.g., `(101,)`). \
+            The shape does not include the number of samples dimension.
 
         Returns:
             dict[str, tuple[int, ...]]:
@@ -253,7 +264,8 @@ class SampleCollection:
         Description:
             Returns a dictionary describing the shape of each target variant \
             in the FeatureSet. Keys are formatted as `"column.variant"` and \
-            values are tuples representing the array shape (e.g., `(n_rows, n_targets)`).
+            values are tuples representing the array shape (e.g., (e.g., `(1,)`). \
+            The shape does not include the number of samples dimension.
 
         Returns:
             dict[str, tuple[int, ...]]:
@@ -283,7 +295,8 @@ class SampleCollection:
         Description:
             Returns a dictionary describing the shape of each tag variant \
             in the FeatureSet. Keys are formatted as `"column.variant"` and \
-            values are tuples representing the array shape (e.g., `(n_rows, n_tags)`).
+            values are tuples representing the array shape (e.g., `(1,)`). \
+            The shape does not include the number of samples dimension.
 
         Returns:
             dict[str, tuple[int, ...]]:
@@ -401,7 +414,7 @@ class SampleCollection:
         fmt: DataFormat = DataFormat.DICT_NUMPY,
         *,
         keys: str | list[str] | None = None,
-        variant: str | None = None,
+        variant: str | None = RAW_VARIANT,
         include_variant_suffix: bool = False,
         include_domain_prefix: bool = False,
     ):
@@ -415,7 +428,7 @@ class SampleCollection:
                 If None, all feature keys are returned. Defaults to None.
             variant (str, optional): The variant (e.g., "raw" or "transformed") of the feature keys to \
                 return. If None, all variants are returned and `include_variant_suffix` is set to True. \
-                If specfied, `keys` must all have matching variants. Defaults to None.
+                If specfied, `keys` must all have matching variants. Defaults to RAW_VARIANT.
             include_variant_suffix (bool): Whether to include the variant suffix in the \
                 feature keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
             include_domain_prefix (bool): Wether to include the domain prefix in the \
@@ -439,7 +452,7 @@ class SampleCollection:
         fmt: DataFormat = DataFormat.DICT_NUMPY,
         *,
         keys: str | list[str] | None = None,
-        variant: str | None = None,
+        variant: str | None = RAW_VARIANT,
         include_variant_suffix: bool = False,
         include_domain_prefix: bool = False,
     ):
@@ -453,7 +466,7 @@ class SampleCollection:
                 If None, all target keys are returned. Defaults to None.
             variant (str, optional): The variant (e.g., "raw" or "transformed") of the target keys to \
                 return. If None, all variants are returned and `include_variant_suffix` is set to True. \
-                If specfied, `keys` must all have matching variants. Defaults to None.
+                If specfied, `keys` must all have matching variants. Defaults to RAW_VARIANT.
             include_variant_suffix (bool): Whether to include the variant suffix in the \
                 target keys (e.g., "soh" or "soh.raw"). Defaults to False.
             include_domain_prefix (bool): Wether to include the domain prefix in the \
@@ -477,7 +490,7 @@ class SampleCollection:
         fmt: DataFormat = DataFormat.DICT_NUMPY,
         *,
         keys: str | list[str] | None = None,
-        variant: str | None = None,
+        variant: str | None = RAW_VARIANT,
         include_variant_suffix: bool = False,
         include_domain_prefix: bool = False,
     ):
@@ -491,7 +504,7 @@ class SampleCollection:
                 If None, all tag keys are returned. Defaults to None.
             variant (str, optional): The variant (e.g., "raw" or "transformed") of the tag keys to \
                 return. If None, all variants are returned and `include_variant_suffix` is set to True. \
-                If specfied, `keys` must all have matching variants. Defaults to None.
+                If specfied, `keys` must all have matching variants. Defaults to RAW_VARIANT.
             include_variant_suffix (bool): Whether to include the variant suffix in the \
                 tag keys (e.g., "cell_id" or "cell_id.raw"). Defaults to False.
             include_domain_prefix (bool): Wether to include the domain prefix in the \
@@ -990,6 +1003,49 @@ class SampleCollection:
             reshaped_data[k] = list(v)
         return pd.DataFrame(reshaped_data)
 
+    def save(self, path: str | Path) -> None:
+        """
+        Save SampleCollection to a single file using Arrow IPC (Feather v2).
+
+        Description:
+            This method fully fully preserves schema, domain struct columns, \
+            variants, metadata (shapes/dtypes), and sample_id column.
+            The `load` class method should be used for safe round-trip loading.
+
+        Args:
+            path (str | Path): Destination file path (e.g., "dataset.arrow").
+
+        """
+        path = Path(path).with_suffix(".arrow")
+        with pa.OSFile(str(path), "wb") as sink:
+            writer = pa.ipc.new_file(sink, self.table.schema)
+            writer.write(self.table)
+            writer.close()
+
+    @classmethod
+    def load(cls, path: str | Path) -> SampleCollection:
+        """
+        Load a SampleCollection previously saved with `.save()`.
+
+        Description:
+            All metadata, variants, domains, and sample_id column \
+            are restored exactly as originally saved.
+
+        Args:
+            path (str | Path): File path to load from.
+
+        Returns:
+            SampleCollection: A fully reconstructed instance.
+
+        """
+        path = Path(path)
+        with pa.OSFile(str(path), "rb") as source:
+            reader = pa.ipc.open_file(source)
+            table = reader.read_all()
+
+        # Schema is inferred back from metadata inside table
+        return cls(table=table)
+
 
 # =========================================================================
 # Helper Methods
@@ -1094,12 +1150,35 @@ def _evaluate_single_condition(col_data: np.ndarray, cond) -> np.ndarray:
 
 def evaluate_filter_conditions(
     collection: SampleCollection,
+    variant_to_use: str = RAW_VARIANT,
     **conditions: dict[str, Any | list[Any] | Callable],
 ) -> np.ndarray:
     """
     Evaluate filtering conditions and return a boolean mask of matching rows.
 
     Used internally by both FeatureSet.filter() and FeatureSetView.filter().
+
+    Args:
+        collection (SampleCollection):
+            The SampleCollection instance to filter.
+        variant_to_use (str, optional):
+            Conditions will only be evaluated on the specified `variant` \
+            of each reference column in `conditions`. Defaults to RAW_VARIANT.
+        **conditions:
+                Mapping of column names (from any domain) to filter criteria.
+                Values may be:
+                - `scalar`: selects rows where the column equals the value.
+                - `sequence`: selects rows where the column is in the given list/set.
+                - `callable`: a function that takes a NumPy array and returns a boolean mask.
+
+    Raises:
+        KeyError: _description_
+
+    Returns:
+        np.ndarray:
+            Mask over interal PyArrow array of samples satisfying all \
+            filter conditions.
+
     """
     # Start with all all rows included
     mask = np.ones(collection.n_samples, dtype=bool)
@@ -1123,12 +1202,12 @@ def evaluate_filter_conditions(
             )
             raise KeyError(msg)
 
-        col_data = collection._domain_dataframe(
+        col_data = collection.get_variant_data(
             domain=domain_of_key,
-            keys=[key],
-            decode_tensors=True,
-            strip_domain_prefix=True,
-        )[key].to_numpy()
+            key=key,
+            variant=variant_to_use,
+            fmt=DataFormat.NUMPY,
+        )
 
         cond_mask = _evaluate_single_condition(col_data=col_data, cond=cond)
         mask &= cond_mask.reshape(collection.n_samples)
