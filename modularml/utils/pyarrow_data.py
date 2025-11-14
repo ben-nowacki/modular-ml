@@ -1,17 +1,110 @@
 import ast
+from typing import Literal
 
 import numpy as np
 import pyarrow as pa
 
 from modularml.core.data.sample_schema import (
-    DTYPE_POSTFIX,
+    DTYPE_SUFFIX,
     FEATURES_COLUMN,
     METADATA_PREFIX,
-    SAMPLE_ID_COLUMN,
-    SHAPE_POSTFIX,
+    RAW_VARIANT,
+    SHAPE_SUFFIX,
     TAGS_COLUMN,
     TARGETS_COLUMN,
+    TRANSFORMED_VARIANT,
 )
+from modularml.utils.shape_utils import get_shape, shape_to_tuple
+
+
+def normalize_numpy_dtype_for_pyarrow_dtype(dtype) -> str:
+    """
+    Normalize dtype across NumPy and Arrow for consistent metadata storage.
+
+    Returns a semantic type string like 'float32', 'int64', 'string', etc.
+    """
+    if isinstance(dtype, str):
+        dtype = np.dtype(dtype)
+
+    if np.issubdtype(dtype, np.floating):
+        return f"float{dtype.itemsize * 8}"
+    if np.issubdtype(dtype, np.integer):
+        return f"int{dtype.itemsize * 8}"
+    if np.issubdtype(dtype, np.bool_):
+        return "bool"
+    if np.issubdtype(dtype, np.str_) or np.issubdtype(dtype, np.object_):
+        return "string"
+    # fallback for unknown / complex types
+    return str(pa.from_numpy_dtype(dtype))
+
+
+def get_shape_of_pyarrow_array(arr: pa.Array, *, include_nrows: bool = True) -> tuple[int, ...]:
+    """Infers the shape of a PyArrow array."""
+    # Get num rows
+    n_rows = len(arr)
+    if n_rows == 0:
+        return ()
+
+    detected: tuple[int, ...] | None = None
+    for i in range(min(n_rows, 10)):  # only sample first 10 rows for speed
+        if not arr[i].is_valid:
+            continue
+        s = get_shape(arr[i].as_py())
+        s = shape_to_tuple(s.get("__shape__") if isinstance(s, dict) else s)
+        if detected is None:
+            detected = s
+        elif detected != s:
+            detected = None
+            break
+    if include_nrows:
+        return (n_rows, *detected) if detected else (n_rows,)
+
+    return detected if detected else ()
+
+
+def get_dtype_of_pyarrow_array(arr: pa.Array) -> str:
+    """
+    Infer array data type directly from contents.
+
+    Returns:
+        str: String representing the element data type. \
+            For example, "float32", "int64", or "bytes".
+
+    """
+
+    def arrow_dtype_string(dtype: pa.DataType) -> str:
+        """
+        Return a precise string representation of a PyArrow DataType.
+
+        Preserves bit width (e.g. 'float32', 'int64').
+        """
+        if pa.types.is_binary(dtype):
+            return "binary"
+        if pa.types.is_string(dtype):
+            return "string"
+        if pa.types.is_boolean(dtype):
+            return "bool"
+        if pa.types.is_floating(dtype):
+            return f"float{dtype.bit_width}"
+        if pa.types.is_integer(dtype):
+            return f"{'int' if dtype.bit_width > 0 else 'uint'}{dtype.bit_width}"
+        return str(dtype)
+
+    t = arr.type
+
+    # Case 1: nested list (tensor-like)
+    if pa.types.is_list(t):
+        base = t
+        while pa.types.is_list(base):
+            base = base.value_type
+        return base.to_pandas_dtype().__name__
+
+    # Case 2: binary blobs
+    if pa.types.is_binary(t) or pa.types.is_fixed_size_binary(t):
+        return "bytes"
+
+    # Case 3: primitive (int, float, string, etc.)
+    return arrow_dtype_string(t)
 
 
 def make_nested_list_type(base_type: pa.DataType, depth: int) -> pa.DataType:
@@ -22,16 +115,17 @@ def make_nested_list_type(base_type: pa.DataType, depth: int) -> pa.DataType:
     return typ
 
 
-def numpy_to_pyarrow_column(
+def numpy_to_pyarrow_struct_variant(
     name: str,
     data: np.ndarray,
     *,
+    variant: Literal["raw", "transformed"] = "raw",
     dtype: pa.DataType | None = None,
     store_shape_metadata: bool = True,
     max_list_depth: int = 2,
-) -> tuple[str, pa.Array, dict[bytes, bytes]]:
+) -> tuple[str, pa.StructArray, dict[bytes, bytes]]:
     """
-    Converts a NumPy array of any rank into a PyArrow column suitable for use in a Table.
+    Converts a NumPy array of any rank into a PyArrow struct suitable for use in a Table.
 
     This function automatically chooses between:
       - Nested list arrays (for rank ≤ max_list_depth)
@@ -40,14 +134,15 @@ def numpy_to_pyarrow_column(
     Args:
         name: Column name.
         data: NumPy array of shape (N, ...).
+        variant (Literal["raw", "transformed"]): The variant to store the data under.
         dtype: Optional element dtype (defaults to `pa.from_numpy_dtype(data.dtype)`).
         store_shape_metadata: If True, returns schema metadata for shape reconstruction.
         max_list_depth: Maximum nesting depth for list-based encoding (default=2).
 
     Returns:
-        (name, pa.Array, metadata)
+        (name, pa.StructArray, metadata)
             name: The same as input `name`.
-            pa.Array: PyArrow array storing the tensor.
+            pa.StructArray: PyArrow struct storing the tensor under the variant.
             metadata: Dict with optional shape and dtype info for schema attachment.
 
     Raises:
@@ -55,6 +150,9 @@ def numpy_to_pyarrow_column(
         ValueError: If `data` is empty.
 
     """
+    if variant not in [RAW_VARIANT, TRANSFORMED_VARIANT]:
+        msg = f"`variant` must be one of: {[RAW_VARIANT, TRANSFORMED_VARIANT]}"
+        raise ValueError(msg)
     if not isinstance(data, np.ndarray):
         msg = f"Expected NumPy array, got {type(data)}"
         raise TypeError(msg)
@@ -65,43 +163,41 @@ def numpy_to_pyarrow_column(
     if dtype is None:
         dtype = pa.from_numpy_dtype(data.dtype)
 
-    # Drop trailing singleton dimensions (e.g., (N,1) → (N,))
+    # Drop trailing singleton dimensions (e.g., (N,1) to (N,))
     if data.ndim > 1 and data.shape[-1] == 1:
         data = data.squeeze(-1)
 
     n_samples = data.shape[0]
     shape = data.shape[1:]
 
-    # -------------------------------------------
     # Case 1: small tensors (1D, 2D)
-    # -------------------------------------------
     if data.ndim <= max_list_depth:
         # Build recursive list type matching rank
         element_type = pa.from_numpy_dtype(data.dtype)
         list_type = make_nested_list_type(element_type, depth=data.ndim - 1)
         array = pa.array(data.tolist(), type=list_type)
+
+    # Case 2: high-rank tensors → store as binary
     else:
-        # -------------------------------------------
-        # Case 2: high-rank tensors → store as binary blobs
-        # -------------------------------------------
         # Convert each row (sample) to bytes
         element_size = data[0].nbytes if isinstance(data[0], np.ndarray) else np.prod(shape) * data.itemsize
         array = pa.array([data[i].tobytes() for i in range(n_samples)], type=pa.binary(element_size))
 
-    # -------------------------------------------
+    # Store pyarrow array under specified variant
+    struct_array = pa.StructArray.from_arrays([array], [variant])
+
     # Metadata for shape reconstruction
-    # -------------------------------------------
     metadata = {}
     if store_shape_metadata:
         metadata = {
-            f"{name}.{SHAPE_POSTFIX}".encode(): str(shape).encode(),
-            f"{name}.{DTYPE_POSTFIX}".encode(): str(data.dtype).encode(),
+            f"{name}.{variant}.{SHAPE_SUFFIX}".encode(): str(shape).encode(),
+            f"{name}.{variant}.{DTYPE_SUFFIX}".encode(): normalize_numpy_dtype_for_pyarrow_dtype(data.dtype).encode(),
         }
 
-    return name, array, metadata
+    return name, struct_array, metadata
 
 
-def pyarrow_column_to_numpy(
+def pyarrow_array_to_numpy(
     array: pa.Array,
     *,
     shape: tuple[int, ...] | None = None,
@@ -175,81 +271,61 @@ def build_sample_schema_table(
     *,
     features: dict[str, np.ndarray],
     targets: dict[str, np.ndarray],
-    tags: dict[str, np.ndarray],
+    tags: dict[str, np.ndarray] | None = None,
 ) -> pa.Table:
     """
-    Build a metadata-preserving PyArrow table compatible with ``SampleCollection``.
+    Build a metadata-preserving PyArrow table compatible with `SampleCollection`.
 
     Description:
-        This function converts three groups of NumPy arrays—``features``, ``targets``,
-        and ``tags``—into a single ``pyarrow.Table`` structured for use with
-        ``SampleCollection``. Each group is stored as a ``StructArray`` column
-        containing its respective subfields.
+        Converts three dictionaries of NumPy arrays (`features`, `targets`, and `tags`) \
+        into a structured Arrow table. Each domain becomes a Struct column whose fields \
+        are *per-column structs* containing a single variant field: `"raw"`.
 
-        During the conversion, per-array metadata (e.g., ``shape`` and ``dtype``)
-        is automatically collected and attached to the resulting table schema
-        under namespaced keys such as:
+        Example layout:
+        ```
+        features: struct<
+            voltage: struct<raw: list<float32>>,
+            current: struct<raw: list<float32>>
+        >
+        ```
 
-        - ``features.voltage.shape``
-        - ``targets.soh.dtype``
-        - ``tags.cell_id.shape``
+        Each leaf array is stored as a PyArrow array, and accompanying metadata \
+        (shape, dtype) is attached to the table schema for full reconstruction.
 
-        This metadata enables full reconstruction of the original NumPy arrays
-        (including shape and dtype) during deserialization.
+        Metadata keys follow the namespaced convention:
+            - `features.voltage.raw.shape`
+            - `features.voltage.raw.dtype`
 
     Args:
         features:
-            Dictionary mapping feature names to NumPy arrays.
-            Each array must share the same first dimension (number of samples).
+            Mapping of feature names → NumPy arrays.
         targets:
-            Dictionary mapping target/output names to NumPy arrays.
-            Each array must share the same first dimension as ``features``.
+            Mapping of target names → NumPy arrays.
         tags:
-            Dictionary mapping metadata or identifier names to NumPy arrays
-            (e.g., ``cell_id``, ``group_id``). Also must share the same
-            first dimension.
+            Mapping of tag names → NumPy arrays.
 
     Returns:
         pa.Table:
-            A PyArrow table with three struct columns—``features``, ``targets``,
-            and ``tags``—plus a combined metadata dictionary containing shape
-            and dtype information for all subfields.
-
-    Notes:
-        - Singleton trailing dimensions (e.g., arrays of shape ``(N, 1)``)
-          are automatically squeezed to ``(N,)`` for compatibility.
-        - Metadata keys are automatically prefixed using the group name
-          (``features``, ``targets``, or ``tags``) to avoid collisions.
-        - The resulting table schema contains all metadata entries accessible via:
-          ``table.schema.metadata``
-
-    Examples:
-        >>> rng = np.random.default_rng(0)
-        >>> features = {"voltage": rng.random((5, 100)), "current": rng.random((5, 100))}
-        >>> targets = {"soh": rng.random((5, 1))}
-        >>> tags = {"cell_id": rng.integers(0, 5, (5, 1))}
-        >>> table = build_samplecollection_table(features=features, targets=targets, tags=tags)
-        >>> print(table.schema.metadata)
-        {
-            b'features.voltage.shape': b'(100,)',
-            b'features.voltage.dtype': b'float64',
-            b'targets.soh.shape': b'()',
-            b'targets.soh.dtype': b'float64',
-            b'tags.cell_id.shape': b'()',
-            b'tags.cell_id.dtype': b'int64'
-        }
+            A PyArrow table with structured columns (`features`, `targets`, and \
+            optionally `tags`), each holding per-column variant structs and \
+            complete dtype/shape metadata.
 
     """
 
-    def _make_struct_from_dict(
+    def _make_domain_struct(
         data: dict[str, np.ndarray],
         meta_prefix: str | None = None,
+        expected_len: int | None = None,
     ) -> tuple[pa.StructArray, dict[bytes, bytes]]:
         """Convert a dictionary of NumPy arrays into a StructArray + metadata."""
-        arrays, names = [], []
-        metadata: dict[bytes, bytes] = {}
-        for name, arr in data.items():
-            col_name, col_array, col_meta = numpy_to_pyarrow_column(name=name, data=arr)
+        names, arrays, metadata = [], [], {}
+
+        for key, arr in data.items():
+            col_name, col_array, col_meta = numpy_to_pyarrow_struct_variant(
+                name=key,
+                data=arr,
+                variant=RAW_VARIANT,
+            )
             arrays.append(col_array)
             names.append(col_name)
 
@@ -257,26 +333,38 @@ def build_sample_schema_table(
             if meta_prefix:
                 for k, v in col_meta.items():
                     # Handle both bytes and string keys gracefully
-                    key = k.decode() if isinstance(k, bytes) else str(k)
-                    prefixed_key = f"{meta_prefix}.{key}"
-                    metadata[prefixed_key.encode()] = v
+                    base = k.decode() if isinstance(k, bytes) else str(k)
+                    full = f"{meta_prefix}.{base}"
+                    metadata[full.encode()] = v
             else:
                 metadata.update(col_meta)
 
+        # Handle empty domain: still create an empty struct with correct number of rows
+        if not arrays:
+            n = expected_len if expected_len is not None else 0
+            empty_struct_type = pa.struct([])
+            empty_array = pa.array([{}] * n, type=empty_struct_type)
+            return empty_array, metadata
+
         return pa.StructArray.from_arrays(arrays, names=names), metadata
 
-    # Build struct arrays and collect metadata
-    features_struct, meta_features = _make_struct_from_dict(
-        features,
+    # Assume all domains have same length
+    n_rows = len(next(iter(features.values())))
+
+    # Build each domain as Struct<col: Struct<raw: arr>>
+    features_struct, meta_features = _make_domain_struct(
+        data=features,
         meta_prefix=f"{METADATA_PREFIX}.{FEATURES_COLUMN}",
     )
-    targets_struct, meta_targets = _make_struct_from_dict(
-        targets,
+    targets_struct, meta_targets = _make_domain_struct(
+        data=targets,
         meta_prefix=f"{METADATA_PREFIX}.{TARGETS_COLUMN}",
+        expected_len=n_rows,
     )
-    tags_struct, meta_tags = _make_struct_from_dict(
-        tags,
+    tags_struct, meta_tags = _make_domain_struct(
+        data=tags or {},
         meta_prefix=f"{METADATA_PREFIX}.{TAGS_COLUMN}",
+        expected_len=n_rows,
     )
 
     table = pa.table(
@@ -288,12 +376,9 @@ def build_sample_schema_table(
     )
 
     # Merge and attach metadata
-    all_metadata = {}
-    all_metadata.update(meta_features)
-    all_metadata.update(meta_targets)
-    all_metadata.update(meta_tags)
-    if table.schema.metadata is not None:
+    all_metadata = {**meta_features, **meta_targets, **meta_tags}
+    if table.schema.metadata:
         all_metadata.update(table.schema.metadata)
-
     table = table.replace_schema_metadata(all_metadata)
+
     return table

@@ -60,3 +60,70 @@ def format_value_to_sig_digits(value: float, sig_digits: int = 3, *, round_integ
 
     decimals = max(0, sig_digits - order - 1)
     return f"{value:.{decimals}f}"
+
+
+def flatten_dict_paths(d: dict[str, any], prefix: str = "", separator: str = ".") -> list[str]:
+    """
+    Recursively flatten a nested dictionary into separator-joined key paths.
+
+    Description:
+        This function traverses any nested dictionary whose:
+          - Keys are strings
+          - Values may be: a string, a list of strings, or another nested dictionary
+
+        The resulting paths are returned as strings joined by the given
+        separator (default: "."). Each terminal element (string or list item)
+        forms the end of a full path.
+
+    Args:
+        d (dict[str, any]):
+            Input nested dictionary to flatten.
+        prefix (str, optional):
+            Internal recursion prefix. Should generally be left empty.
+        separator (str, optional):
+            String used to join nested key names. Defaults to ".".
+
+    Returns:
+        list[str]:
+            A list of fully flattened paths using the specified separator.
+
+    Raises:
+        TypeError:
+            If a list contains non-string elements, or if an unsupported
+            value type is encountered in the dictionary.
+
+    Examples:
+        ```python
+        flatten_dict_paths({"a": ["b", "c"]})
+        # ['a.b', 'a.c']
+
+        flatten_dict_paths({"a": {"b": "c", "d": "e"}})
+        # ['a.b.c', 'a.d.e']
+
+        flatten_dict_paths({"a": {"b": ["c", "f"], "d": ["e", "g"]}})
+        # ['a.b.c', 'a.b.f', 'a.d.e', 'a.d.g']
+        ```
+
+    """
+    paths = []
+    for k, v in d.items():
+        full_prefix = f"{prefix}.{k}" if prefix else k
+
+        if isinstance(v, dict):
+            # Recurse deeper into nested dict
+            paths.extend(flatten_dict_paths(v, prefix=full_prefix, separator=separator))
+        elif isinstance(v, str):
+            # Terminal string value
+            paths.append(f"{full_prefix}.{v}")
+        elif isinstance(v, list):
+            # List of terminal strings
+            for item in v:
+                if not isinstance(item, str):
+                    msg = f"List values must be strings, got {type(item)} in key '{k}'"
+                    raise TypeError(msg)
+                paths.append(f"{full_prefix}.{item}")
+        else:
+            msg = f"Unsupported value type {type(v)} for key '{k}'"
+            raise TypeError(msg)
+
+    return paths

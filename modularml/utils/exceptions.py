@@ -124,7 +124,7 @@ class SampleLoadError(FeatureSetError):
         super().__init__(message)
 
 
-class SubsetOverlapWarning(UserWarning):
+class SplitOverlapWarning(UserWarning):
     pass
 
 

@@ -1,3 +1,6 @@
+from typing import Any
+
+
 class CaseInsensitiveRegistry(dict):
     """
     Dictionary-like registry with case-insensitive key lookup.
@@ -99,3 +102,10 @@ class CaseInsensitiveRegistry(dict):
     def original_keys(self):
         """Return keys as originally inserted."""
         return list(self.keys())
+
+    def register(self, name: str, obj: Any):
+        key_l = name.lower()
+        if key_l in (k.lower() for k in self.keys()):
+            msg = f"Duplicate registry key (case-insensitive): {name}"
+            raise KeyError(msg)
+        self[name] = obj

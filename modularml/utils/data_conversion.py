@@ -10,6 +10,112 @@ from modularml.utils.error_handling import ErrorMode
 from modularml.utils.optional_imports import check_tensorflow, check_torch, ensure_tensorflow, ensure_torch
 
 
+def flatten_to_2d(arr: np.ndarray, merged_axes: int | tuple[int]):
+    """
+    Flatten an N-D array into 2D by *merging* a set of axes.
+
+    Description:
+        The axes in `merged_axes` are multiplied together to form one \
+        dimension of the 2D output; all remaining axes form the other dimension.
+        If axis 0 is included, merged axes become the first dimension \
+        (samples); otherwise they become the second dimension (features).
+
+    Args:
+        arr (np.ndarray): Input N-D array.
+        merged_axes (int | tuple[int]):
+            Axes whose sizes are merged into a single dimension.
+
+    Returns:
+        flat (np.ndarray): 2D array of shape (A, B).
+        meta (dict): Metadata for reversing the operation:
+            - "original_shape": tuple
+            - "merged_axes": tuple
+
+    Example:
+        ```python
+        X.shape  # (1000, 3, 16, 16)
+        Y = flatten_to_2d(X, (2,3))
+        Y.shape  # (3000, 256)
+        ```
+
+    """
+    arr = np.asarray(arr)
+    original_shape = arr.shape
+
+    # Axes to merge and resulting size
+    merged_axes = (merged_axes,) if isinstance(merged_axes, int) else tuple(merged_axes)
+    merged_size = int(np.prod([original_shape[i] for i in merged_axes]))
+
+    # Axes to flatten
+    flattened_axes = tuple(i for i in range(arr.ndim) if i not in merged_axes)
+    flattened_size = int(np.prod([original_shape[i] for i in flattened_axes]))
+
+    # Permute merged axes:
+    #   - It should be first if 0 in merged_axes (merge sample dim)
+    #   - Otherwise it should be last (merge feature shape)
+    if 0 in merged_axes:
+        perm = merged_axes + flattened_axes
+        final_shape = (merged_size, flattened_size)
+    else:
+        perm = flattened_axes + merged_axes
+        final_shape = (flattened_size, merged_size)
+
+    arr_permutated = arr.transpose(perm)
+    arr_flat = arr_permutated.reshape(final_shape)
+
+    # Store metadata required to reverse the transform
+    meta = {
+        "original_shape": original_shape,
+        "merged_axes": merged_axes,
+    }
+
+    return arr_flat, meta
+
+
+def unflatten_from_2d(flat: np.ndarray, meta: dict):
+    """
+    Restore the original N-D array from a 2D matrix flattened by `flatten_to_2d`.
+
+    Description:
+        Reconstructs the original shape using metadata describing which axes \
+        were merged and how they were ordered during flattening.
+
+    Args:
+        flat (np.ndarray): 2D flattened array.
+        meta (dict): Metadata from `flatten_to_2d`:
+            - "original_shape": tuple
+            - "merged_axes": tuple
+
+    Returns:
+        np.ndarray: The restored N-D array.
+
+    """
+    original_shape = meta["original_shape"]
+    ndim = len(original_shape)
+
+    # Axes that were merged
+    merged_axes = meta["merged_axes"]
+    merged_orig_shape = tuple(original_shape[i] for i in merged_axes)
+
+    # Axes that were flattened
+    flatten_axes = tuple(i for i in range(ndim) if i not in merged_axes)
+    flatten_orig_shape = tuple(original_shape[i] for i in flatten_axes)
+
+    # Reshape (undo collapse in proper order)
+    if 0 in merged_axes:
+        exp_shape = merged_orig_shape + flatten_orig_shape
+        perm = merged_axes + flatten_axes
+    else:
+        exp_shape = flatten_orig_shape + merged_orig_shape
+        perm = flatten_axes + merged_axes
+
+    arr_expanded = flat.reshape(exp_shape)
+    inv_perm = np.argsort(perm)
+    arr_orig = arr_expanded.transpose(inv_perm)
+
+    return arr_orig
+
+
 def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
     """
     Align the *ranks* (number of dimensions) of two array-like objects.
@@ -143,6 +249,43 @@ def align_ranks(arr1: Any, arr2: Any, backend: Backend | None = None) -> tuple:
         raise RuntimeError("Failed to match ranks.")
 
     return arr1, arr2
+
+
+def stack_nested_numpy(obj: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+    """
+    Recursively stack nested NumPy object arrays into a dense array of shape (n_samples, *shape).
+
+    Args:
+        obj (np.ndarray):
+            Outer NumPy array (dtype=object) where each element is either a NumPy array or \
+                another object array.
+        shape (tuple[int, ...]):
+            Expected inner shape per sample, excluding n_samples.
+
+    Returns:
+        np.ndarray: Dense NumPy array of shape (n_samples, *shape).
+
+    Notes:
+        - Assumes homogenous shapes across all samples.
+        - Never converts to PyList (keeps everything in NumPy).
+        - Recurses only for object-dtype subarrays.
+
+    """
+    if not isinstance(obj, np.ndarray):
+        msg = f"Expected np.ndarray, got {type(obj)}"
+        raise TypeError(msg)
+    if obj.dtype != object:
+        # Already dense numeric array
+        return obj.reshape((len(obj), *shape)) if shape else obj
+
+    # Base case: final depth, inner arrays are numeric
+    if len(shape) == 1 or all(not isinstance(sub, np.ndarray) or sub.dtype != object for sub in obj):
+        return np.stack(obj, axis=0)
+
+    # Recursive case: still object arrays inside
+    inner_shape = shape[1:]
+    stacked_inner = [stack_nested_numpy(sub, inner_shape) for sub in obj]
+    return np.stack(stacked_inner, axis=0)
 
 
 def merge_dict_of_arrays_to_numpy(
