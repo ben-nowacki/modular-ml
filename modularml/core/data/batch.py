@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 
-from modularml.core.data.sample_schema import FEATURES_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
+from modularml.core.data.sample_schema import FEATURES_COLUMN, SAMPLE_ID_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
 
 
 class RoleData:
@@ -43,6 +43,7 @@ class RoleData:
         self,
         data: dict[str, Any] | None = None,
         *,
+        sample_uuids: Any = None,
         features: Any = None,
         targets: Any = None,
         tags: Any = None,
@@ -53,12 +54,19 @@ class RoleData:
         else:
             # Construct standardized mapping
             self.data = {}
+            if sample_uuids is not None:
+                self.data[SAMPLE_ID_COLUMN] = sample_uuids
             if features is not None:
                 self.data[FEATURES_COLUMN] = features
             if targets is not None:
                 self.data[TARGETS_COLUMN] = targets
             if tags is not None:
                 self.data[TAGS_COLUMN] = tags
+
+    @property
+    def sample_uuids(self):
+        """Tensor-like data stored under SAMPLE_ID_COLUMN."""
+        return self.data.get(SAMPLE_ID_COLUMN)
 
     @property
     def features(self):
@@ -74,6 +82,12 @@ class RoleData:
     def tags(self):
         """Tensor-like data stored under TAGS_COLUMN."""
         return self.data.get(TAGS_COLUMN)
+
+    def __repr__(self) -> str:
+        return f"RoleData(features={self.features.shape}, targets={self.targets.shape}, tags={self.tags.shape})"
+
+    def __str__(self):
+        return self.__repr__()
 
 
 class NodeShapes:
@@ -131,7 +145,7 @@ class NodeShapes:
         return self.shapes[domain]
 
     def __repr__(self):
-        return f"ShapeSpec({self.domain_shapes})"
+        return f"ShapeSpec({self.shapes})"
 
     @property
     def features_shape(self) -> tuple[int, ...]:
