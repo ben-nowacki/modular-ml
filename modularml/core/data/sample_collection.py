@@ -27,6 +27,7 @@ from modularml.core.data.sample_schema import (
 from modularml.utils.data_conversion import convert_dict_to_format, convert_to_format, stack_nested_numpy
 from modularml.utils.data_format import DataFormat, ensure_list
 from modularml.utils.pyarrow_data import (
+    flatten_schema,
     get_dtype_of_pyarrow_array,
     get_shape_of_pyarrow_array,
     numpy_to_pyarrow_struct_variant,
@@ -199,6 +200,10 @@ class SampleCollection:
         meta = self.table.schema.metadata or {}
         val = meta.get(METADATA_SCHEMA_VERSION_KEY.encode())
         return val.decode() if val else None
+
+    @property
+    def available_domains(self) -> list[str]:
+        return [FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN, SAMPLE_ID_COLUMN]
 
     @property
     def n_samples(self) -> int:
@@ -522,6 +527,75 @@ class SampleCollection:
             include_variant_suffix=include_variant_suffix,
             include_domain_prefix=include_domain_prefix,
         )
+
+    def get_sample_uuids(self, fmt: DataFormat = DataFormat.NUMPY):
+        """
+        Retrieve sample UUIDs in this collection.
+
+        Args:
+            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
+                Defaults to a single dictionary of numpy arrays.
+
+        Returns:
+            Sample UUIDs in the requested format.
+
+        """
+        # Access the sample_id column as an Arrow array
+        pa_arr = self.table.column(SAMPLE_ID_COLUMN).combine_chunks()
+
+        # Return raw pyarrow array is no format is specified
+        if fmt is None:
+            return pa_arr
+
+        # Otherwise PyArrow's `to_numpy` for list-like arrays (1D/2D)
+        # .to_numpy() returns an object-array, we need to convert to proper shape and dtype
+        data = pa_arr.to_numpy(zero_copy_only=False)
+        np_arr = stack_nested_numpy(data, (1,))
+        return convert_to_format(np_arr, fmt=fmt)
+
+    def get_all_keys(
+        self,
+        *,
+        include_variant_suffix: bool = True,
+        include_domain_prefix: bool = True,
+    ) -> list[str]:
+        """
+        Get all column names in the SampleCollection.
+
+        Args:
+            include_variant_suffix (bool): Whether to include the variant suffix in the \
+                keys (e.g., "voltage" or "voltage.raw"). Defaults to True.
+            include_domain_prefix (bool): Wether to include the domain prefix in the \
+                keys (e.g., "cell_id" or "tags.cell_id"). Defaults to True.
+
+        Returns:
+            list[str]: All unique columns in the SampleCollection.
+
+        """
+        out = []
+        for col in flatten_schema(self.table.schema, separator="."):
+            # sample_id either gets dropped (if !include_domain_prefix) or returned (has no variant)
+            if col == SAMPLE_ID_COLUMN:
+                if include_domain_prefix:
+                    out.append(col)
+                continue
+
+            # Split column by "."
+            parts = col.split(sep=".")
+            if len(parts) != 3:
+                msg = f"Unknown column schema for col `{col}`. Should have 3 parts but detected {len(parts)}."
+                raise ValueError(msg)
+
+            # Remove specified components
+            if not include_domain_prefix:
+                parts = parts[1:]
+            if not include_variant_suffix:
+                parts = parts[:-1]
+
+            # Re-join with "." separator
+            out.append(".".join(parts))
+
+        return sorted(set(out))
 
     # =====================================================================
     # Domain-level accessors
