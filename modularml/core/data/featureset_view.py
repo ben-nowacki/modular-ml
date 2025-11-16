@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from modularml.core.graph.featureset import FeatureSet
 
 
-@dataclass
 class FeatureSetView(SplitMixin):
     """
     Logical row-indexed view over a specific collection within a FeatureSet.
@@ -32,9 +31,11 @@ class FeatureSetView(SplitMixin):
         or a fully realized :class:`FeatureSet`.
     """
 
-    source: FeatureSet
-    indices: np.ndarray
-    label: str
+    def __init__(self, source: FeatureSet, indices: np.ndarray, label: str):
+        super().__init__()
+        self.source = source
+        self.indices = indices
+        self.label = label
 
     # =====================================================
     # Basic info
