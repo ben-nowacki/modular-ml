@@ -1,7 +1,7 @@
 # ModularML Roadmap
 
 ## v1.0.0 — Core ModularML Pipeline  
-![Progress](https://img.shields.io/badge/progress-0%25-lightgrey)
+![Progress](https://img.shields.io/badge/progress-67%25-yellow)
 
 **Target Release:** Dec 2025
 *(Single breaking overhaul release; all features land together)*
@@ -73,7 +73,7 @@
 ---
 
 ## v1.1.0 — Multi-Experiment Container & Comparison  
-![Progress](https://img.shields.io/badge/progress-0%25-lightgrey)
+![Progress](https://img.shields.io/badge/progress-0%25-red)
 
 **Target Release:** March 2026
 
