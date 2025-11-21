@@ -40,6 +40,7 @@ dependencies = [
     "numpy",
     "scipy",
     "pandas",
+    "pyarrow",
     "scikit-learn",
     "scikit-optimize",
     "nbformat",
@@ -55,7 +56,10 @@ Issues = "https://github.com/REIL-UConn/modular-ml/issues"
 
 [project.optional-dependencies]
 torch = ["torch"]
-tensorflow = ["tensorflow"]
+tensorflow = [
+    "tensorflow-macos; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "tensorflow; platform_system == 'Darwin' and platform_machine != 'arm64'",
+]
 optimize = ["optuna"]
 docs = [
     "sphinx>=6",
