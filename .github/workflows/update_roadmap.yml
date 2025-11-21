@@ -63,10 +63,22 @@ jobs:
             echo "  Completed tasks: $DONE"
             echo "  Percent:         $PERCENT%"
 
-            # Update progress bar line immediately after the header
-            # Replace only the first occurrence after this header
-            sed -i "$((START_LINE+1))s|progress-bar.dev/[0-9]*/|progress-bar.dev/${PERCENT}/|" "$FILE"
+            # Encode percent sign for URL
+            PERCENT_ENCODED=$(printf "%s%%25" "$PERCENT")
 
+            # Choose color
+            if   [ "$PERCENT" -ge 90 ]; then COLOR="brightgreen";
+            elif [ "$PERCENT" -ge 75 ]; then COLOR="green";
+            elif [ "$PERCENT" -ge 50 ]; then COLOR="yellow";
+            elif [ "$PERCENT" -ge 25 ]; then COLOR="orange";
+            else                          COLOR="red"; fi
+
+            BADGE_URL="https://img.shields.io/badge/progress-${PERCENT}%25-${COLOR}"
+
+            # Replace the line immediately after the section header
+            sed -i "$((START_LINE+1))s|https://img.shields.io/badge/progress-[^)]*|${BADGE_URL}|" "$FILE"
+
+            echo "  Updated badge: $BADGE_URL"
             echo ""
 
           done <<< "$SECTIONS"
