@@ -1,7 +1,7 @@
 # ModularML Roadmap
 
 ## v1.0.0 — Core ModularML Pipeline  
-![Progress](https://progress-bar.dev/0/?title=v1.0.0)
+![Progress](https://progress-bar.dev/67/?title=v1.0.0)
 **Target Release:** Dec 2025
 *(Single breaking overhaul release; all features land together)*
 
