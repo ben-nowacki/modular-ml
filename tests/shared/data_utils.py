@@ -3,9 +3,7 @@ from typing import Any
 
 import numpy as np
 
-from modularml.core.api import Data, FeatureSet, Sample
-from modularml.core.data_structures.batch import Batch
-from modularml.core.data_structures.sample_collection import SampleCollection
+from modularml.core.graph.featureset import FeatureSet
 
 rng = np.random.default_rng(seed=13)
 
@@ -63,119 +61,6 @@ def generate_dummy_data(
     return np.array(values).reshape(shape)
 
 
-def generate_dummy_sample(
-    feature_shape_map: dict[str, tuple[int, ...]] | None = None,
-    target_shape_map: dict[str, tuple[int, ...]] | None = None,
-    tag_type_map: dict[str, str] | None = None,
-    target_type: str = "numeric",  # "numeric" or "categorical"
-) -> Sample:
-    """
-    Generate a synthetic :class:`Sample` object for testing.
-
-    This utility creates dummy features, targets, and tags with configurable
-    shapes and data types. Useful for unit tests of FeatureSets, samplers, and
-    splitters without needing real datasets.
-
-    Args:
-        feature_shape_map (dict[str, tuple[int, ...]], optional):
-            Mapping of feature names to their shapes.
-            Defaults to {"X1": (1, 100), "X2": (1, 100)}.
-        target_shape_map (dict[str, tuple[int, ...]], optional):
-            Mapping of target names to their shapes.
-            Defaults to {"Y1": (1, 1), "Y2": (1, 10)}.
-        tag_type_map (dict[str, str], optional):
-            Mapping of tag names to data types (e.g., {"T_FLOAT": "float", "T_STR": "str"}).
-            Defaults to one float tag and one string tag.
-        target_type (str, optional):
-            Type of targets to generate:
-            - `"numeric"` → continuous float values (default).
-            - `"categorical"` → categorical string labels from {"A", "B", "C"}.
-
-    Returns:
-        Sample:
-            A dummy sample containing randomly generated features, targets, and tags.
-
-    Raises:
-        ValueError:
-            If `target_type` is not one of {"numeric", "categorical"}.
-
-    Examples:
-        >>> s = generate_dummy_sample()
-        >>> list(s.features.keys())
-        ['X1', 'X2']
-        >>> list(s.targets.keys())
-        ['Y1', 'Y2']
-        >>> s.tags
-        {'T_FLOAT': Data(...), 'T_STR': Data(...)}
-
-        >>> s_cat = generate_dummy_sample(target_type="categorical")
-        >>> s_cat.targets["Y1"]  # contains string labels like "A", "B", "C"
-
-    """
-    feature_shape_map = feature_shape_map or {
-        "X1": (1, 100),
-        "X2": (1, 100),
-    }
-    target_shape_map = target_shape_map or {
-        "Y1": (1, 1),
-        "Y2": (1, 10),
-    }
-    tag_type_map = tag_type_map or {
-        "T_FLOAT": "float",
-        "T_STR": "str",
-    }
-
-    # generate features
-    features = {k: Data(generate_dummy_data(shape=v, dtype="float")) for k, v in feature_shape_map.items()}
-
-    # generate targets (numeric or categorical)
-    if target_type == "numeric":
-        targets = {k: Data(generate_dummy_data(shape=v, dtype="float")) for k, v in target_shape_map.items()}
-    elif target_type == "categorical":
-        # categorical → pick from finite string/int labels
-        targets = {
-            k: Data(generate_dummy_data(shape=v, dtype="str", choices=["A", "B", "C"]))
-            for k, v in target_shape_map.items()
-        }
-    else:
-        msg = f"Unsupported target_type: {target_type}"
-        raise ValueError(msg)
-
-    # generate tags
-    tags = {
-        k: Data(generate_dummy_data(shape=(1,), dtype=v, choices=(["red", "blue", "green"] if v == "str" else None)))
-        for k, v in tag_type_map.items()
-    }
-
-    return Sample(features=features, targets=targets, tags=tags)
-
-
-def generate_dummy_batch(
-    feature_shape_map: dict[str, tuple[int, ...]] | None = None,
-    target_shape_map: dict[str, tuple[int, ...]] | None = None,
-    tag_type_map: dict[str, str] | None = None,
-    target_type: str = "numeric",  # "numeric" or "categorical"
-    batch_size: int = 8,
-    batch_roles: tuple[str] = ("default"),
-):
-    samples = []
-    for _ in range(batch_size):
-        samples.append(
-            generate_dummy_sample(
-                feature_shape_map=feature_shape_map,
-                target_shape_map=target_shape_map,
-                tag_type_map=tag_type_map,
-                target_type=target_type,
-            ),
-        )
-
-    batch = Batch(
-        role_samples={k: SampleCollection(samples) for k in batch_roles},
-        role_sample_weights={k: np.full(shape=batch_size) for k in batch_roles},
-    )
-    return batch
-
-
 def generate_dummy_featureset(
     feature_shape_map: dict[str, tuple[int, ...]] | None = None,
     target_shape_map: dict[str, tuple[int, ...]] | None = None,
@@ -187,7 +72,7 @@ def generate_dummy_featureset(
     """
     Generate a synthetic :class:`FeatureSet` populated with dummy samples.
 
-    This function wraps :func:`generate_dummy_sample` to create a collection of
+    This function wraps :func:`generate_dummy_data` to create a collection of
     random samples for testing higher-level abstractions (e.g., samplers,
     splitters, training pipelines) without requiring real datasets.
 
@@ -224,14 +109,61 @@ def generate_dummy_featureset(
         ['X1', 'X2']
 
     """
-    samples = []
-    for _ in range(n_samples):
-        samples.append(
-            generate_dummy_sample(
-                feature_shape_map=feature_shape_map,
-                target_shape_map=target_shape_map,
-                tag_type_map=tag_type_map,
-                target_type=target_type,
-            ),
-        )
-    return FeatureSet(label=label, samples=samples)
+    # Get column data shapes (this doesn't not include number of samples)
+    feature_shape_map = feature_shape_map or {
+        "X1": (1, 100),
+        "X2": (1, 100),
+    }
+    target_shape_map = target_shape_map or {
+        "Y1": (1, 1),
+        "Y2": (1, 10),
+    }
+    tag_type_map = tag_type_map or {
+        "T_FLOAT": "float",
+        "T_STR": "str",
+    }
+
+    # Add sample_len dimension
+    for k in feature_shape_map:
+        feature_shape_map[k] = (n_samples, *feature_shape_map[k])
+    for k in target_shape_map:
+        target_shape_map[k] = (n_samples, *target_shape_map[k])
+
+    # Generate feature data
+    features = {k: generate_dummy_data(shape=v, dtype="float") for k, v in feature_shape_map.items()}
+
+    # Generate target data (numeric or categorical)
+    if target_type == "numeric":
+        targets = {k: generate_dummy_data(shape=v, dtype="float") for k, v in target_shape_map.items()}
+    elif target_type == "categorical":
+        # categorical → pick from finite string/int labels
+        targets = {
+            k: generate_dummy_data(shape=v, dtype="str", choices=["A", "B", "C"]) for k, v in target_shape_map.items()
+        }
+    else:
+        msg = f"Unsupported target_type: {target_type}"
+        raise ValueError(msg)
+
+    # Generate tag data
+    tags = {
+        k: generate_dummy_data(shape=(n_samples,), dtype=v, choices=(["red", "blue", "green"] if v == "str" else None))
+        for k, v in tag_type_map.items()
+    }
+
+    # Create FeatureSet
+    return FeatureSet.from_dict(
+        label=label,
+        data=features | targets | tags,
+        feature_keys=list(feature_shape_map.keys()),
+        target_keys=list(target_shape_map.keys()),
+        tag_keys=list(tag_type_map.keys()),
+    )
+
+
+if __name__ == "__main__":
+    fs = generate_dummy_featureset()
+    print(fs)
+    sc = fs.get_collection("original")
+    print(sc.feature_keys, sc.feature_shapes, sc.feature_dtypes)
+    print(sc.target_keys, sc.target_shapes, sc.target_dtypes)
+    print(sc.tag_keys, sc.tag_shapes, sc.tag_dtypes)

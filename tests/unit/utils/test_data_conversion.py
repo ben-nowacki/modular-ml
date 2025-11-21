@@ -7,9 +7,9 @@ import torch
 from modularml.utils.backend import Backend
 from modularml.utils.data_conversion import (
     align_ranks,
-    convert_dict_to_format,
     convert_to_format,
     enforce_numpy_shape,
+    merge_dict_of_arrays_to_numpy,
     to_list,
     to_numpy,
     to_python,
@@ -17,6 +17,42 @@ from modularml.utils.data_conversion import (
     to_torch,
 )
 from modularml.utils.error_handling import ErrorMode
+
+rng = np.random.default_rng(seed=13)
+
+
+# ----------------------------------------------------------------------
+# Fixtures and simple helpers
+# ----------------------------------------------------------------------
+@pytest.fixture
+def base_data():
+    """Base dictionary of simple (n_samples, n_features) arrays."""
+    return {
+        "a": np.arange(20).reshape(10, 2),
+        "b": np.ones((10, 2)),
+        "c": np.zeros((10, 2)),
+    }
+
+
+@pytest.fixture
+def varied_rank_data_can_align():
+    """Dictionary with arrays of different ranks for align_singletons testing."""
+    # (10,4), (10,4,1,1), (10,4,1)
+    return {
+        "a": rng.random(size=(10, 4)),  # (10,4)
+        "b": rng.random(size=(10, 4, 1, 1)),  # (10,4,1,1)
+        "c": rng.random(size=(10, 4, 1)),  # (10,4,1)
+    }
+
+
+@pytest.fixture
+def varied_rank_data_cannot_align():
+    """Dictionary with arrays of different ranks for align_singletons testing."""
+    return {
+        "a": rng.random(size=(10, 4)),  # (10,4)
+        "b": rng.random(size=(4,)),  # (10,)
+        "c": rng.random(size=(10, 4, 1)),  # (10,4,1)
+    }
 
 
 # ---------- to_python ----------
@@ -82,25 +118,143 @@ def test_to_torch_and_tensorflow_conversion():
     arr = [1, 2, 3]
     t = to_torch(arr)
     assert isinstance(t, torch.Tensor)
+    assert t.shape == (3,)
     tf_t = to_tensorflow(arr)
     assert isinstance(tf_t, tf.Tensor)
+    assert tf_t.shape == (3,)
 
 
-# ---------- convert_dict_to_format ----------
+# ---------- merge_dict_of_arrays_to_numpy ----------
 @pytest.mark.unit
-def test_convert_dict_to_format_variants():
-    d = {"x": [1, 2], "y": [3, 4]}
-    np_arr = convert_dict_to_format(d, "numpy")
-    assert isinstance(np_arr, np.ndarray)
+def test_merge_dict_stack_basics(base_data):
+    """Stack should add a new leading axis for dictionary keys."""
+    out = merge_dict_of_arrays_to_numpy(base_data, mode="stack")
+    assert out.shape == (3, 10, 2)
+    assert np.allclose(out[1], np.ones((10, 2)))  # second element all ones
 
-    list_out = convert_dict_to_format(d, "list")
-    assert all(isinstance(row, list) for row in list_out)
 
-    t_dict = convert_dict_to_format(d, "dict_torch")
-    assert all(isinstance(v, torch.Tensor) for v in t_dict.values())
+@pytest.mark.unit
+def test_merge_dict_stack_with_custom_axis(base_data):
+    """Custom axis stacking should insert new dimension at the correct position."""
+    out = merge_dict_of_arrays_to_numpy(base_data, mode="stack", axis=1)
+    # Shape: (10, 3, 2) — new axis inserted after sample dimension
+    assert out.shape == (10, 3, 2)
 
-    tf_dict = convert_dict_to_format(d, "dict_tensorflow")
-    assert all(isinstance(v, tf.Tensor) for v in tf_dict.values())
+
+@pytest.mark.unit
+def test_merge_dict_stack_fails_on_mismatched_shapes():
+    """Stack should raise if array shapes differ."""
+    data = {"a": np.ones((10, 2)), "b": np.ones((5, 2))}
+    with pytest.raises(ValueError, match="all input arrays must have the same shape"):
+        merge_dict_of_arrays_to_numpy(data, mode="stack")
+
+
+@pytest.mark.unit
+def test_merge_dict_concat_mode_default_axis(base_data):
+    """Concatenation along axis=0 should join samples."""
+    out = merge_dict_of_arrays_to_numpy(base_data, mode="concat")
+    assert out.shape == (30, 2)  # 10 samples x 3 arrays
+    # Verify ordering: 'a' then 'b' then 'c'
+    np.testing.assert_array_equal(out[:10], np.arange(20).reshape(10, 2))
+
+
+@pytest.mark.unit
+def test_merge_dict_concat_mode_feature_axis(base_data):
+    """Concatenation along axis=-1 should join feature dimension."""
+    out = merge_dict_of_arrays_to_numpy(base_data, mode="concat", axis=-1)
+    assert out.shape == (10, 6)  # 3 x 2 features combined
+
+
+@pytest.mark.unit
+def test_merge_dict_concat_mode_incompatible_shapes():
+    """Concat should raise for incompatible shapes."""
+    data = {"a": np.ones((10, 2)), "b": np.ones((5, 2))}
+    x = merge_dict_of_arrays_to_numpy(data, mode="concat", axis=0)
+    assert x.shape == (15, 2)
+
+    with pytest.raises(
+        ValueError,
+        match="all the input array dimensions except for the concatenation axis must match exactly",
+    ):
+        merge_dict_of_arrays_to_numpy(data, mode="concat", axis=1)
+
+
+@pytest.mark.unit
+def test_merge_dict_flatten_mode(base_data):
+    """Flatten should concatenate feature dimensions horizontally."""
+    # Flatten to 1D (3 * 10 * 2 = 60)
+    out = merge_dict_of_arrays_to_numpy(base_data, mode="flatten", axis=None)
+    assert out.shape == (60,)
+
+    # Flatten after axis 0 -> 3 of (10, 2) -> (10, 6)
+    out = merge_dict_of_arrays_to_numpy(base_data, mode="flatten", axis=0)
+    assert out.shape == (10, 6)
+
+
+@pytest.mark.unit
+def test_merge_dict_flatten_with_different_ranks(
+    varied_rank_data_can_align,
+    varied_rank_data_cannot_align,
+):
+    # Align singletons, then flatten after axis 0
+    # (10,4), (10,), (10,4,1) --> aligned to (10,4,1,1) --> (10, 4*3)
+    out = merge_dict_of_arrays_to_numpy(
+        varied_rank_data_can_align,
+        mode="flatten",
+        axis=0,
+        align_singletons=True,
+    )
+    assert out.ndim == 2
+    assert out.shape == (10, 12)
+
+    # (10,4), (4,), (10,4,1) --> cannot align but flattening all so should pass
+    out = merge_dict_of_arrays_to_numpy(varied_rank_data_cannot_align, mode="flatten", axis=None)
+    assert out.shape == (84,)  # 10*4 + 4 + 10*4*1
+
+    # Specifying any axis should fail since shapes don't align
+    with pytest.raises(
+        ValueError,
+        match="all the input array dimensions except for the concatenation axis must match exactly",
+    ):
+        out = merge_dict_of_arrays_to_numpy(
+            varied_rank_data_cannot_align,
+            mode="flatten",
+            axis=0,
+            align_singletons=False,
+        )
+
+
+@pytest.mark.unit
+def test_merge_dict_auto(base_data):
+    # Should prefer stack, if possible
+    out = merge_dict_of_arrays_to_numpy(base_data, mode="auto")
+    assert out.shape == (3, 10, 2)
+
+    # If not, fallback to concat on axis 0
+    data = {"a": np.ones((5, 2)), "b": np.ones((4, 2))}
+    out = merge_dict_of_arrays_to_numpy(data, mode="auto")
+    assert out.shape == (9, 2)
+
+    # If not, 2nd fallback to concat on axis -1
+    data = {"a": np.ones((10, 2)), "b": np.ones((10, 3))}
+    out = merge_dict_of_arrays_to_numpy(data, mode="auto")
+    assert out.shape == (10, 5)
+
+    # Else, flatten to 1D array
+    data = {"a": np.ones((3, 2)), "b": np.ones((4, 5))}
+    out = merge_dict_of_arrays_to_numpy(data, mode="auto")
+    assert out.shape == (26,)  # 3 * 2 + 4 * 5
+
+    # Fails on empyty input
+    with pytest.raises(ValueError, match="No arrays provided"):
+        merge_dict_of_arrays_to_numpy({})
+
+
+@pytest.mark.unit
+def test_merge_dict_invalid_mode_raises(base_data):
+    """Invalid mode should raise a ValueError."""
+    with pytest.raises(ValueError, match="Unsupported"):
+        merge_dict_of_arrays_to_numpy(base_data, mode="badmode")
 
 
 # ---------- convert_to_format ----------
