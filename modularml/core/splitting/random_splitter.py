@@ -19,11 +19,11 @@ class RandomSplitter(BaseSplitter):
     Randomly splits a FeatureSetView into subsets according to user-specified ratios.
 
     Description:
-        This splitter partitions samples randomly into subsets (e.g., "train", "val", "test") \
-        based on the given ratios. Optionally, samples can be grouped by one or more tag keys \
+        This splitter partitions samples randomly into subsets (e.g., "train", "val", "test")
+        based on the given ratios. Optionally, samples can be grouped by one or more tag keys
         before splitting, ensuring that all samples from the same group fall into the same subs etc.
 
-        The split operates on **relative indices** within the provided FeatureSetView, \
+        The split operates on **relative indices** within the provided FeatureSetView,
         preserving full traceability via SAMPLE_ID in the source FeatureSet.
 
     Example:
@@ -45,10 +45,10 @@ class RandomSplitter(BaseSplitter):
 
         Args:
             ratios (Mapping[str, float]):
-                Dictionary mapping subset labels to relative ratios. Must sum to 1.0. \
+                Dictionary mapping subset labels to relative ratios. Must sum to 1.0.
                 Example: {"train": 0.7, "val": 0.2, "test": 0.1}.
             group_by (str | Sequence[str] | None, optional):
-                One or more tag keys to group samples by before splitting. \
+                One or more tag keys to group samples by before splitting.
                 If None, samples are split individually.
             seed (int, optional):
                 Random seed for reproducibility. Default is 13.
@@ -168,7 +168,19 @@ class RandomSplitter(BaseSplitter):
     # Utilities
     # =====================================================
     def _compute_split_boundaries(self, n: int) -> dict[str, tuple[int, int]]:
-        """Compute index boundaries for each split given n total elements."""
+        """
+        Compute index boundaries for each split given n total elements.
+
+        Args:
+            n (int):
+                The total number of samples.
+
+        Returns:
+            dict[str, tuple[int, int]]:
+                A dictionary where keys are subset labels and values are tuples representing
+                the start and end indices for each subset.
+
+        """
         boundaries = {}
         current = 0
         for i, (label, ratio) in enumerate(self.ratios.items()):
@@ -183,6 +195,18 @@ class RandomSplitter(BaseSplitter):
     # SerializableMixin
     # ==========================================
     def get_state(self) -> dict[str, Any]:
+        """
+        Retrieve the internal state of the RandomSplitter.
+
+        Description:
+            This method encapsulates the state of the splitter for serialization or deep copying.
+
+        Returns:
+            dict[str, Any]:
+                A dictionary containing the splitter's state, including version,
+                target, ratios, group_by, and seed.
+
+        """
         return {
             "version": "1.0",
             "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
@@ -192,6 +216,18 @@ class RandomSplitter(BaseSplitter):
         }
 
     def set_state(self, state: dict[str, Any]):
+        """
+        Restore the internal state of the RandomSplitter.
+
+        Description:
+            This method allows restoring a splitter from a saved state, ensuring consistency
+            and reproducibility.
+
+        Args:
+            state (dict[str, Any]):
+                The state dictionary to restore from.
+
+        """
         version = state.get("version")
         if version != "1.0":
             msg = f"Unsupported RandomSplitter version: {version}"
@@ -203,6 +239,22 @@ class RandomSplitter(BaseSplitter):
 
     @classmethod
     def from_state(cls, state: dict) -> RandomSplitter:
+        """
+        Create a RandomSplitter from a saved state.
+
+        Description:
+            This classmethod allows creating a new RandomSplitter instance from a saved state,
+            useful for loading pre-configured splitters.
+
+        Args:
+            state (dict):
+                The state dictionary containing the splitter's configuration.
+
+        Returns:
+            RandomSplitter:
+                A new RandomSplitter instance initialized from the provided state.
+
+        """
         version = state.get("version")
         if version != "1.0":
             msg = f"Unsupported RandomSplitter version: {version}"

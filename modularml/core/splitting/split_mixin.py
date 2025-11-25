@@ -7,7 +7,7 @@ import numpy as np
 
 from modularml.core.data.sample_collection import evaluate_filter_conditions
 from modularml.core.data.sample_schema import RAW_VARIANT
-from modularml.core.references.featureset_ref import FeatureSetRef
+from modularml.core.references.data_reference import DataReference
 from modularml.core.splitting.splitter_record import SplitterRecord
 
 if TYPE_CHECKING:
@@ -236,7 +236,7 @@ class SplitMixin:
             source._split_configs.append(
                 SplitterRecord(
                     splitter_state=splitter.get_state(),
-                    applied_to=FeatureSetRef(
+                    applied_to=DataReference(
                         node=source.label,
                         split=self.label if is_view else None,
                     ),

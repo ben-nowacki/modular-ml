@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from modularml.core.references.featureset_ref import FeatureSetRef
+from modularml.core.references.data_reference import DataReference
 from modularml.utils.serialization import SerializableMixin
 
 
@@ -38,7 +38,7 @@ class SplitterRecord(SerializableMixin):
     """
 
     splitter_state: dict[str, Any]
-    applied_to: FeatureSetRef
+    applied_to: DataReference
 
     # ==========================================
     # SerializableMixin
@@ -59,11 +59,11 @@ class SplitterRecord(SerializableMixin):
             raise NotImplementedError(msg)
 
         self.splitter_state = state["splitter_state"]
-        self.applied_to = FeatureSetRef.from_state(state["applied_to"])
+        self.applied_to = DataReference.from_state(state["applied_to"])
 
     @classmethod
     def from_state(cls, state: dict) -> SplitterRecord:
         return cls(
             splitter_state=state["splitter_state"],
-            applied_to=FeatureSetRef.from_state(state["applied_to"]),
+            applied_to=DataReference.from_state(state["applied_to"]),
         )
