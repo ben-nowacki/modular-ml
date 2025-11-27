@@ -57,6 +57,7 @@ def format_requires_compatible_shapes(fmt: DataFormat) -> bool:
 
 def format_is_tensorlike(fmt: DataFormat) -> bool:
     """True if specified DataFormat returns a tensor-like object."""
+    fmt = normalize_format(fmt)
     return fmt in [DataFormat.NUMPY, DataFormat.TORCH, DataFormat.TENSORFLOW]
 
 

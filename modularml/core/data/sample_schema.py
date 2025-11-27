@@ -46,11 +46,11 @@ class SampleSchema:
           - **targets**: supervised outputs (e.g., SOH, capacity)
           - **tags**: metadata or identifiers (e.g., cell_id, SOC)
 
-        The schema acts as the contract that ensures consistent column names,
+        The schema acts as the contract that ensures consistent column names, \
         data types, and separation across these domains.
 
-        Every Arrow table that follows this schema must also contain a
-        global identifier column, `SAMPLE_ID_COLUMN`, storing a unique
+        Every Arrow table that follows this schema must also contain a \
+        global identifier column, `SAMPLE_ID_COLUMN`, storing a unique \
         per-row ID string (UUID or hash).
 
     """
@@ -172,68 +172,52 @@ class SampleSchema:
             raise KeyError(msg)
         return dom_types[key]
 
-    def struct_type(self, domain: str) -> pa.StructType:
-        """
-        Build a `pyarrow.StructType` for a given domain, supporting variants.
-
-        Example:
-            ``` python
-            features: struct<
-                voltage: struct<raw: list<float32>, transformed: list<float32>>,
-                current: struct<raw: list<float32>>
-            >
-            ```
-
-        Args:
-            domain: One of {"features", "targets", "tags"}.
-
-        Returns:
-            pa.StructType corresponding to that domain.
-
-        """
-        dom_types = self.domain_types(domain)
-        fields = []
-        for name, var_types in dom_types.items():
-            subfields = [pa.field(vname, vtype) for vname, vtype in var_types.items()]
-            fields.append(pa.field(name, pa.struct(subfields)))
-        return pa.struct(fields)
-
     # =================================================================
-    # Constructors and serialization
+    # Flat schema inference
     # =================================================================
     @classmethod
     def from_table(cls, table: pa.Table) -> SampleSchema:
         """
-        Infer a SampleSchema from a pyarrow.Table.
+        Infer SampleSchema from a flat Arrow table.
 
-        Args:
-            table: Arrow table containing 'features', 'targets', and 'tags' StructArrays.
+        Expected column naming:
+            "<domain>.<key>.<variant>"
 
-        Returns:
-            A SampleSchema describing each domain's fields and data types.
+        Example:
+            features.voltage.raw
+            features.voltage.transformed
+            targets.soh.raw
+            tags.cell_id.raw
+            sample_id
 
         """
+        features: dict[str, dict[str, pa.DataType]] = {}
+        targets: dict[str, dict[str, pa.DataType]] = {}
+        tags: dict[str, dict[str, pa.DataType]] = {}
 
-        def _extract_struct_type(domain: str) -> dict[str, dict[str, pa.DataType]]:
-            if domain not in table.column_names:
-                return {}
-            struct_type = table[domain].type
-            if not isinstance(struct_type, pa.StructType):
-                msg = f"Column '{domain}' must be a StructType, not {struct_type}."
-                raise TypeError(msg)
-            domain_map: dict[str, dict[str, pa.DataType]] = {}
-            for fld in struct_type:
-                if isinstance(fld.type, pa.StructType):
-                    domain_map[fld.name] = {subfield.name: subfield.type for subfield in fld.type}
-                else:
-                    domain_map[fld.name] = {RAW_VARIANT: fld.type}
-            return domain_map
+        for col in table.schema.names:
+            if col == SAMPLE_ID_COLUMN:
+                continue
 
-        return cls(
-            features=_extract_struct_type(FEATURES_COLUMN),
-            targets=_extract_struct_type(TARGETS_COLUMN),
-            tags=_extract_struct_type(TAGS_COLUMN),
-        )
+            parts = col.split(".")
+            if len(parts) != 3:
+                msg = f"Invalid column '{col}'. Expected '<domain>.<key>.<variant>' format."
+                raise ValueError(msg)
+
+            domain, key, variant = parts
+            dtype = table.schema.field(col).type
+
+            if domain == FEATURES_COLUMN:
+                features.setdefault(key, {})[variant] = dtype
+            elif domain == TARGETS_COLUMN:
+                targets.setdefault(key, {})[variant] = dtype
+            elif domain == TAGS_COLUMN:
+                tags.setdefault(key, {})[variant] = dtype
+            else:
+                msg = f"Unknown domain '{domain}' in column '{col}'"
+                raise ValueError(msg)
+
+        return cls(features=features, targets=targets, tags=tags)
 
 
 def ensure_sample_id_column(table: pa.Table) -> pa.Table:
@@ -259,8 +243,7 @@ def ensure_sample_id_column(table: pa.Table) -> pa.Table:
             raise TypeError(msg)
         return table
 
-    n = table.num_rows
-    sample_ids = pa.array([str(uuid.uuid4()) for _ in range(n)], type=pa.string())
+    sample_ids = pa.array([str(uuid.uuid4()) for _ in range(table.num_rows)], type=pa.string())
     return table.append_column(SAMPLE_ID_COLUMN, sample_ids)
 
 

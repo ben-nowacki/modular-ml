@@ -9,12 +9,29 @@ from modularml.core.data.sample_schema import (
     FEATURES_COLUMN,
     METADATA_PREFIX,
     RAW_VARIANT,
+    SAMPLE_ID_COLUMN,
     SHAPE_SUFFIX,
     TAGS_COLUMN,
     TARGETS_COLUMN,
     TRANSFORMED_VARIANT,
 )
 from modularml.utils.shape_utils import get_shape, shape_to_tuple
+
+
+def flatten_schema(schema: pa.Schema, prefix: str = "", separator: str = "."):
+    """Return flattened column paths for a (possibly nested) Arrow schema."""
+    cols = []
+    for field in schema:
+        name = f"{prefix}{field.name}"
+
+        if pa.types.is_struct(field.type):
+            # Recurse into struct fields
+            child_schema = pa.schema(field.type)
+            cols.extend(flatten_schema(child_schema, prefix=name + separator))
+        else:
+            cols.append(name)
+
+    return cols
 
 
 def normalize_numpy_dtype_for_pyarrow_dtype(dtype) -> str:
@@ -115,7 +132,7 @@ def make_nested_list_type(base_type: pa.DataType, depth: int) -> pa.DataType:
     return typ
 
 
-def numpy_to_pyarrow_struct_variant(
+def numpy_to_sample_schema_column(
     name: str,
     data: np.ndarray,
     *,
@@ -125,7 +142,7 @@ def numpy_to_pyarrow_struct_variant(
     max_list_depth: int = 2,
 ) -> tuple[str, pa.StructArray, dict[bytes, bytes]]:
     """
-    Converts a NumPy array of any rank into a PyArrow struct suitable for use in a Table.
+    Converts a NumPy array of any rank into a PyArrow column suitable for use in SampleCollection.
 
     This function automatically chooses between:
       - Nested list arrays (for rank ≤ max_list_depth)
@@ -140,9 +157,9 @@ def numpy_to_pyarrow_struct_variant(
         max_list_depth: Maximum nesting depth for list-based encoding (default=2).
 
     Returns:
-        (name, pa.StructArray, metadata)
+        (name, pa.Array, metadata)
             name: The same as input `name`.
-            pa.StructArray: PyArrow struct storing the tensor under the variant.
+            pa.Array: PyArrow array storing the tensor under the variant.
             metadata: Dict with optional shape and dtype info for schema attachment.
 
     Raises:
@@ -170,21 +187,18 @@ def numpy_to_pyarrow_struct_variant(
     n_samples = data.shape[0]
     shape = data.shape[1:]
 
-    # Case 1: small tensors (1D, 2D)
+    # Case 1: small tensors (1D, 2D) -> store as nested list
     if data.ndim <= max_list_depth:
         # Build recursive list type matching rank
         element_type = pa.from_numpy_dtype(data.dtype)
         list_type = make_nested_list_type(element_type, depth=data.ndim - 1)
         array = pa.array(data.tolist(), type=list_type)
 
-    # Case 2: high-rank tensors → store as binary
+    # Case 2: high-rank tensors -> store as binary
     else:
         # Convert each row (sample) to bytes
         element_size = data[0].nbytes if isinstance(data[0], np.ndarray) else np.prod(shape) * data.itemsize
         array = pa.array([data[i].tobytes() for i in range(n_samples)], type=pa.binary(element_size))
-
-    # Store pyarrow array under specified variant
-    struct_array = pa.StructArray.from_arrays([array], [variant])
 
     # Metadata for shape reconstruction
     metadata = {}
@@ -194,7 +208,7 @@ def numpy_to_pyarrow_struct_variant(
             f"{name}.{variant}.{DTYPE_SUFFIX}".encode(): normalize_numpy_dtype_for_pyarrow_dtype(data.dtype).encode(),
         }
 
-    return name, struct_array, metadata
+    return name, array, metadata
 
 
 def pyarrow_array_to_numpy(
@@ -312,71 +326,71 @@ def build_sample_schema_table(
 
     """
 
-    def _make_domain_struct(
-        data: dict[str, np.ndarray],
+    def _encode_domain(
+        domain_name: str,
+        domain_dict: dict[str, np.ndarray],
         meta_prefix: str | None = None,
-        expected_len: int | None = None,
-    ) -> tuple[pa.StructArray, dict[bytes, bytes]]:
-        """Convert a dictionary of NumPy arrays into a StructArray + metadata."""
-        names, arrays, metadata = [], [], {}
+    ):
+        """Converts dict of arrays to tuple[{col_name: pa.Array}, meta_data_dict]."""
+        cols: dict[str, pa.Array] = {}
+        metadata = {}
 
-        for key, arr in data.items():
-            col_name, col_array, col_meta = numpy_to_pyarrow_struct_variant(
+        for key, np_arr in domain_dict.items():
+            name, arrow_arr, meta = numpy_to_sample_schema_column(
                 name=key,
-                data=arr,
+                data=np_arr,
                 variant=RAW_VARIANT,
             )
-            arrays.append(col_array)
-            names.append(col_name)
+
+            # Full col name
+            col_name = f"{domain_name}.{name}.{RAW_VARIANT}"
+            cols[col_name] = arrow_arr
 
             # Prefix metadata keys if provided
             if meta_prefix:
-                for k, v in col_meta.items():
+                for k, v in meta.items():
                     # Handle both bytes and string keys gracefully
                     base = k.decode() if isinstance(k, bytes) else str(k)
                     full = f"{meta_prefix}.{base}"
                     metadata[full.encode()] = v
             else:
-                metadata.update(col_meta)
+                metadata.update(meta)
 
-        # Handle empty domain: still create an empty struct with correct number of rows
-        if not arrays:
-            n = expected_len if expected_len is not None else 0
-            empty_struct_type = pa.struct([])
-            empty_array = pa.array([{}] * n, type=empty_struct_type)
-            return empty_array, metadata
-
-        return pa.StructArray.from_arrays(arrays, names=names), metadata
+        return cols, metadata
 
     # Assume all domains have same length
     n_rows = len(next(iter(features.values())))
 
-    # Build each domain as Struct<col: Struct<raw: arr>>
-    features_struct, meta_features = _make_domain_struct(
-        data=features,
+    # Build each domain
+    feature_cols, feature_meta = _encode_domain(
+        domain_name=FEATURES_COLUMN,
+        domain_dict=features,
         meta_prefix=f"{METADATA_PREFIX}.{FEATURES_COLUMN}",
     )
-    targets_struct, meta_targets = _make_domain_struct(
-        data=targets,
+    target_cols, target_meta = _encode_domain(
+        domain_name=TARGETS_COLUMN,
+        domain_dict=targets,
         meta_prefix=f"{METADATA_PREFIX}.{TARGETS_COLUMN}",
-        expected_len=n_rows,
     )
-    tags_struct, meta_tags = _make_domain_struct(
-        data=tags or {},
+    tag_cols, tag_meta = _encode_domain(
+        domain_name=TAGS_COLUMN,
+        domain_dict=tags or {},
         meta_prefix=f"{METADATA_PREFIX}.{TAGS_COLUMN}",
-        expected_len=n_rows,
     )
 
-    table = pa.table(
-        {
-            FEATURES_COLUMN: features_struct,
-            TARGETS_COLUMN: targets_struct,
-            TAGS_COLUMN: tags_struct,
-        },
-    )
+    # Build flat column dict
+    all_cols = {**feature_cols, **target_cols, **tag_cols}
+
+    # Ensure table has at least 1 column
+    if len(all_cols) == 0:
+        # Create an "empty" placeholder column of correct row count
+        all_cols = {SAMPLE_ID_COLUMN: pa.array([None] * n_rows, type=pa.string())}
+
+    # Build table
+    table = pa.table(all_cols)
 
     # Merge and attach metadata
-    all_metadata = {**meta_features, **meta_targets, **meta_tags}
+    all_metadata = {**feature_meta, **target_meta, **tag_meta}
     if table.schema.metadata:
         all_metadata.update(table.schema.metadata)
     table = table.replace_schema_metadata(all_metadata)

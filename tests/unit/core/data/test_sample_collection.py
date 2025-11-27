@@ -10,8 +10,6 @@ from modularml.core.data.sample_schema import (
     METADATA_SCHEMA_VERSION_KEY,
     SAMPLE_ID_COLUMN,
     SCHEMA_VERSION,
-    TAGS_COLUMN,
-    TARGETS_COLUMN,
 )
 from modularml.utils.data_format import DataFormat
 from modularml.utils.pyarrow_data import build_sample_schema_table
@@ -70,7 +68,6 @@ def test_optional_tags_are_supported():
     coll = SampleCollection(table_no_tags)
 
     assert not coll.has_tags
-    assert TAGS_COLUMN in coll.table.column_names  # still inserted as empty struct
     assert coll.tag_keys == []
 
 
@@ -79,25 +76,48 @@ def test_optional_tags_are_supported():
 # ---------------------------------------------------------------------
 def test_get_features_targets_tags(sample_collection: SampleCollection):
     """Ensure get_* methods return proper numpy data."""
-    feats = sample_collection.get_features(fmt=DataFormat.DICT_NUMPY)
-    targs = sample_collection.get_targets(fmt=DataFormat.DICT_NUMPY)
-    tags = sample_collection.get_tags(fmt=DataFormat.DICT_NUMPY)
-
+    feats = sample_collection.get_features(
+        fmt=DataFormat.DICT_NUMPY,
+        include_domain_prefix=False,
+        include_variant_suffix=False,
+    )
+    assert "voltage" in feats
+    feats = sample_collection.get_features(
+        fmt=DataFormat.DICT_NUMPY,
+        include_domain_prefix=False,
+        include_variant_suffix=True,
+    )
     assert "voltage.raw" in feats
-    assert "soh.raw" in targs
-    assert "cell_id.raw" in tags
 
     v = feats["voltage.raw"]
     assert isinstance(v, np.ndarray)
     assert v.shape == (sample_collection.n_samples, 4)
 
+    targs = sample_collection.get_targets(
+        fmt=DataFormat.DICT_NUMPY,
+        include_domain_prefix=False,
+        include_variant_suffix=True,
+    )
+    assert "soh.raw" in targs
     y = targs["soh.raw"]
     assert y.shape == (sample_collection.n_samples,)
+
+    tags = sample_collection.get_tags(
+        fmt=DataFormat.DICT_NUMPY,
+        include_domain_prefix=False,
+        include_variant_suffix=True,
+    )
+    assert "cell_id.raw" in tags
 
 
 def test_get_variant_data_numpy(sample_collection: SampleCollection):
     """Directly retrieve a single variant as NumPy array."""
-    arr = sample_collection.get_variant_data("features", "voltage", "raw", fmt=DataFormat.NUMPY)
+    arr = sample_collection.get_variant_data(
+        domain="features",
+        key="voltage",
+        variant="raw",
+        fmt=DataFormat.NUMPY,
+    )
     assert isinstance(arr, np.ndarray)
     assert arr.shape == (sample_collection.n_samples, 4)
 
@@ -183,7 +203,7 @@ def test_shape_and_dtype_from_metadata(sample_collection: SampleCollection):
 def test_missing_required_domains():
     """Table missing features/targets should raise."""
     bad_table = pa.table({"bad": pa.array([1, 2, 3])})
-    with pytest.raises(ValueError, match="Missing expected columns"):
+    with pytest.raises(ValueError, match="Invalid column 'bad'"):
         SampleCollection(bad_table)
 
 

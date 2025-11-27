@@ -30,7 +30,7 @@ from modularml.utils.pyarrow_data import (
     flatten_schema,
     get_dtype_of_pyarrow_array,
     get_shape_of_pyarrow_array,
-    numpy_to_pyarrow_struct_variant,
+    numpy_to_sample_schema_column,
 )
 
 if TYPE_CHECKING:
@@ -51,11 +51,7 @@ class SampleCollection:
         row-level traceability across all views, subsets, and exports.
 
     Args:
-        table: Underlying Arrow table containing structured columns:
-            - FEATURES_COLUMN:  struct<...>
-            - TARGETS_COLUMN:   struct<...>
-            - TAGS_COLUMN:      struct<...>
-            - SAMPLE_ID_COLUMN: struct<...>
+        table: Underlying Arrow table following a defined schema.
         schema: Optional `SampleSchema` describing the expected domain layout.
 
     """
@@ -122,20 +118,16 @@ class SampleCollection:
 
     def _validate_schema(self):
         """Ensure required domains and the `sample_id` column exist."""
-        required = {SAMPLE_ID_COLUMN, FEATURES_COLUMN, TARGETS_COLUMN}
-        # optional = {TAGS_COLUMN}
-        actual = set(self.table.column_names)
+        unique_cols = set(self.table.column_names)
 
-        missing = required - actual
-        if missing:
-            msg = f"Missing expected columns: {sorted(missing)}"
+        # Check for duplicate/non-unique columns
+        if len(unique_cols) != len(self.table.column_names):
+            unique, counts = np.unique(np.asarray(self.table.column_names), return_counts=True)
+            dups = unique[counts > 1]
+            msg = f"Detected duplicate column names: {dups}"
             raise ValueError(msg)
 
-        # If tags missing, inject an empty struct column for schema consistency
-        if TAGS_COLUMN not in actual:
-            empty_struct = pa.struct([])
-            empty_array = pa.array([{}] * self.table.num_rows, type=empty_struct)
-            self.table = self.table.append_column(TAGS_COLUMN, empty_array)
+        # Required column validation is done in SampleSchema
 
     def _embed_metadata(self) -> None:
         """
@@ -213,7 +205,7 @@ class SampleCollection:
     @property
     def has_tags(self) -> bool:
         """Return True if tags domain exists and is non-empty."""
-        return TAGS_COLUMN in self.table.column_names and len(self.schema.domain_keys(TAGS_COLUMN)) > 0
+        return len(self.tag_keys) > 0
 
     @property
     def feature_keys(self) -> list[str]:
@@ -228,7 +220,7 @@ class SampleCollection:
     @property
     def tag_keys(self) -> list[str]:
         """List of tag column names defined in the schema."""
-        return self.schema.domain_keys(TAGS_COLUMN) if self.has_tags else []
+        return self.schema.domain_keys(TAGS_COLUMN)
 
     @property
     def feature_shapes(self) -> dict[str, tuple[int, ...]]:
@@ -701,6 +693,9 @@ class SampleCollection:
     # =====================================================================
     # Variant-level accessors
     # =====================================================================
+    def _colname(self, domain: str, key: str, variant: str) -> str:
+        return f"{domain}.{key}.{variant}"
+
     def get_variant_keys(self, domain: str, key: str) -> list[str]:
         """
         Get available variants for the specified domain and column.
@@ -716,11 +711,7 @@ class SampleCollection:
         if domain not in (FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN):
             msg = f"Invalid domain '{domain}'"
             raise ValueError(msg)
-        try:
-            return self.table.column(domain).combine_chunks().field(key).type.names
-        except KeyError as e:
-            msg = f"`{key}` does not exist in the `{domain}` domain."
-            raise ValueError(msg) from e
+        return list(self.schema.variant_keys(domain, key))
 
     def get_variant_shape(self, domain: str, key: str, variant: str) -> tuple[int, ...]:
         """
@@ -737,14 +728,14 @@ class SampleCollection:
         """
         # 1. Check meta-data
         meta = self.table.schema.metadata or {}
-
         meta_key = f"{METADATA_PREFIX}.{domain}.{key}.{variant}.{SHAPE_SUFFIX}"
         shape = meta.get(meta_key.encode())
         if shape:
             return tuple(ast.literal_eval(shape.decode()))
 
         # 2. Infer shapes directly from stored data (slow)
-        variant_arr: pa.Array = self.table.column(domain).combine_chunks().field(key).field(variant)
+        col_name = self._colname(domain=domain, key=key, variant=variant)
+        variant_arr: pa.Array = self.table[col_name].combine_chunks()
         return get_shape_of_pyarrow_array(variant_arr, include_nrows=False)
 
     def get_variant_dtype(self, domain: str, key: str, variant: str) -> str:
@@ -766,14 +757,14 @@ class SampleCollection:
         """
         # 1. Check meta-data
         meta = self.table.schema.metadata or {}
-
         meta_key = f"{METADATA_PREFIX}.{domain}.{key}.{variant}.{DTYPE_SUFFIX}"
         dtype = meta.get(meta_key.encode())
         if dtype:
             return dtype.decode()
 
         # 2. Infer data type directly from stored data (slow)
-        variant_arr: pa.Array = self.table.column(domain).combine_chunks().field(key).field(variant)
+        col_name = self._colname(domain=domain, key=key, variant=variant)
+        variant_arr: pa.Array = self.table[col_name].combine_chunks()
         return get_dtype_of_pyarrow_array(variant_arr)
 
     def get_variant_data(
@@ -798,8 +789,12 @@ class SampleCollection:
             Column variant data in the requested format.
 
         """
-        # Access the variant subfield as an Arrow array
-        pa_arr = self.table.column(domain).combine_chunks().field(key).field(variant)
+        # Access the variant column as an Arrow array
+        col_name = self._colname(domain=domain, key=key, variant=variant)
+        if col_name not in self.table.column_names:
+            msg = f"Column '{col_name}' not found in PyArrow table."
+            raise KeyError(msg)
+        pa_arr: pa.Array = self.table[col_name].combine_chunks()
 
         # Return raw pyarrow array is no format is specified
         if fmt is None:
@@ -898,44 +893,31 @@ class SampleCollection:
             msg = f"Data length {data.shape[0]} does not match number of samples {self.n_samples}."
             raise ValueError(msg)
 
-        # Build new variant Arrow array
-        _, new_variant_arr, new_meta = numpy_to_pyarrow_struct_variant(
+        # Build Arrow array for the new variant column
+        col_name = self._colname(domain=domain, key=key, variant=variant)
+        _, new_arr, new_meta = numpy_to_sample_schema_column(
             name=key,
             data=data,
             variant=variant,
         )
 
-        # Combine existing variants (dict of arrays)
-        domain_arr = self.table.column(domain).combine_chunks()
-        key_struct = domain_arr.field(key)
-        existing_variant_names = key_struct.type.names
-        existing_arrays = [key_struct.field(name) for name in existing_variant_names]
-
-        # Replace existing variant
-        if variant in existing_variant_names:
+        # Insert / replace column in table
+        if col_name in self.table.column_names:
             if not overwrite:
                 msg = f"Variant '{variant}' already exists for '{key}'. Set `overwrite=True` to modify."
                 raise ValueError(msg)
-            idx = existing_variant_names.index(variant)
-            existing_arrays[idx] = new_variant_arr.field(variant)
-        # Append new variant
+            idx = self.table.schema.get_field_index(col_name)
+            self.table = self.table.set_column(idx, col_name, new_arr)
         else:
-            existing_variant_names = [*list(existing_variant_names), variant]
-            existing_arrays = [*existing_arrays, new_variant_arr.field(variant)]
+            self.table = self.table.append_column(col_name, new_arr)
 
-        # Rebuild the StructArray for this key
-        updated_key_struct = pa.StructArray.from_arrays(existing_arrays, names=existing_variant_names)
-
-        # Replace the key field inside the domain struct
-        new_domain_arrays = []
-        for name in domain_arr.type.names:
-            arr = updated_key_struct if name == key else domain_arr.field(name)
-            new_domain_arrays.append(arr)
-        updated_domain_struct = pa.StructArray.from_arrays(new_domain_arrays, names=domain_arr.type.names)
-
-        # Replace the column in the table
-        idx = self.table.schema.get_field_index(domain)
-        self.table = self.table.set_column(idx, domain, updated_domain_struct)
+        # Update schema: register this variant's dtype
+        if domain == FEATURES_COLUMN:
+            self.schema.features.setdefault(key, {})[variant] = new_arr.type
+        elif domain == TARGETS_COLUMN:
+            self.schema.targets.setdefault(key, {})[variant] = new_arr.type
+        else:
+            self.schema.tags.setdefault(key, {})[variant] = new_arr.type
 
         # Update metadata
         meta = dict(self.table.schema.metadata or {})
@@ -973,25 +955,22 @@ class SampleCollection:
             msg = f"The default variant ('{RAW_VARIANT}') cannot be deleted."
             raise ValueError(msg)
 
-        # Get specified variant and domain structs
-        domain_arr = self.table.column(domain).combine_chunks()
-        key_struct = domain_arr.field(key)
+        col_name = self._colname(domain=domain, key=key, variant=variant)
+        if col_name not in self.table.column_names:
+            msg = f"Column `{col_name}` does not exist in table."
+            raise KeyError(msg)
 
-        # Remove variant from key struct
-        remaining_names = [v for v in key_struct.type.names if v != variant]
-        remaining_arrays = [key_struct.field(v) for v in remaining_names]
-        updated_key_struct = pa.StructArray.from_arrays(remaining_arrays, names=remaining_names)
+        # Remove the column from the table
+        idx = self.table.schema.get_field_index(col_name)
+        self.table = self.table.remove_column(idx)
 
-        # Replace key in domain struct
-        new_domain_arrays = []
-        for name in domain_arr.type.names:
-            arr = updated_key_struct if name == key else domain_arr.field(name)
-            new_domain_arrays.append(arr)
-        updated_domain_struct = pa.StructArray.from_arrays(new_domain_arrays, names=domain_arr.type.names)
-
-        # Replace in table
-        idx = self.table.schema.get_field_index(domain)
-        self.table = self.table.set_column(idx, domain, updated_domain_struct)
+        # Update schema: drop this variant
+        if domain == FEATURES_COLUMN:
+            self.schema.features[key].pop(variant, None)
+        elif domain == TARGETS_COLUMN:
+            self.schema.targets[key].pop(variant, None)
+        else:
+            self.schema.tags[key].pop(variant, None)
 
         # Remove metadata entries for this variant
         meta = dict(self.table.schema.metadata or {})
@@ -1003,21 +982,6 @@ class SampleCollection:
     # =====================================================================
     # Export / conversion
     # =====================================================================
-    def to_table(self, domain: str | None = None) -> pa.Table:
-        """
-        Return the full Arrow table or a specific domain subset.
-
-        Args:
-            domain: Optional domain name. If ``None``, returns the entire table.
-
-        Returns:
-            Arrow table containing selected data.
-
-        """
-        if domain is None:
-            return self.table
-        return self.table.select([domain])
-
     def to_dict(self) -> dict[str, np.ndarray]:
         """
         Convert the entire SampleCollection into a flattened dict of NumPy arrays.
@@ -1046,9 +1010,8 @@ class SampleCollection:
             all_data |= d_res
 
         # Always include sample_id column (guaranteed unique)
-        if SAMPLE_ID_COLUMN in self.table.column_names:
-            obj_arr = self.table.column(SAMPLE_ID_COLUMN).combine_chunks().to_numpy(zero_copy_only=False)
-            all_data[SAMPLE_ID_COLUMN] = stack_nested_numpy(obj_arr, shape=())
+        uuids = self.get_sample_uuids(fmt=DataFormat.NUMPY)
+        all_data[SAMPLE_ID_COLUMN] = stack_nested_numpy(uuids, shape=())
 
         return all_data
 
@@ -1069,12 +1032,8 @@ class SampleCollection:
 
         """
         # Gather domain data (flattened)
-        all_data: dict[str, np.ndarray] = self.to_dict()
-
-        # Each element may be a multi-dim array, need to separate 1st dimensions
-        reshaped_data = {}
-        for k, v in all_data.items():
-            reshaped_data[k] = list(v)
+        # Each element may be a multi-dim array, need to separate 1st dimension with list()
+        reshaped_data = {k: list(v) for k, v in self.to_dict().items()}
         return pd.DataFrame(reshaped_data)
 
     def save(self, path: str | Path) -> None:
