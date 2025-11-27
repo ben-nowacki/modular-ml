@@ -1,8 +1,13 @@
 import numpy as np
 
-from modularml.core.data.batch import Batch, NodeShapes, RoleData
+from modularml.core.data.batch import Batch, SampleData, SampleShapes
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.sample_schema import FEATURES_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
+from modularml.core.data.sample_schema import (
+    FEATURES_COLUMN,
+    TAGS_COLUMN,
+    TARGETS_COLUMN,
+    TRANSFORMED_VARIANT,
+)
 from modularml.core.graph.featureset import FeatureSet
 from modularml.utils.data_conversion import to_numpy
 from modularml.utils.data_format import DataFormat, format_is_tensorlike
@@ -81,38 +86,68 @@ class BatchView:
             label=role,
         )
 
-    def materialize_batch(self, *, fmt: DataFormat = DataFormat.NUMPY) -> Batch:
+    def materialize_batch(
+        self,
+        *,
+        fmt: DataFormat = DataFormat.NUMPY,
+        feature_keys: list[str] | None = None,
+        target_keys: list[str] | None = None,
+        tag_keys: list[str] | None = None,
+        variant: str = TRANSFORMED_VARIANT,
+        missing: str = "error",
+    ) -> Batch:
         """
         Convert this BatchView into a fully materialized in-memory Batch.
 
         Description:
-            Builds a runtime-ready :class:`Batch` object from the current \
-            BatchView by converting all role-based subsets into backend-specific \
-            tensor formats. Each role (e.g., "anchor", "pair") is materialized \
-            independently based on its assigned sample indices and selected \
+            Builds a runtime-ready :class:`Batch` object from the current
+            BatchView by converting all role-based subsets into backend-specific
+            tensor formats. Each role (e.g., "anchor", "pair") is materialized
+            independently based on its assigned sample indices and selected
             feature/target/tag columns.
 
             The resulting Batch contains:
-            - A mapping of node_label → role → :class:`RoleData`
+            - A mapping of node_label → role → :class:`SampleData`
             - Optional per-sample weights for each role
             - Recorded output shapes (excluding batch dimension) for each domain
 
-            This method enforces that the leading dimension of all tensors \
+            This method enforces that the leading dimension of all tensors
             matches the expected batch size (`self.n_samples`).
 
         Args:
             fmt (DataFormat):
-                Desired output data format, typically one of \
-                :attr:`DataFormat.NUMPY`, :attr:`DataFormat.TORCH`, \
-                or :attr:`DataFormat.TENSORFLOW`. Defaults to ``NUMPY``.
+                Desired output data format, typically one of
+                :attr:`DataFormat.NUMPY`, :attr:`DataFormat.TORCH`,
+                or :attr:`DataFormat.TENSORFLOW`. Defaults to `NUMPY`.
+            feature_keys (list[str] | None):
+                Only the specified feature_keys will be included in the returned
+                Batch. If None, all features in the original source view are included.
+                Defaults to None.
+            target_keys (list[str] | None):
+                Only the specified target_keys will be included in the returned
+                Batch. If None, all features in the original source view are included.
+                Defaults to None.
+            tag_keys (list[str] | None):
+                Only the specified tag_keys will be included in the returned
+                Batch. If None, all features in the original source view are included.
+                Defaults to None.
+            variant (str):
+                The variant to use in instantiating tensors. Any columns that do
+                not have the specified variant will default to use the RAW_VARIANT.
+                Defaults to TRANSFORMED_VARIANT.
+            missing ({"error", "warn", "ignore"}):
+                Behavior when a requested key or variant is missing:
+                    "error" -> raise KeyError
+                    "warn"  -> issue a warning and skip the key/variant
+                    "ignore"-> silently skip the key/variant
 
         Returns:
             Batch:
                 A fully materialized :class:`Batch` instance containing:
-                - ``outputs``: node- and role-specific :class:`RoleData` objects \
+                - ``outputs``: node- and role-specific :class:`SampleData` objects \
                     with "features", "targets", and "tags".
                 - ``role_sample_weights``: optional array-like weight vectors.
-                - ``shapes``: per-node :class:`NodeShapes` objects describing \
+                - ``shapes``: per-node :class:`SampleShapes` objects describing \
                     per-sample tensor shapes (without batch dimension).
 
         Example:
@@ -135,19 +170,28 @@ class BatchView:
             msg = f"DataFormat must be tensor-like. Received: {fmt}"
             raise TypeError(msg)
 
-        role_data: dict[str, RoleData] = {}
-        shapes: NodeShapes | None = None
+        role_data: dict[str, SampleData] = {}
+        shapes: SampleShapes | None = None
         role_sample_weights: dict[str, np.ndarray] = {}
 
         for role in self.role_indices:
             # Get tensor-like data for each domain
-            coll = self.get_role_view(role).to_samplecollection()
-            features = coll.get_features(fmt=fmt)
-            targets = coll.get_targets(fmt=fmt)
-            tags = coll.get_tags(fmt=fmt)
+            coll = self.get_role_view(role).to_samplecollection(
+                feature_keys=feature_keys,
+                target_keys=target_keys,
+                tag_keys=tag_keys,
+                variant=variant,
+                missing=missing,
+            )
+
+            # Extract feature/target/tag values in chosen format
+            features = coll.get_features(fmt=fmt, variant=None)
+            targets = coll.get_targets(fmt=fmt, variant=None)
+            tags = coll.get_tags(fmt=fmt, variant=None)
             uuids = coll.get_sample_uuids(fmt=fmt)
 
-            role_data[role] = RoleData(
+            # Build SampleData for this role
+            role_data[role] = SampleData(
                 sample_uuids=uuids,
                 features=features,
                 targets=targets,
@@ -168,7 +212,7 @@ class BatchView:
                     )
                     raise ValueError(msg)
             # Drop batch_size
-            shapes = NodeShapes(shapes={k: v[1:] for k, v in all_shapes.items()})
+            shapes = SampleShapes(shapes={k: v[1:] for k, v in all_shapes.items()})
 
             # Add role_sample_weights (if defined)
             if self.role_indice_weights and role in self.role_indice_weights:
@@ -190,6 +234,7 @@ class BatchView:
 
         # Construct Batch
         return Batch(
+            batch_size=self.n_samples,
             outputs={node_label: role_data},
             role_sample_weights=role_sample_weights,
             shapes={node_label: shapes},
