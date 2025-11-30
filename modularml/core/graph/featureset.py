@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import copy
+import fnmatch
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import joblib
 import numpy as np
+import pyarrow as pa
 
-from modularml.components.graph_node import GraphNode, ShapeSpec
-from modularml.core.data.sample_collection import SampleCollection
+from modularml.components.graph_node import GraphNode
+from modularml.components.shapes import NodeShapes
+from modularml.core.data.sample_collection import SampleCollection, _ensure_domain_prefix
 from modularml.core.data.sample_schema import (
     FEATURES_COLUMN,
     RAW_VARIANT,
+    SAMPLE_ID_COLUMN,
     TAGS_COLUMN,
     TARGETS_COLUMN,
     TRANSFORMED_VARIANT,
@@ -26,18 +30,18 @@ from modularml.utils.data_conversion import flatten_to_2d, to_numpy, unflatten_f
 from modularml.utils.data_format import DataFormat, ensure_list
 from modularml.utils.exceptions import SplitOverlapWarning
 from modularml.utils.pyarrow_data import build_sample_schema_table
+from modularml.utils.serialization import SerializableMixin
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     import pandas as pd
-    import pyarrow as pa
 
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.data.sample_schema import SampleSchema
 
 
-class FeatureSet(GraphNode, SplitMixin):
+class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
     """
     Unified FeatureSet backed by a single SampleCollection.
 
@@ -279,19 +283,22 @@ class FeatureSet(GraphNode, SplitMixin):
         return True  # FeatureSets can feed into downstream nodes
 
     @property
-    def input_shape_spec(self) -> ShapeSpec | None:
-        return None  # Not applicable
-
-    @property
-    def output_shape_spec(self) -> ShapeSpec:
-        return ShapeSpec(
-            shapes=self.collection.feature_shapes,
-            num_samples=self.collection.n_samples,
-        )
-
-    @property
     def max_inputs(self) -> int | None:
         return 0
+
+    @property
+    def node_shapes(self) -> NodeShapes:
+        # FeatureSet has no inputs
+        # Output is the merged shape of all features
+        out_shape = self.get_features(
+            fmt=DataFormat.NUMPY,
+            keys=None,
+            variant=None,
+        ).shape[1:]
+        return NodeShapes(
+            input_shapes={},
+            output_shapes={0: out_shape},
+        )
 
     # ==========================================
     # SampleCollection properties
@@ -300,6 +307,48 @@ class FeatureSet(GraphNode, SplitMixin):
     def n_samples(self) -> int:
         """Total number of samples."""
         return self.collection.n_samples
+
+    @property
+    def feature_shapes(self) -> dict[str, tuple[int, ...]]:
+        """
+        Mapping of feature columns (including variants) to their data shapes.
+
+        Description:
+            Returns a shape tuple keyed by each feature column name.
+
+        Returns:
+            dict[str, tuple[int, ...]]: Per-feature shapes.
+
+        """
+        return self.collection.feature_shapes
+
+    @property
+    def target_shapes(self) -> dict[str, tuple[int, ...]]:
+        """
+        Mapping of target columns (including variants) to their data shapes.
+
+        Description:
+            Returns a shape tuple keyed by each target column name.
+
+        Returns:
+            dict[str, tuple[int, ...]]: Per-target shapes.
+
+        """
+        return self.collection.target_shapes
+
+    @property
+    def tag_shapes(self) -> dict[str, tuple[int, ...]]:
+        """
+        Mapping of tag columns (including variants) to their data shapes.
+
+        Description:
+            Returns a shape tuple keyed by each tag column name.
+
+        Returns:
+            dict[str, tuple[int, ...]]: Per-tag shapes.
+
+        """
+        return self.collection.tag_shapes
 
     @property
     def feature_keys(self) -> list[str]:
@@ -317,60 +366,10 @@ class FeatureSet(GraphNode, SplitMixin):
         return self.collection.tag_keys
 
     @property
-    def feature_shapes(self) -> ShapeSpec:
-        """
-        Mapping of feature columns (including variants) to their data shapes.
-
-        Description:
-            Returns a ShapeSpec instance containing per feature shapes and a separate \
-            number of sample property. See `ShapeSpec` for more details.
-
-        Returns:
-            ShapeSpec:
-                Per-feature shapes.
-
-        """
-        return ShapeSpec(
-            shapes=self.collection.feature_shapes,
-            num_samples=self.collection.n_samples,
-        )
-
-    @property
-    def target_shapes(self) -> ShapeSpec:
-        """
-        Mapping of target columns (including variants) to their data shapes.
-
-        Description:
-            Returns a ShapeSpec instance containing per target shapes and a separate \
-            number of sample property. See `ShapeSpec` for more details.
-
-        Returns:
-            ShapeSpec:
-                Per-target shapes.
-
-        """
-        return ShapeSpec(
-            shapes=self.collection.target_shapes,
-            num_samples=self.collection.n_samples,
-        )
-
-    @property
-    def tag_shapes(self) -> ShapeSpec:
-        """
-        Mapping of tag columns (including variants) to their data shapes.
-
-        Description:
-            Returns a ShapeSpec instance containing per tag shapes and a separate \
-            number of sample property. See `ShapeSpec` for more details.
-
-        Returns:
-            ShapeSpec:
-                Per-tag shapes.
-
-        """
-        return ShapeSpec(
-            shapes=self.collection.tag_shapes,
-            num_samples=self.collection.n_samples,
+    def all_keys(self) -> list[str]:
+        return self.collection.get_all_keys(
+            include_domain_prefix=True,
+            include_variant_suffix=True,
         )
 
     @property
@@ -672,6 +671,152 @@ class FeatureSet(GraphNode, SplitMixin):
         """Removes all previously defined splits."""
         self._splits.clear()
         self._split_configs.clear()
+
+    def select(
+        self,
+        columns: str | list[str] | None = None,
+        *,
+        features: str | list[str] | None = None,
+        targets: str | list[str] | None = None,
+        tags: str | list[str] | None = None,
+        variant: str | None = None,
+        label: str | None = None,
+    ):
+        """
+        Select a subset of columns from this FeatureSet and return a new FeatureSet.
+
+        This method provides flexible and expressive column selection using:
+            - Explicit column names
+            - Domain-based selection (`features=`, `targets=`, `tags=`)
+            - Wildcards (e.g., `"*.raw"`, `"voltage.*"`, `"*.*"`)
+            - Automatic domain prefixing (e.g., `"voltage.raw"` -> `"features.voltage.raw"`)
+            - Automatic variant suffixing via the `variant=` argument
+
+        The returned FeatureSet **shares the same underlying buffers** (no deep copy).
+        Only the visible subset of columns is changed.
+
+        **Supported Patterns & Examples:**
+        1. Exact column selection
+        ```python
+        fs2 = fs.select(columns=["features.voltage.raw", "targets.soh.raw"])
+        ```
+
+        2. Domain-based selection
+        ```python
+        fs2 = fs.select(features="voltage.raw")
+        # automatically interpreted as "features.voltage.raw"
+        ```
+
+        3. Wildcard on variant (`*.raw`): select all keys in a domain having the `.raw` variant:
+        ```python
+        fs2 = fs.select(features="*.raw")
+        # selects: features.voltage.raw, features.current.raw, ...
+        ```
+
+        4. Wildcard on key (`voltage.*`): select all variants for a specific key:
+        ```python
+        fs2 = fs.select(features="voltage.*")
+        # selects: features.voltage.raw, features.voltage.transformed, ...
+        ```
+
+        5. Full wildcard (`*.*`): select all keys and all variants within a domain:
+        ```python
+        fs2 = fs.select(features="*.*")
+        # selects all feature columns (raw, transformed, etc.)
+        ```
+
+        6. Variant inference using `variant=`: if a key is missing a variant suffix:
+        ```python
+        fs2 = fs.select(features="voltage", variant="raw")
+        # selects features.voltage.raw
+        # Does *not* overwrite columns that explicitly specify a variant.
+        ```
+
+        7. Merging multiple sources: explicit columns + domain-based:
+        ```python
+        fs2 = fs.select(columns=["targets.soh.raw"], features=["voltage.raw", "current.raw"])
+        ```
+
+        Args:
+            columns (str | list[str] | None):
+                Fully-qualified column names to include  (e.g., `"features.voltage.raw"`).
+                Must match actual FeatureSet columns.
+
+            features (str | list[str] | None):
+                Feature-domain selectors. Accepts exact names or wildcard patterns.
+                Domain prefix `"features."` may be omitted.
+
+            targets (str | list[str] | None):
+                Same as `features`, but for the targets domain.
+
+            tags (str | list[str] | None):
+                Same as `features`, but for the tags domain.
+
+            variant (str | None):
+                Default variant suffix to apply when a selector provides no variant.
+                Does *not* overwrite explicit variants.
+
+            label(str | None):
+                Label of the returned FeatureSet. Defaults to `<original>-selection`.
+
+
+        Returns:
+            FeatureSet:
+                A new FeatureSet referencing the same underlying arrow table, but
+                restricted to the selected columns.
+
+        """
+        # Extract real columns from collection
+        all_cols: list[str] = self.all_keys
+
+        # Build final column selection
+        selected: set[str] = set()
+
+        # 1. Exact columns defined via `columns`
+        for col in ensure_list(columns):
+            if col not in all_cols:
+                msg = f"Columns '{col}' does not exist. Available columns: {all_cols}"
+                raise KeyError(msg)
+            selected.add(col)
+
+        # 2. Domain-based selection
+        domain_inputs: dict[str, list[str]] = {
+            FEATURES_COLUMN: [_ensure_domain_prefix(element=x, domain=FEATURES_COLUMN) for x in ensure_list(features)],
+            TARGETS_COLUMN: [_ensure_domain_prefix(element=x, domain=TARGETS_COLUMN) for x in ensure_list(targets)],
+            TAGS_COLUMN: [_ensure_domain_prefix(element=x, domain=TAGS_COLUMN) for x in ensure_list(tags)],
+        }
+        for domain, cols in domain_inputs.items():
+            for c in cols:
+                # Parse domain, key, variant
+                parts = c.split(".")
+                if len(parts) != 3:
+                    msg = f"{domain} input, '{c}', contains too many/few elements: {len(parts)} != 3."
+                    raise ValueError(msg)
+                d, k, v = parts
+
+                # Apply `variant` if defined and missing from `c`
+                if v is None and variant is not None:
+                    v = variant
+
+                # Handle key wildcards
+                pattern = f"{d}.{k}.{v or '*'}"
+                matched = fnmatch.filter(all_cols, pattern)
+                if not matched:
+                    msg = f"No columns match pattern '{c}' -> '{pattern}' in domain '{domain}'."
+                    raise KeyError(msg)
+
+                # Add to selected
+                for m in matched:
+                    selected.add(m)
+
+        # 3. Ensure smaple_id col is included
+        if SAMPLE_ID_COLUMN not in selected:
+            selected.add(SAMPLE_ID_COLUMN)
+
+        return FeatureSet(
+            label=label or f"{self.label}-selection",
+            table=self.collection.table.select(selected),
+        )
 
     # ==========================================
     # Transform/Scaling
@@ -1026,6 +1171,98 @@ class FeatureSet(GraphNode, SplitMixin):
 
             # Any other ValueError is unexpected -> re-raise
             raise
+
+    # ==========================================
+    # Serialization
+    # ==========================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Serialize this FeatureSet into a fully reconstructable Python dictionary.
+
+        Includes:
+            - label
+            - collection.table
+            - collection.schema
+            - split configs (SplitterRecord)
+            - scaler logs (ScalerRecord)
+
+        Notes:
+            - FeatureSetView objects are *not* serialized directly (they are views),
+              only their SplitterRecord configs are serialized.
+
+        """
+        # Copy PyArrow table
+        copied_table = pa.Table.from_pandas(self.collection.table.to_pandas())
+        return {
+            "_target": f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+            "label": self.label,
+            "table": copied_table,
+            "schema": self.collection.schema,
+            "split_configs": [rec.get_state() for rec in self._split_configs],
+            "scaler_logs": [rec.get_state() for rec in self._scaler_logs],
+        }
+
+    def set_state(self, state: dict[str, Any]):
+        """
+        Restore this FeatureSet in-place from serialized state.
+
+        Used internally by ModelGraph cloning logic.
+        """
+        from modularml.core.splitting.base_splitter import BaseSplitter
+        from modularml.core.splitting.split_mixin import SplitterRecord
+        from modularml.core.transforms.scaler_record import ScalerRecord
+
+        # Core identifiers
+        self.label = state["label"]
+        table = state["table"]
+        schema = state["schema"]
+
+        # Rebuild fresh collection
+        self.collection = SampleCollection(table=table, schema=schema)
+
+        # Reset split/scaler storage
+        self._splits = {}
+        self._split_configs = []
+        self._scaler_logs = []
+
+        # Restore splits
+        split_records = [SplitterRecord.from_state(cfg) for cfg in state["split_configs"]]
+        for rec in split_records:
+            # Recreate the split
+            src = self
+            if rec.applied_to.split is not None:
+                src = self.get_split(rec.applied_to.split)
+
+            splitter = BaseSplitter.from_state(rec.splitter_state)
+            src.split(splitter=splitter, register=True, return_views=False)
+
+        # Remove any residual transformed variants (same logic used in load())
+        for domain in [FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN]:
+            for k in self.collection.get_domain_keys(domain=domain):
+                if TRANSFORMED_VARIANT in self.collection.get_variant_keys(domain=domain, key=k):
+                    self.collection.delete_variant(domain=domain, key=k, variant=TRANSFORMED_VARIANT)
+
+        # Restore scaler logs
+        scaler_records = [
+            ScalerRecord.from_state(cfg) for cfg in sorted(state["scaler_logs"], key=lambda x: x["order"])
+        ]
+
+        # Reapply transforms in order
+        for rec in scaler_records:
+            self.fit_transform(
+                scaler=rec.scaler_object,
+                domain=rec.domain,
+                keys=rec.keys,
+                fit_to_split=rec.fit_split,
+                merged_axes=rec.merged_axes,
+            )
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> FeatureSet:
+        """Construct a new FeatureSet instance from serialized state."""
+        fs = cls(label=state["label"], table=state["table"], schema=state["schema"])
+        fs.set_state(state)
+        return fs
 
     # ==========================================
     # State/Config Management Methods
