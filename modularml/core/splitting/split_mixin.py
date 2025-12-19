@@ -5,16 +5,17 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.core.data.sample_collection import evaluate_filter_conditions
-from modularml.core.data.sample_schema import RAW_VARIANT
+from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.core.references.data_reference import DataReference
 from modularml.core.splitting.splitter_record import SplitterRecord
+from modularml.utils.data_format import DataFormat
+from modularml.utils.pyarrow_data import resolve_column_selectors
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
-    from modularml.core.graph.featureset import FeatureSet
     from modularml.core.splitting.base_splitter import BaseSplitter
 
 
@@ -37,9 +38,9 @@ class SplitMixin:
         registries when invoked from a FeatureSet.
     """
 
-    # ==========================================
+    # ================================================
     # Context resolution
-    # ==========================================
+    # ================================================
     def _get_split_context(self) -> tuple[FeatureSet, bool]:
         """
         Identify the FeatureSet context for a split operation.
@@ -66,8 +67,8 @@ class SplitMixin:
                 If the caller is neither a FeatureSet nor a FeatureSetView.
 
         """
+        from modularml.core.data.featureset import FeatureSet
         from modularml.core.data.featureset_view import FeatureSetView
-        from modularml.core.graph.featureset import FeatureSet
 
         # Case 1: called on FeatureSet
         if isinstance(self, FeatureSet):
@@ -83,42 +84,80 @@ class SplitMixin:
         msg = f"{self.__class__.__name__} is not a valid split context host. Expected FeatureSet or FeatureSetView."
         raise TypeError(msg)
 
-    # ==========================================
-    # Row filtering
-    # ==========================================
+    # ================================================
+    # Row & column filtering
+    # ================================================
+    def take(
+        self,
+        rel_indices: Sequence[int],
+        label: str | None = None,
+    ) -> FeatureSetView:
+        """
+        Create a new FeatureSetView derived from this one using relative indices.
+
+        Description:
+            Produces a new view referencing the same collection and parent \
+            FeatureSet but restricted to a subset of rows. The provided indices \
+            are interpreted *relative to this view* and mapped to *absolute* \
+            indices in the underlying collection.
+
+        Args:
+            rel_indices (Sequence[int]):
+                Relative indices of the current FeaturSet/View to project into
+                a new view.
+
+            label (str, optional):
+                The label to assign to the returned FeatureSetView.
+
+        """
+        from modularml.core.data.featureset_view import FeatureSetView
+
+        # Get indices of the calling class
+        source, is_view = self._get_split_context()
+        idxs = self.indices if is_view else np.arange(source.n_samples)
+
+        rel_indices = np.asarray(rel_indices)
+        if rel_indices.ndim != 1:
+            raise ValueError("rel_indices must be a 1D sequence of integer positions.")
+        if np.any(rel_indices >= len(idxs)):
+            raise IndexError("Some relative indices exceed the size of the current view.")
+        abs_indices = np.asarray(idxs)[rel_indices]
+
+        return FeatureSetView(
+            source=source,
+            indices=abs_indices,
+            columns=source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
+            label=label or f"{self.label}_view",
+        )
+
     def filter(
         self,
         *,
+        conditions: dict[str | DataReference, Any | list[Any], Callable],
         label: str | None = None,
-        variant_to_use: str = RAW_VARIANT,
-        **conditions: dict[str, Any | list[Any], Callable],
     ) -> FeatureSetView | None:
         """
-        Create a filtered view based on tag, feature, or target conditions.
+        Create a filtered FeatureSetView using reference-aware conditions.
 
         Description:
-            Filters the FeatureSet data according to key-value conditions \
-            applied across all schema domains ("features", "targets", "tags"). \
-            Each condition may be:
-                - A literal value for equality matching.
-                - A list/tuple/set/np.ndarray of allowed values.
-                - A callable that takes a NumPy or Arrow array and returns a boolean mask.
+            Applies row-level filtering using fully-qualified column references.
+            Each condition is evaluated independently using its own representation,
+            and all resulting masks are AND-composed.
 
-            Returns a lightweight :class:`FeatureSetView` referencing the filtered rows \
-            of the current FeatureSet (without copying underlying data).
+            Conditions may reference:
+                - features.<key>.<rep>
+                - targets.<key>.<rep>
+                - tags.<key>.<rep>
 
         Args:
-            label (str, optional):
-                The label to assign to the returned FeatureSetView.
-            variant_to_use (str, optional):
-                Conditions will only be evaluated on the specified `variant` \
-                of each reference column in `conditions`. Defaults to RAW_VARIANT.
-            **conditions:
+            conditions (dict[str, Any | list[Any], Callable]):
                 Mapping of column names (from any domain) to filter criteria.
                 Values may be:
                 - `scalar`: selects rows where the column equals the value.
                 - `sequence`: selects rows where the column is in the given list/set.
                 - `callable`: a function that takes a NumPy array and returns a boolean mask.
+            label (str, optional):
+                The label to assign to the returned FeatureSetView.
 
         Returns:
             FeatureSetView:
@@ -144,30 +183,133 @@ class SplitMixin:
             - `pulse_type` equals 'charge'.
 
         ``` python
-        FeatureSet.filter(
-            cell_id=[1,2,3],
-            group_id=(lambda x: x > 1),
-            pulse_type='charge',
-        )
+        FeatureSet.filter(where={
+            "tags.cell_id"=[1,2,3],
+            "tags.group_id"=(lambda x: x > 1),
+            "tags.pulse_type"="charge",
+        })
         ```
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
 
+        def _evaluate_single_condition(col_data: np.ndarray, cond) -> np.ndarray:
+            """
+            Evaluate a filter condition on a column of scalar or array values.
+
+            Args:
+                col_data (np.ndarray | Sequence[Any]):
+                    Column values (scalars or arrays).
+                cond (Any | list | tuple | set | callable):
+                    The condition to evaluate:
+                    - callable(x) -> bool
+                    - iterable of allowed values
+                    - scalar literal for equality
+
+            Returns:
+                np.ndarray[bool]: Boolean mask indicating rows satisfying the condition.
+
+            """
+            col_data = np.asarray(col_data, dtype=object)
+
+            # 1. Callable condition
+            if callable(cond):
+                # Detect scalar vs array-valued column
+                first_val = col_data[0]
+                if isinstance(first_val, (np.ndarray, list, tuple)):
+                    # Apply row-wise for arrays
+                    mask = np.fromiter((bool(cond(x)) for x in col_data), dtype=bool, count=len(col_data))
+                else:
+                    # Try applying directly to the vector
+                    try:
+                        mask = np.asarray(cond(col_data))
+                        if np.ndim(mask) == 0:  # single scalar result
+                            mask = np.full(len(col_data), bool(mask))
+                    except Exception as e:
+                        msg = f"Failed to apply callable condition. {e}"
+                        raise ValueError(msg) from e
+                return mask
+
+            # 2. Iterable of allowed values
+            if isinstance(cond, (list, tuple, set, np.ndarray)):
+                # For scalar columns -> vectorized np.isin
+                first_val = col_data[0]
+                if not isinstance(first_val, (np.ndarray, list, tuple)):
+                    return np.isin(col_data, cond, assume_unique=False)
+
+                # Array-like row values are not supported yet
+                ## This commented out below returns True is any value in the row value is in the provided
+                ## condition value list. Not sure this is what is expected. Likely want an exact match?
+                # # For array-valued rows -> True if *any element* in the row is in cond
+                # allowed = set(cond)
+                # mask = np.fromiter(
+                #     (any(elem in allowed for elem in x) if x is not None else False for x in col_data),
+                #     dtype=bool,
+                #     count=len(col_data),
+                # )
+                raise TypeError("Iterable condition can only be applied to 1-dimensional columns.")
+
+            # 3. Scalar equality condition
+            # For scalar columns -> vectorized equality
+            first_val = col_data[0]
+            if not isinstance(first_val, (np.ndarray, list, tuple)):
+                return np.asarray(col_data) == cond
+
+            # Array-like row values are not supported yet
+            ## This commented out below returns True is any value in the row value is equal to the provided
+            ## condition scalar value. Not sure this is what is expected.
+            # # For array-valued rows -> True if any element equals the scalar
+            # mask = np.fromiter(
+            #     (np.any(np.asarray(x) == cond) if x is not None else False for x in col_data),
+            #     dtype=bool,
+            #     count=len(col_data),
+            # )
+            raise TypeError("Scalar-valued conditions can only be applied to 1-dimensional columns.")
+
         source, is_view = self._get_split_context()
         collection = source.collection
-        full_mask = evaluate_filter_conditions(
-            collection=collection,
-            variant_to_use=variant_to_use,
-            **conditions,
-        )
+
+        # Start with all True mask
+        mask = np.ones(collection.n_samples, dtype=bool)
+
+        for arg, cond in conditions.items():
+            # Try to cast ref to DataReference
+            if isinstance(arg, str):
+                ref = DataReference.from_string(arg, known_attrs={"node": source.label})
+            elif isinstance(arg, DataReference):
+                ref = arg
+            else:
+                msg = (
+                    "filter conditions must be keyed by a string or DataReference object. "
+                    f"Received key of type {type(ref)}"
+                )
+                raise TypeError(msg)
+
+            # Validate DataReference values
+            inval_props = [x for x in [ref.node, ref.domain, ref.key, ref.rep] if x is None]
+            if inval_props:
+                msg = f"Failed to interpret values for the following DataReference attributes: {inval_props}"
+                raise ValueError(msg)
+            if ref.node != source.label:
+                msg = f"DataReference.node '{ref.node}' does not match FeatureSet '{source.label}'."
+                raise ValueError(msg)
+
+            # Retrieve column data explicitly
+            col_data = collection._get_rep_data(
+                domain=ref.domain,
+                key=ref.key,
+                rep=ref.rep,
+                fmt=DataFormat.NUMPY,
+            )
+            cond_mask = _evaluate_single_condition(col_data=col_data, cond=cond)
+            mask &= cond_mask.reshape(collection.n_samples)
 
         # Restrict mask to current view's indices
         if is_view:
-            local_mask = full_mask[self.indices]
+            local_mask = mask[self.indices]
             selected_indices = self.indices[np.where(local_mask)[0]]
         else:
-            selected_indices = np.where(full_mask)[0]
+            selected_indices = np.where(mask)[0]
 
         if len(selected_indices) == 0:
             warnings.warn(
@@ -180,12 +322,114 @@ class SplitMixin:
         return FeatureSetView(
             source=source,
             indices=selected_indices,
-            label=label or f"{self.label}_filtered",
+            columns=source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
+            label=label or f"{self.label}_view",
         )
 
-    # ==========================================
+    def select(
+        self,
+        columns: str | list[str] | None = None,
+        *,
+        features: str | list[str] | None = None,
+        targets: str | list[str] | None = None,
+        tags: str | list[str] | None = None,
+        rep: str | None = None,
+        label: str | None = None,
+    ) -> FeatureSetView:
+        """
+        Select a subset of columns from this FeatureSet and return a FeatureSetView.
+
+        Description:
+            Performs declarative column selection using a shared selector syntax
+            across FeatureSet, FeatureSetView, and DataReference creation.
+
+            Selection supports:
+                - Explicit fully-qualified columns (e.g. "features.voltage.raw")
+                - Domain-based selectors via `features`, `targets`, and `tags`
+                - Wildcards (e.g. "*.raw", "voltage.*", "*.*")
+                - Automatic domain prefixing ("voltage.raw" → "features.voltage.raw")
+                - Optional default representation inference via `rep`
+
+            No data is copied. The returned object is a lightweight view that
+            references the same underlying SampleCollection.
+
+        Args:
+            columns (str | list[str] | None):
+                Fully-qualified column names to include
+                (e.g. "features.voltage.raw"). These must exactly match existing
+                columns in the FeatureSet.
+
+            features (str | list[str] | None):
+                Feature-domain selectors. May be bare keys ("voltage"),
+                key/rep pairs ("voltage.raw"), or wildcards.
+                The "features." prefix may be omitted.
+
+            targets (str | list[str] | None):
+                Target-domain selectors, following the same rules as `features`.
+
+            tags (str | list[str] | None):
+                Tag-domain selectors, following the same rules as `features`.
+
+            rep (str | None):
+                Default representation suffix to apply when a selector omits a
+                representation. Explicit representations are never overridden.
+
+            label (str, optional):
+                The label to assign to the returned FeatureSetView.
+
+        Returns:
+            FeatureSetView:
+                A row-preserving, column-filtered view over this FeatureSet.
+
+        """
+        from modularml.core.data.featureset_view import FeatureSetView
+
+        source, is_view = self._get_split_context()
+
+        # Extract real columns from collection
+        all_cols: list[str] = source.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
+        )
+
+        # Build final column selection (organized by domain)
+        selected: dict[str, set[str]] = resolve_column_selectors(
+            all_columns=all_cols,
+            columns=columns,
+            features=features,
+            targets=targets,
+            tags=tags,
+            rep=rep,
+            include_all_if_empty=False,
+        )
+
+        # Order columns: features -> targets -> tags -> sample_id
+        sel_cols: list[str] = []
+        for d in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
+            if d in selected:
+                sel_cols.extend(sorted(selected[d]))
+        sel_cols.append(DOMAIN_SAMPLE_ID)
+
+        # Maintain same indices of the calling class
+        mask = np.ones(source.n_samples, dtype=bool)
+        # Restrict mask to current view's indices
+        if is_view:
+            local_mask = mask[self.indices]
+            selected_indices = self.indices[np.where(local_mask)[0]]
+        else:
+            selected_indices = np.where(mask)[0]
+
+        # Return new view with filtered columns
+        return FeatureSetView(
+            source=source,
+            indices=selected_indices,
+            columns=list(sel_cols),
+            label=label or f"{self.label}_view",
+        )
+
+    # ================================================
     # Split methods
-    # ==========================================
+    # ================================================
     def split(
         self,
         splitter: BaseSplitter,
@@ -219,7 +463,7 @@ class SplitMixin:
         source, is_view = self._get_split_context()
 
         # Choose base view (use self if called on FeatureSetView, otherwise convert FeatureSet to a view)
-        base_view = self if is_view else source._as_view()
+        base_view = self if is_view else source.to_sample_view()
         if ".fold_" in base_view.label:
             raise NotImplementedError("Splitting of a fold (`base_view.label`) is not supported.")
 
@@ -238,6 +482,7 @@ class SplitMixin:
                     splitter_state=splitter.get_state(),
                     applied_to=DataReference(
                         node=source.label,
+                        node_id=source.node_id,
                         split=self.label if is_view else None,
                     ),
                 ),

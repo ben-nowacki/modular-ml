@@ -48,7 +48,7 @@ class ConditionSplitter(BaseSplitter):
 
         Args:
             **conditions:
-                Mapping of subset labels → condition dictionaries.
+                Mapping of subset labels to condition dictionaries.
                 Each condition dictionary maps a key (feature/target/tag name)
                 to either:
                   - A literal value (equality)
@@ -86,8 +86,7 @@ class ConditionSplitter(BaseSplitter):
         sample_to_subsets: dict[int, list[str]] = {}
         for sub_label, sub_conds in self.conditions.items():
             # Filter the source FeatureSet directly
-            filt_view = view.filter(**sub_conds)
-            filt_view.label = sub_label
+            filt_view = view.filter(label=sub_label, conditions=sub_conds)
 
             # Map absolute indices of filtered view to relative indices of given view
             abs_selected = set(filt_view.indices.tolist())

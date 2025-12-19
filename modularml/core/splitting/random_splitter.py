@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.core.data.sample_schema import RAW_VARIANT, TAGS_COLUMN
+from modularml.core.data.schema_constants import DOMAIN_TAGS, REP_RAW
 from modularml.core.splitting.base_splitter import BaseSplitter
 from modularml.utils.data_format import DataFormat, ensure_list
 
@@ -117,12 +117,13 @@ class RandomSplitter(BaseSplitter):
         coll = view.source.collection
 
         # Extract raw tag arrays as numpy, aligned with the FULL FeatureSet
-        tag_data: dict[str, np.ndarray] = coll.get_domain_data(
-            domain=TAGS_COLUMN,
+        tag_data: dict[str, np.ndarray] = coll._get_domain_data(
+            domain=DOMAIN_TAGS,
             keys=self.group_by,
             fmt=DataFormat.DICT_NUMPY,
-            variant=RAW_VARIANT,
-            include_variant_suffix=False,
+            rep=REP_RAW,
+            include_rep_suffix=False,
+            include_domain_prefix=False,
         )
         # Restrict to the *samples inside this view*
         view_abs_indices = view.indices  # absolute sample indices
