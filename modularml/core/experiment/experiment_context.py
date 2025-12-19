@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 from weakref import ref
 
 from matplotlib.pylab import Enum
 
+from modularml.core.references.reference_like import ReferenceLike
 from modularml.utils.environment import running_in_notebook
 
 if TYPE_CHECKING:
-    from modularml.components.graph_node import GraphNode
     from modularml.core.experiment.experiment import Experiment
+    from modularml.core.experiment.experiment_node import ExperimentNode
     from modularml.core.experiment.stage import Stage
     from modularml.core.graph.model_graph import ModelGraph
     from modularml.core.references.data_reference import DataReference
@@ -44,7 +45,7 @@ class ExperimentContext:
 
     Notes:
         Provides a deterministic registry of:
-        - GraphNodes
+        - ExperimentNodes
         - Stages
         - ModelGraphs
 
@@ -56,10 +57,13 @@ class ExperimentContext:
 
     _active_exp: ref | None = None
 
-    # Registries
-    _nodes: ClassVar[dict[str, Any]] = {}
-    _stages: ClassVar[dict[str, Any]] = {}
-    _model_graphs: ClassVar[dict[str, Any]] = {}
+    # ExperimentNode registry and label-to-id mapping
+    _nodes_by_id: ClassVar[dict[str, ExperimentNode]] = {}
+    _node_label_to_id: ClassVar[dict[str, str]] = {}
+
+    # Stage registry and label-to-id mapping
+    _stages_by_id: ClassVar[dict[str, Stage]] = {}
+    _stage_label_to_id: ClassVar[dict[str, str]] = {}
 
     # Global policy (see _resolve_default_policy)
     _policy: ClassVar[RegistrationPolicy] | None = None
@@ -117,7 +121,7 @@ class ExperimentContext:
         """
         Temporarily disable ALL registration.
 
-        GraphNodes, Stages, and ModelGraphs created inside this block
+        ExperimentNodes, Stages, and ModelGraphs created inside this block
         will NOT be added to the ExperimentContext registry.
 
         Example:
@@ -162,123 +166,218 @@ class ExperimentContext:
     # Registration
     # =====================================================
     @classmethod
-    def _handle_registration(
-        cls,
-        registry: dict[str, Any],
-        label: str,
-        obj: Any,
-        *,
-        obj_type: str,
-    ):
-        """Internal helper applying policy to registration events."""
-        if cls._get_policy() is RegistrationPolicy.NO_REGISTER:
+    def register_experiment_node(cls, node: ExperimentNode):
+        from modularml.core.experiment.experiment_node import ExperimentNode
+
+        if not isinstance(node, ExperimentNode):
+            msg = f"`node` must be an ExperimentNode. Received: {type(node)}"
+            raise TypeError(msg)
+
+        reg_policy = cls._get_policy()
+        if reg_policy is RegistrationPolicy.NO_REGISTER:
             return
 
-        if label in registry:
-            if cls._get_policy() is RegistrationPolicy.ERROR:
-                msg = (
-                    f"{obj_type} with label '{label}' is already registered. "
-                    f"Set policy to OVERWRITE to replace existing objects."
-                )
-                raise ValueError(msg)
+        node_id = node.node_id
+        label = node.label
 
-            if cls._get_policy() is RegistrationPolicy.OVERWRITE:
-                registry[label] = obj
+        if node_id in cls._nodes_by_id:
+            if reg_policy is RegistrationPolicy.ERROR:
+                msg = f"ExperimentNode with ID '{node_id}' is already registered."
+                raise ValueError(msg)
+            if reg_policy is RegistrationPolicy.OVERWRITE:
+                old = cls._nodes_by_id[node_id]
+                cls._node_label_to_id.pop(old.label, None)
+            else:
                 return
 
-            msg = f"Unknown registration policy: {cls._get_policy()}"
-            raise RuntimeError(msg)
+        # Check label collision
+        if label in cls._node_label_to_id:
+            if reg_policy is RegistrationPolicy.ERROR:
+                msg = f"ExperimentNode label '{label}' already exists."
+                raise ValueError(msg)
+            if reg_policy is RegistrationPolicy.OVERWRITE:
+                old_id = cls._node_label_to_id[label]
+                cls._nodes_by_id.pop(old_id, None)
 
-        registry[label] = obj
-
-    @classmethod
-    def register_node(cls, node: GraphNode):
-        from modularml.components.graph_node import GraphNode
-
-        if not isinstance(node, GraphNode):
-            msg = f"`node` must be a GraphNode. Received: {type(node)}"
-            raise TypeError(msg)
-        cls._handle_registration(cls._nodes, node.label, node, obj_type="GraphNode")
-
-    @classmethod
-    def register_stage(cls, stage: Stage):
-        from modularml.core.experiment.stage import Stage
-
-        if not isinstance(stage, Stage):
-            msg = f"`stage` must be a Stage. Received: {type(stage)}."
-            raise TypeError(msg)
-        cls._handle_registration(cls._stages, stage.label, stage, obj_type="Stage")
+        # Register unique node UUID and string-based label
+        cls._nodes_by_id[node.node_id] = node
+        cls._node_label_to_id[node.label] = node.node_id
 
     @classmethod
-    def register_model_graph(cls, graph: ModelGraph):
-        from modularml.core.graph.model_graph import ModelGraph
+    def update_node_label(cls, node: ExperimentNode, new_label: str):
+        if new_label in cls._node_label_to_id:
+            msg = f"Label '{new_label}' already exists."
+            raise ValueError(msg)
 
-        if not isinstance(graph, ModelGraph):
-            msg = f"`graph` must be a ModelGraph. Received: {type(graph)}."
-            raise TypeError(msg)
-        cls._handle_registration(cls._model_graphs, graph.label, graph, obj_type="ModelGraph")
+        # Remove old label
+        cls._node_label_to_id.pop(node.label, None)
+
+        # Add new label
+        cls._node_label_to_id[new_label] = node.node_id
 
     @classmethod
     def clear_registries(cls):
-        cls._nodes.clear()
-        cls._stages.clear()
-        cls._model_graphs.clear()
+        cls._nodes_by_id.clear()
+        cls._node_label_to_id.clear()
 
     # =====================================================
-    # Convience Methods
+    # Node Lookup
+    # =====================================================
+    @classmethod
+    def has_node(cls, *, node_id: str | None = None, label: str | None = None) -> bool:
+        if node_id is not None:
+            return node_id in cls._nodes_by_id
+        if label is not None:
+            return label in cls._node_label_to_id
+        raise ValueError("Must provide `node_id` or `label`.")
+
+    @classmethod
+    def get_node(
+        cls,
+        *,
+        node_id: str | None = None,
+        label: str | None = None,
+    ) -> ExperimentNode:
+        if node_id is not None:
+            try:
+                return cls._nodes_by_id[node_id]
+            except KeyError as exc:
+                msg = f"No ExperimentNode with id '{node_id}'"
+                raise KeyError(msg) from exc
+
+        if label is not None:
+            try:
+                return cls._nodes_by_id[cls._node_label_to_id[label]]
+            except KeyError as exc:
+                msg = f"No ExperimentNode with label '{label}'"
+                raise KeyError(msg) from exc
+
+        raise ValueError("Must provide node_id or label.")
+
+    # =====================================================
+    # Convienence Methods
     # =====================================================
     @classmethod
     def available_nodes(cls) -> list[str]:
-        return list(cls._nodes.keys())
+        """List of available ExperimentNode labels."""
+        return list(cls._node_label_to_id.keys())
 
     @classmethod
     def available_stages(cls) -> list[str]:
-        return list(cls._stages.keys())
-
-    @classmethod
-    def available_model_graphs(cls) -> list[str]:
-        return list(cls._model_graphs.keys())
+        """List of available Stage labels."""
+        return list(cls._stage_label_to_id.keys())
 
     @classmethod
     def node_is_featureset(cls, node_label: str) -> bool:
         """Checks if `node_label` is registered and is a FeatureSet."""
-        from modularml.core.graph.featureset import FeatureSet
+        from modularml.core.data.featureset import FeatureSet
 
         # Check that node exists
-        if node_label not in cls._nodes:
+        try:
+            node = cls.get_node(label=node_label)
+        except (ValueError, KeyError):
             return False
 
         # Check if FeatureSet
-        node = cls._nodes[node_label]
         return isinstance(node, FeatureSet)
 
     @classmethod
     def get_all_featureset_keys(cls, featureset_label: str) -> list[str]:
         """Gets all keys belonging to the specified FeatureSet."""
-        from modularml.core.graph.featureset import FeatureSet
+        from modularml.core.data.featureset import FeatureSet
 
-        if featureset_label not in cls._nodes:
+        if not cls.node_is_featureset(node_label=featureset_label):
             msg = (
-                f"FeatureSet `{featureset_label}` does not exist in this context. "
-                f"Available GraphNodes: {cls.available_nodes()}"
+                f"No FeatureSet exists in this context with label '{featureset_label}'. "
+                f"Available ExperimentNodes: {cls.available_nodes()}"
             )
             raise ValueError(msg)
-        node = cls._nodes[featureset_label]
+
+        node = cls.get_node(label=featureset_label)
         if not isinstance(node, FeatureSet):
-            msg = f"GraphNode `{featureset_label}` is not a FeatureSet."
+            msg = f"ExperimentNode `{featureset_label}` is not a FeatureSet."
             raise TypeError(msg)
 
-        return node.collection.get_all_keys(include_domain_prefix=True, include_variant_suffix=True)
+        return node.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
 
+    # =====================================================
+    # Resolving Nodes from ReferenceLike Objects
+    # =====================================================
+    @classmethod
+    def _normalize_to_single_node_id(
+        cls,
+        ref: ReferenceLike,
+    ) -> str:
+        """
+        Normalize a ReferenceLike object to a single ExperimentNode node_id.
+
+        Raises:
+            TypeError:
+                If `ref` is not a ReferenceLike object.
+            ValueError:
+                If the reference group points to multiple nodes.
+
+        """
+        if not isinstance(ref, ReferenceLike):
+            msg = f"Expected ReferenceLike, received {type(ref)!r}"
+            raise TypeError(msg)
+
+        node_ids = {r.node_id for r in ref.resolve().refs}
+        if len(node_ids) != 1:
+            msg = f"All DataReferences must resolve to the same node_id. Received: {sorted(node_ids)}"
+            raise ValueError(msg)
+
+        return next(iter(node_ids))
+
+    @classmethod
+    def has_node_for_ref(cls, ref: ReferenceLike) -> bool:
+        """
+        Checks if a ExperimentNode exists for the given ReferenceLike object.
+
+        Returns:
+            True if ExperimentNode exists, false otherwise.
+
+        """
+        try:
+            node_id = cls._normalize_to_single_node_id(ref)
+        except (TypeError, ValueError):
+            return False
+
+        return node_id in cls._nodes_by_id
+
+    @classmethod
+    def resolve_node_from_ref(cls, ref: ReferenceLike) -> ExperimentNode:
+        """
+        Resolve a ReferenceLike object to its corresponding ExperimentNode.
+
+        Raises:
+            TypeError:
+                If `ref` is not a ReferenceLike object.
+            ValueError:
+                If the reference group spans multiple nodes.
+            KeyError:
+                If the referenced ExperimentNode does not exist in the ExperimentContext.
+
+        """
+        node_id = cls._normalize_to_single_node_id(ref)
+        try:
+            return cls._nodes_by_id[node_id]
+        except KeyError as exc:
+            msg = f"ExperimentNode  with id '{node_id}' referenced by {ref!r} does not exist in the current ExperimentContext."
+            raise KeyError(msg) from exc
+
+    # =====================================================
+    # Validate DataReference Attributes
+    # =====================================================
     @classmethod
     def validate_data_ref(cls, ref: DataReference, *, check_featuresets: bool = True):
         """Checks that all fields of `ref` exist in the active Experiment."""
-        exp = cls.get_active()
+        # exp = cls.get_active()
 
         # Check stage & node
         attrs_to_check = ["stage", "node"]
         valid_values = [cls.available_stages(), cls.available_nodes()]
-        labels = ["Stage", "GraphNode"]
+        labels = ["Stage", "ExperimentNode"]
         for attr, allowed_values, label in zip(attrs_to_check, valid_values, labels, strict=True):
             val = getattr(ref, attr)
             if val is not None and val not in allowed_values:
@@ -288,26 +387,30 @@ class ExperimentContext:
                 )
                 raise ValueError(msg)
 
-        # Check FeatureSet fields (domain, key, variant)
+        # Check FeatureSet fields (domain, key, rep)
         if check_featuresets:
-            from modularml.core.graph.featureset import FeatureSet
+            from modularml.core.data.featureset import FeatureSet
 
-            node = cls._nodes[ref.node]
+            node = cls.get_node(node_id=ref.node_id)
             if isinstance(node, FeatureSet):
                 # Check domain
                 if ref.domain is not None and ref.domain not in node.collection.available_domains:
                     msg = f"DataRefBase.domain `{ref.domain}` is not a valid domain."
                     raise ValueError(msg)
                 # Check key
-                if ref.key is not None and ref.key not in node.collection.get_domain_keys(ref.domain):
+                if ref.key is not None and ref.key not in node.collection._get_domain_keys(
+                    ref.domain,
+                    include_domain_prefix=False,
+                    include_rep_suffix=False,
+                ):
                     msg = f"DataRefBase.key `{ref.key}` is not a valid key in domain `{ref.domain}`."
                     raise ValueError(msg)
-                # Check variant
-                if ref.variant is not None and ref.variant not in node.collection.get_variant_keys(ref.domain, ref.key):
-                    msg = f"DataRefBase.variant `{ref.variant}` is not a valid variant for key `{ref.key}` in domain `{ref.domain}`."
+                # Check rep
+                if ref.rep is not None and ref.rep not in node.collection._get_rep_keys(ref.domain, ref.key):
+                    msg = f"DataRefBase.rep `{ref.rep}` is not a valid representation for key `{ref.key}` in domain `{ref.domain}`."
                     raise ValueError(msg)
-            elif ref.domain is not None or ref.key is not None or ref.variant is not None:
-                msg = f"DataRefBase.node `{ref.node}` is not a FeatureSet, but defines a domain, key, or variant attribute."
+            elif ref.domain is not None or ref.key is not None or ref.rep is not None:
+                msg = f"DataRefBase.node `{ref.node}` is not a FeatureSet, but defines a domain, key, or representation attribute."
                 raise ValueError(msg)
 
         # TODO: still need to validate split, fold, role, batch
