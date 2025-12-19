@@ -142,3 +142,6 @@ class TripletSampler(NSampler):
             drop_last=drop_last,
             seed=seed,
         )
+
+    def __repr__(self):
+        return f"TripletSampler(n_batches={len(self.batches)}, batch_size={self.batcher.batch_size})"

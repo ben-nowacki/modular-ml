@@ -95,3 +95,6 @@ class SimpleSampler(BaseSampler):
             role_indices={"default": self.source.indices},
             role_weights=None,
         )
+
+    def __repr__(self):
+        return f"SimpleSampler(n_batches={len(self.batches)}, batch_size={self.batcher.batch_size})"
