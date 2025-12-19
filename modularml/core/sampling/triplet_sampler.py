@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 from modularml.core.sampling.n_sampler import NSampler
 
 if TYPE_CHECKING:
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
-    from modularml.core.graph.featureset import FeatureSet
     from modularml.core.sampling.similiarity_condition import SimilarityCondition
 
 
@@ -34,6 +34,11 @@ class TripletSampler(NSampler):
         shuffle: bool = False,
         max_samples_per_anchor: int | None = 3,
         choose_best_only: bool = False,
+        group_by: list[str] | None = None,
+        group_by_role: str = "anchor",
+        stratify_by: list[str] | None = None,
+        stratify_by_role: str = "anchor",
+        strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
     ):
@@ -92,6 +97,25 @@ class TripletSampler(NSampler):
                 role instead of random sampling within match categories.
                 Defaults to False.
 
+            group_by (list[str], optional):
+                FeatureSet key(s) defining grouping behavior.
+                Only one grouping strategy can be active at a time.
+
+            group_by_role (str, optional):
+                If `group_by=True`, the role on which to draw data for grouping
+                must be specified. Defaults to `"anchor"`.
+
+            stratify_by (list[str], optional):
+                FeatureSet key(s) defining strata for stratified sampling.
+                Conflicts with `group_by`.
+
+            stratify_by_role (str, optional):
+                If `stratify_by=True`, the role on which to draw data for stratification
+                must be specified. Defaults to `"anchor"`.
+
+            strict_stratification (bool, optional):
+                See description above.
+
             drop_last (bool, optional):
                 Whether to drop the final batch if it contains fewer than
                 ``batch_size`` triplets. Defaults to False.
@@ -110,6 +134,11 @@ class TripletSampler(NSampler):
             shuffle=shuffle,
             max_samples_per_anchor=max_samples_per_anchor,
             choose_best_only=choose_best_only,
+            group_by=group_by,
+            group_by_role=group_by_role,
+            stratify_by=stratify_by,
+            stratify_by_role=stratify_by_role,
+            strict_stratification=strict_stratification,
             drop_last=drop_last,
             seed=seed,
         )

@@ -6,13 +6,15 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.core.data.batch_view import BatchView
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.references.data_reference import DataReference
-from modularml.core.sampling.base_sampler import BaseSampler
+from modularml.core.sampling.base_sampler import BaseSampler, Samples
+from modularml.utils.data_format import DataFormat
 
 if TYPE_CHECKING:
-    from modularml.core.graph.featureset import FeatureSet
+    from numpy.typing import NDArray
+
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.sampling.similiarity_condition import SimilarityCondition
 
 
@@ -43,6 +45,11 @@ class NSampler(BaseSampler):
         shuffle: bool = False,
         max_samples_per_anchor: int | None = 3,
         choose_best_only: bool = False,
+        group_by: list[str] | None = None,
+        group_by_role: str = "anchor",
+        stratify_by: list[str] | None = None,
+        stratify_by_role: str = "anchor",
+        strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
     ):
@@ -79,6 +86,25 @@ class NSampler(BaseSampler):
             choose_best_only (bool):
                 Whether to select only the highest-scoring sample(s) per role.
 
+            group_by (list[str], optional):
+                FeatureSet key(s) defining grouping behavior.
+                Only one grouping strategy can be active at a time.
+
+            group_by_role (str, optional):
+                If `group_by=True`, the role on which to draw data for grouping
+                must be specified. Defaults to `"anchor"`.
+
+            stratify_by (list[str], optional):
+                FeatureSet key(s) defining strata for stratified sampling.
+                Conflicts with `group_by`.
+
+            stratify_by_role (str, optional):
+                If `stratify_by=True`, the role on which to draw data for stratification
+                must be specified. Defaults to `"anchor"`.
+
+            strict_stratification (bool, optional):
+                See description above.
+
             drop_last (bool):
                 Whether to drop final incomplete batch.
 
@@ -96,13 +122,18 @@ class NSampler(BaseSampler):
             source=source,
             batch_size=batch_size,
             shuffle=shuffle,
+            group_by=group_by,
+            group_by_role=group_by_role,
+            stratify_by=stratify_by,
+            stratify_by_role=stratify_by_role,
+            strict_stratification=strict_stratification,
             drop_last=drop_last,
             seed=seed,
         )
 
-    def build_batches(self) -> list[BatchView]:
+    def build_samples(self) -> Samples:
         """
-        Construct N-way batches using similarity-based matching logic.
+        Construct N-way samples using similarity-based matching logic.
 
         Description:
             For each anchor sample in the bound FeatureSetView:
@@ -121,12 +152,9 @@ class NSampler(BaseSampler):
                 - one key per role: aligned role indices
                 - role-specific sample weights
 
-        Args:
-            None
-
         Returns:
-            list[BatchView]:
-                A list of BatchView objects, each representing an
+            Samples
+                A Samples object with attributes representing an
                 N-way batch of aligned sample indices and weights.
 
         Raises:
@@ -141,18 +169,17 @@ class NSampler(BaseSampler):
 
         """
         if self.source is None:
-            raise RuntimeError("`bind_source` must be called first.")
+            raise RuntimeError("`bind_source` must be called before sampling can occur.")
         if not isinstance(self.source, FeatureSetView):
-            raise TypeError("NSampler expects a FeatureSetView source.")
-
-        view: FeatureSetView = self.source
-        if len(view) < 2:
-            msg = f"NSampler requires at least 2 samples; got {len(view)}."
+            msg = f"`source` must be of type FeatureSetView. Received: {type(self.source)}"
+            raise TypeError(msg)
+        if len(self.source) < 2:
+            msg = f"NSampler requires at least 2 samples; got {len(self.source)}."
             raise ValueError(msg)
 
         # Precompute specs per role
         role_specs: dict[str, list[dict[str, Any]]] = {
-            role: self._resolve_columns_for_role(view=view, conds=role_conds)
+            role: self._resolve_columns_for_role(view=self.source, conds=role_conds)
             for role, role_conds in self.condition_mapping.items()
         }
 
@@ -160,45 +187,116 @@ class NSampler(BaseSampler):
         # Each role key contains a tuple of: anchor indices, role indices, and role scores
         # All returned indices are absolute indicies from the parent source
         role_results: dict[str, tuple[np.ndarray]] = {
-            role: self._generate_role_matches(view=view, specs=specs) for role, specs in role_specs.items()
+            role: self._generate_role_matches(view=self.source, specs=specs) for role, specs in role_specs.items()
         }
         # Each role may return a different array of anchor indices
         # We need to get the intersection and ensure proper alignment
         role_idxs, role_weights = self._standardize_role_idxs(d=role_results)
 
-        # If shuffle requested to shuffle anchors and all roles jointly
-        if self.shuffle:
-            perm = self.rng.permutation(len(role_idxs["anchor"]))
-            for k in role_idxs:
-                role_idxs[k] = role_idxs[k][perm]
-                role_weights[k] = role_weights[k][perm]
+        return Samples(
+            role_indices=role_idxs,
+            role_weights=role_weights,
+        )
 
-        # Build batches
-        batches: list[BatchView] = []
-        total = len(role_idxs["anchor"])
+    # def build_batches(self) -> list[BatchView]:
+    #     """
+    #     Construct N-way samples using similarity-based matching logic.
 
-        for start in range(0, total, self.batch_size):
-            stop = start + self.batch_size
+    #     Description:
+    #         For each anchor sample in the bound FeatureSetView:
+    #             1. Resolve role-specific columns for each role.
+    #             2. Generate role-specific candidate matches using
+    #                similarity and fallback rules.
+    #             3. Intersect anchors across all roles so only anchors
+    #                with valid matches in every role are retained.
+    #             4. Align role indices according to the canonical anchor
+    #                ordering.
+    #             5. Shuffle results if requested.
+    #             6. Slice aligned data into batches of size ``batch_size``.
 
-            # Handle incomplete batch
-            if stop > total and self.drop_last:
-                break
+    #         The resulting BatchView objects contain:
+    #             - "anchor": aligned anchor indices
+    #             - one key per role: aligned role indices
+    #             - role-specific sample weights
 
-            # Create batch
-            batches.append(
-                BatchView(
-                    source=view.source,
-                    role_indices={k: v[start:stop] for k, v in role_idxs.items()},
-                    role_indice_weights={k: v[start:stop] for k, v in role_weights.items()},
-                ),
-            )
+    #     Args:
+    #         None
 
-        return batches
+    #     Returns:
+    #         list[BatchView]:
+    #             A list of BatchView objects, each representing an
+    #             N-way batch of aligned sample indices and weights.
+
+    #     Raises:
+    #         RuntimeError:
+    #             If no source is bound.
+    #         TypeError:
+    #             If the bound source is not a FeatureSetView.
+    #         ValueError:
+    #             If fewer than two samples are available, or if roles
+    #             fail to produce a valid non-empty intersection of
+    #             anchor samples.
+
+    #     """
+    #     if self.source is None:
+    #         raise RuntimeError("`bind_source` must be called first.")
+    #     if not isinstance(self.source, FeatureSetView):
+    #         raise TypeError("NSampler expects a FeatureSetView source.")
+
+    #     view: FeatureSetView = self.source
+    #     if len(view) < 2:
+    #         msg = f"NSampler requires at least 2 samples; got {len(view)}."
+    #         raise ValueError(msg)
+
+    #     # Precompute specs per role
+    #     role_specs: dict[str, list[dict[str, Any]]] = {
+    #         role: self._resolve_columns_for_role(view=view, conds=role_conds)
+    #         for role, role_conds in self.condition_mapping.items()
+    #     }
+
+    #     # Build role-specific matchings
+    #     # Each role key contains a tuple of: anchor indices, role indices, and role scores
+    #     # All returned indices are absolute indicies from the parent source
+    #     role_results: dict[str, tuple[np.ndarray]] = {
+    #         role: self._generate_role_matches(view=view, specs=specs) for role, specs in role_specs.items()
+    #     }
+    #     # Each role may return a different array of anchor indices
+    #     # We need to get the intersection and ensure proper alignment
+    #     role_idxs, role_weights = self._standardize_role_idxs(d=role_results)
+
+    #     # If shuffle requested to shuffle anchors and all roles jointly
+    #     if self.shuffle:
+    #         perm = self.rng.permutation(len(role_idxs["anchor"]))
+    #         for k in role_idxs:
+    #             role_idxs[k] = role_idxs[k][perm]
+    #             role_weights[k] = role_weights[k][perm]
+
+    #     # Build batches
+    #     batches: list[BatchView] = []
+    #     total = len(role_idxs["anchor"])
+
+    #     for start in range(0, total, self.batch_size):
+    #         stop = start + self.batch_size
+
+    #         # Handle incomplete batch
+    #         if stop > total and self.drop_last:
+    #             break
+
+    #         # Create batch
+    #         batches.append(
+    #             BatchView(
+    #                 source=view.source,
+    #                 role_indices={k: v[start:stop] for k, v in role_idxs.items()},
+    #                 role_indice_weights={k: v[start:stop] for k, v in role_weights.items()},
+    #             ),
+    #         )
+
+    #     return batches
 
     # =====================================================
     # Helpers
     # =====================================================
-    def _standardize_role_idxs(self, d: dict[str, tuple[np.ndarray, ...]]):
+    def _standardize_role_idxs(self, d: dict[str, tuple[NDArray, ...]]):
         """
         Standardize and align anchor and role indices across all roles.
 
@@ -224,12 +322,12 @@ class NSampler(BaseSampler):
                         - each role name
 
         Args:
-            d (dict[str, tuple[np.ndarray,...]]):
+            d (dict[str, tuple[NDArray,...]]):
                 Mapping from role name → (anchor_idxs, role_idxs, role_scores),
                 all using absolute sample indices.
 
         Returns:
-            tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+            tuple[dict[str, NDArray], dict[str, NDArray]]:
                 A pair of dictionaries:
                     - role_idxs:  aligned anchor and role indices
                     - role_scores: aligned score arrays
@@ -453,7 +551,7 @@ class NSampler(BaseSampler):
             out.append(float(np.mean(per_cond_score)))
         return np.array(out)
 
-    def _precompute_numeric_sorted(self, arr: np.ndarray) -> SortedColumn:
+    def _precompute_numeric_sorted(self, arr: NDArray) -> SortedColumn:
         """
         Precompute sorted order for a numeric array.
 
@@ -463,7 +561,7 @@ class NSampler(BaseSampler):
             original array positions. Used for fast numeric range search.
 
         Args:
-            arr (np.ndarray):
+            arr (NDArray):
                 Numeric 1D array.
 
         Returns:
@@ -505,17 +603,14 @@ class NSampler(BaseSampler):
                 If column resolution fails, or if data are not 1D.
 
         """
-        # Get collection from view
-        coll = view.to_samplecollection()
-
         # Resolve columns for each condition
         specs: list[dict[str, Any]] = []
         for key_str, cond in conds.items():
-            # Infer node/domain/key/variant from string
+            # Infer node/domain/key/rep from string
             ref = DataReference.from_string(
                 key_str,
-                known_attrs={"node": view.source.label},
-                required_attrs=["node", "domain", "key", "variant"],
+                known_attrs={"node": view.source.label, "node_id": view.source.node_id},
+                required_attrs=["node", "domain", "key", "rep"],
             )
             if ref.node != view.source.label:
                 msg = (
@@ -525,11 +620,11 @@ class NSampler(BaseSampler):
                 raise ValueError(msg)
 
             # Gather actual data in the column defined by `ref`
-            col = coll.get_variant_data(
+            col = view._get_domain(
                 domain=ref.domain,
-                key=ref.key,
-                variant=ref.variant,
-                fmt="numpy",
+                keys=ref.key,
+                rep=ref.rep,
+                fmt=DataFormat.NUMPY,
             )
             col = np.asarray(col)
 
