@@ -106,8 +106,14 @@ class SerializableMixin(ABC):
 
     @classmethod
     def from_state(cls, state: dict):
+        from modularml.core.experiment.experiment_context import ExperimentContext
+        from modularml.core.experiment.experiment_node import ExperimentNode
+
         obj = cls.__new__(cls)  # bypass __init__
         obj.set_state(state)
+
+        if isinstance(obj, ExperimentNode):
+            ExperimentContext.register_experiment_node(obj)
         return obj
 
     # ================================================
@@ -152,12 +158,8 @@ class SerializableMixin(ABC):
             msg = f"File contains data for a {meta['class']} but loader expects {cls.__name__}."
             raise TypeError(msg)
 
-        # Create uninitiallized shell from calling class
-        obj = cls.__new__(cls)
-
-        # Set state from loaded data
-        obj.set_state(payload["state"])
-        return obj
+        # Use from_state to create
+        return cls.from_state(payload["state"])
 
     # ================================================
     # File I/O
