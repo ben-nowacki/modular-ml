@@ -463,7 +463,7 @@ class SplitMixin:
         source, is_view = self._get_split_context()
 
         # Choose base view (use self if called on FeatureSetView, otherwise convert FeatureSet to a view)
-        base_view = self if is_view else source.to_sample_view()
+        base_view = self if is_view else source.to_view()
         if ".fold_" in base_view.label:
             raise NotImplementedError("Splitting of a fold (`base_view.label`) is not supported.")
 

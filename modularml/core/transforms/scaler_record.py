@@ -27,10 +27,10 @@ class ScalerRecord:
             One of {"features", "targets", "tags"}.
         keys : tuple[str]
             Column names within the domain that were transformed.
-        variant_in : str
-            Input variant name (e.g., "raw" or "transformed").
-        variant_out : str
-            Output variant name produced by this transform.
+        rep_in : str
+            Input representation name (e.g., "raw" or "transformed").
+        rep_out : str
+            Output representation name produced by this transform.
         fit_split : str | None
             Name of the split used for fitting, or None if fit on all samples.
         merged_axes : tuple[int] | None
@@ -45,8 +45,8 @@ class ScalerRecord:
     order: int
     domain: str
     keys: tuple[str]
-    variant_in: str
-    variant_out: str
+    rep_in: str
+    rep_out: str
     fit_split: str | None
     merged_axes: tuple[int] | None
     flatten_meta: dict
@@ -61,8 +61,8 @@ class ScalerRecord:
             self.order == other.order
             and self.domain == other.domain
             and self.keys == other.keys
-            and self.variant_in == other.variant_in
-            and self.variant_out == other.variant_out
+            and self.rep_in == other.rep_in
+            and self.rep_out == other.rep_out
             and self.fit_split == other.fit_split
             and self.merged_axes == other.merged_axes
             and self.flatten_meta == other.flatten_meta
@@ -75,8 +75,8 @@ class ScalerRecord:
                 self.order,
                 self.domain,
                 self.keys,
-                self.variant_in,
-                self.variant_out,
+                self.rep_in,
+                self.rep_out,
                 self.fit_split,
                 self.merged_axes,
                 self.flatten_meta,
@@ -99,8 +99,8 @@ class ScalerRecord:
             "order": self.order,
             "domain": self.domain,
             "keys": self.keys,
-            "variant_in": self.variant_in,
-            "variant_out": self.variant_out,
+            "rep_in": self.rep_in,
+            "rep_out": self.rep_out,
             "fit_split": self.fit_split,
             "merged_axes": self.merged_axes,
             "flatten_meta": self.flatten_meta,
@@ -118,8 +118,8 @@ class ScalerRecord:
         self.order = state["order"]
         self.domain = state["domain"]
         self.keys = tuple(state["keys"])
-        self.variant_in = state["variant_in"]
-        self.variant_out = state["variant_out"]
+        self.rep_in = state["rep_in"]
+        self.rep_out = state["rep_out"]
         self.fit_split = state["fit_split"]
         self.merged_axes = state["merged_axes"]
         self.flatten_meta = state["flatten_meta"]
@@ -139,8 +139,8 @@ class ScalerRecord:
             order=state["order"],
             domain=state["domain"],
             keys=state["keys"],
-            variant_in=state["variant_in"],
-            variant_out=state["variant_out"],
+            rep_in=state["rep_in"],
+            rep_out=state["rep_out"],
             fit_split=state["fit_split"],
             merged_axes=state["merged_axes"],
             flatten_meta=state["flatten_meta"],
