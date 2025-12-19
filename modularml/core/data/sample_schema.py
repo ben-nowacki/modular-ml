@@ -214,7 +214,7 @@ class SampleSchema:
         return cls(features=features, targets=targets, tags=tags)
 
 
-def ensure_sample_id_column(table: pa.Table) -> pa.Table:
+def ensure_sample_id(table: pa.Table) -> pa.Table:
     """
     Ensure that the Arrow table contains a unique DOMAIN_SAMPLE_ID.
 

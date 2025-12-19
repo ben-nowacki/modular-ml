@@ -1,4 +1,7 @@
 import ast
+import fnmatch
+import warnings
+from collections import defaultdict
 from typing import Literal
 
 import numpy as np
@@ -6,16 +9,162 @@ import pyarrow as pa
 
 from modularml.core.data.sample_schema import (
     DTYPE_SUFFIX,
-    FEATURES_COLUMN,
     METADATA_PREFIX,
-    RAW_VARIANT,
-    SAMPLE_ID_COLUMN,
     SHAPE_SUFFIX,
-    TAGS_COLUMN,
-    TARGETS_COLUMN,
-    TRANSFORMED_VARIANT,
 )
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+    REP_RAW,
+    REP_TRANSFORMED,
+)
+from modularml.utils.data_format import ensure_list
 from modularml.utils.shape_utils import get_shape, shape_to_tuple
+
+
+def resolve_column_selectors(
+    *,
+    all_columns: list[str],
+    columns: str | list[str] | None = None,
+    features: str | list[str] | None = None,
+    targets: str | list[str] | None = None,
+    tags: str | list[str] | None = None,
+    rep: str | None = None,
+    include_all_if_empty: bool = False,
+) -> dict[str, set[str]]:
+    """
+    Resolve column selectors into fully-qualified column names.
+
+    Args:
+        all_columns (list[str]):
+            All available columns in the table being filtered.
+
+        columns (str | list[str] | None):
+            Fully-qualified column names to include  (e.g., `"features.voltage.raw"`).
+            Must have an exact match in `all_columns`.
+
+        features (str | list[str] | None):
+            Feature-domain selectors. Accepts exact names or wildcard (`"*"`) patterns.
+            Domain prefix `"features."` may be omitted.
+
+        targets (str | list[str] | None):
+            Same as `features`, but for the targets domain.
+
+        tags (str | list[str] | None):
+            Same as `features`, but for the tags domain.
+
+        rep (str | None):
+            Default representation suffix to apply when a selector provides no representation.
+            Does *not* overwrite explicit representations in `columns`.
+
+        include_all_if_empty (bool):
+            If True, domains with no explicitly selected columns will include
+            all available columns from that domain. Defaults to False.
+
+    Returns:
+        dict[str, set[str]]:
+            Mapping of domain -> set of fully-qualified column names
+            (e.g. `{"features": {"features.voltage.raw"}, ...}`)
+
+    """
+    # Build final column selection (organized by domain)
+    selected: dict[str, set[str]] = {DOMAIN_FEATURES: set(), DOMAIN_TARGETS: set(), DOMAIN_TAGS: set()}
+
+    # 1. Extract columns defined via `columns` argument
+    for col in ensure_list(columns):
+        if col not in all_columns:
+            msg = f"Columns '{col}' does not exist. Available columns: {all_columns}"
+            raise KeyError(msg)
+        selected[col.split(".")[0]].add(col)
+
+    # 2. Domain-based arguments
+    domain_inputs = {
+        DOMAIN_FEATURES: ensure_list(features),
+        DOMAIN_TARGETS: ensure_list(targets),
+        DOMAIN_TAGS: ensure_list(tags),
+    }
+    for domain, selectors in domain_inputs.items():
+        for sel in selectors:
+            # Normalize to domain.key.rep (rep may be wildcard or missing)
+            full = _ensure_domain_prefix(sel, domain)
+            parts = full.split(".")
+
+            if len(parts) not in (2, 3):
+                msg = f"Invalid selector '{sel}'. Expected 'key', 'key.rep', or wildcard form."
+                raise ValueError(msg)
+            d, k, r = parts[0], parts[1], (parts[2] if len(parts) == 3 else None)
+
+            # Apply default rep if missing
+            if r is None and rep is not None:
+                r = rep
+            pattern = f"{d}.{k}.{r or '*'}"
+            matched = fnmatch.filter(all_columns, pattern)
+            if not matched:
+                msg = f"No entries in `all_columns` match selector '{sel}' (expanded to '{pattern}')."
+                raise KeyError(msg)
+
+            # Add to selected
+            for m in matched:
+                selected[domain].add(m)
+
+    # 3. Fill empty domain, if specified
+    if include_all_if_empty:
+        for d, cols in selected.items():
+            if not cols:
+                selected[d].update(c for c in all_columns if c.startswith(f"{d}."))  # noqa: PLR1733
+
+            # Raise warning if multiple representations of the same columns are being used
+            key_to_reps: dict[str, set[str]] = defaultdict(set)
+            for c in cols:
+                _, k, r = c.split(".")
+                key_to_reps[k].add(r)
+            multi_rep_keys = {k: list(v) for k, v in key_to_reps.items() if len(v) > 1}
+            if multi_rep_keys:
+                msg = (
+                    f"Multiple representations selected for the same {d} column(s): "
+                    + ", ".join(f"{k} -> {reps}" for k, reps in multi_rep_keys.items())
+                    + ". This may lead to unintended model inputs if not handled explicitly."
+                )
+                warnings.warn(msg, category=UserWarning, stacklevel=2)
+
+    return selected
+
+
+def _remove_domain_prefix(element: str, domain: str) -> str:
+    """Removes the domain prefix from element, if it contains it."""
+    prefix = f"{domain}."
+    return element[element.rindex(prefix) + len(prefix) :] if prefix in element else element
+
+
+def _ensure_domain_prefix(element: str, domain: str) -> str:
+    """Ensures the domain prefix is in element."""
+    prefix = f"{domain}."
+
+    all_domains = [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]
+    invalid_domains = [y for y in all_domains if y != domain]
+    invalid_prefixes = [f"{x}." for x in invalid_domains]
+
+    if element.startswith(prefix):
+        return element
+    if any(element.startswith(f"{x}.") for x in invalid_prefixes):
+        msg = f"Domain mistmatch: '{element}' starts with domain other than '{domain}'"
+        raise ValueError(msg)
+
+    return prefix + element
+
+
+def _remove_rep_suffix(element: str, rep: str) -> str:
+    """Removes the representation suffix from element, if it contains it."""
+    suffix = f".{rep}"
+    return element[: element.rindex(suffix)] if suffix in element else element
+
+
+def _ensure_rep_suffix(element: str, rep: str) -> str:
+    """Ensures the representation suffix is in element."""
+    suffix = f".{rep}"
+    return element if element.endswith(suffix) else element + suffix
 
 
 def flatten_schema(schema: pa.Schema, prefix: str = "", separator: str = "."):
@@ -136,7 +285,7 @@ def numpy_to_sample_schema_column(
     name: str,
     data: np.ndarray,
     *,
-    variant: Literal["raw", "transformed"] = "raw",
+    rep: Literal["raw", "transformed"] = "raw",
     dtype: pa.DataType | None = None,
     store_shape_metadata: bool = True,
     max_list_depth: int = 2,
@@ -151,7 +300,7 @@ def numpy_to_sample_schema_column(
     Args:
         name: Column name.
         data: NumPy array of shape (N, ...).
-        variant (Literal["raw", "transformed"]): The variant to store the data under.
+        rep (Literal["raw", "transformed"]): The representation to store the data under.
         dtype: Optional element dtype (defaults to `pa.from_numpy_dtype(data.dtype)`).
         store_shape_metadata: If True, returns schema metadata for shape reconstruction.
         max_list_depth: Maximum nesting depth for list-based encoding (default=2).
@@ -159,7 +308,7 @@ def numpy_to_sample_schema_column(
     Returns:
         (name, pa.Array, metadata)
             name: The same as input `name`.
-            pa.Array: PyArrow array storing the tensor under the variant.
+            pa.Array: PyArrow array storing the tensor under the representation.
             metadata: Dict with optional shape and dtype info for schema attachment.
 
     Raises:
@@ -167,8 +316,8 @@ def numpy_to_sample_schema_column(
         ValueError: If `data` is empty.
 
     """
-    if variant not in [RAW_VARIANT, TRANSFORMED_VARIANT]:
-        msg = f"`variant` must be one of: {[RAW_VARIANT, TRANSFORMED_VARIANT]}"
+    if rep not in [REP_RAW, REP_TRANSFORMED]:
+        msg = f"`rep` must be one of: {[REP_RAW, REP_TRANSFORMED]}"
         raise ValueError(msg)
     if not isinstance(data, np.ndarray):
         msg = f"Expected NumPy array, got {type(data)}"
@@ -204,8 +353,8 @@ def numpy_to_sample_schema_column(
     metadata = {}
     if store_shape_metadata:
         metadata = {
-            f"{name}.{variant}.{SHAPE_SUFFIX}".encode(): str(shape).encode(),
-            f"{name}.{variant}.{DTYPE_SUFFIX}".encode(): normalize_numpy_dtype_for_pyarrow_dtype(data.dtype).encode(),
+            f"{name}.{rep}.{SHAPE_SUFFIX}".encode(): str(shape).encode(),
+            f"{name}.{rep}.{DTYPE_SUFFIX}".encode(): normalize_numpy_dtype_for_pyarrow_dtype(data.dtype).encode(),
         }
 
     return name, array, metadata
@@ -293,7 +442,7 @@ def build_sample_schema_table(
     Description:
         Converts three dictionaries of NumPy arrays (`features`, `targets`, and `tags`) \
         into a structured Arrow table. Each domain becomes a Struct column whose fields \
-        are *per-column structs* containing a single variant field: `"raw"`.
+        are *per-column structs* containing a single representation field: `"raw"`.
 
         Example layout:
         ```
@@ -321,7 +470,7 @@ def build_sample_schema_table(
     Returns:
         pa.Table:
             A PyArrow table with structured columns (`features`, `targets`, and \
-            optionally `tags`), each holding per-column variant structs and \
+            optionally `tags`), each holding per-column representation structs and \
             complete dtype/shape metadata.
 
     """
@@ -339,11 +488,11 @@ def build_sample_schema_table(
             name, arrow_arr, meta = numpy_to_sample_schema_column(
                 name=key,
                 data=np_arr,
-                variant=RAW_VARIANT,
+                rep=REP_RAW,
             )
 
             # Full col name
-            col_name = f"{domain_name}.{name}.{RAW_VARIANT}"
+            col_name = f"{domain_name}.{name}.{REP_RAW}"
             cols[col_name] = arrow_arr
 
             # Prefix metadata keys if provided
@@ -363,19 +512,19 @@ def build_sample_schema_table(
 
     # Build each domain
     feature_cols, feature_meta = _encode_domain(
-        domain_name=FEATURES_COLUMN,
+        domain_name=DOMAIN_FEATURES,
         domain_dict=features,
-        meta_prefix=f"{METADATA_PREFIX}.{FEATURES_COLUMN}",
+        meta_prefix=f"{METADATA_PREFIX}.{DOMAIN_FEATURES}",
     )
     target_cols, target_meta = _encode_domain(
-        domain_name=TARGETS_COLUMN,
+        domain_name=DOMAIN_TARGETS,
         domain_dict=targets,
-        meta_prefix=f"{METADATA_PREFIX}.{TARGETS_COLUMN}",
+        meta_prefix=f"{METADATA_PREFIX}.{DOMAIN_TARGETS}",
     )
     tag_cols, tag_meta = _encode_domain(
-        domain_name=TAGS_COLUMN,
+        domain_name=DOMAIN_TAGS,
         domain_dict=tags or {},
-        meta_prefix=f"{METADATA_PREFIX}.{TAGS_COLUMN}",
+        meta_prefix=f"{METADATA_PREFIX}.{DOMAIN_TAGS}",
     )
 
     # Build flat column dict
@@ -384,7 +533,7 @@ def build_sample_schema_table(
     # Ensure table has at least 1 column
     if len(all_cols) == 0:
         # Create an "empty" placeholder column of correct row count
-        all_cols = {SAMPLE_ID_COLUMN: pa.array([None] * n_rows, type=pa.string())}
+        all_cols = {DOMAIN_SAMPLE_ID: pa.array([None] * n_rows, type=pa.string())}
 
     # Build table
     table = pa.table(all_cols)

@@ -1,36 +1,34 @@
 from __future__ import annotations
 
 import copy
-import fnmatch
 import warnings
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import joblib
 import numpy as np
 import pyarrow as pa
 
-from modularml.components.graph_node import GraphNode
-from modularml.components.shapes import NodeShapes
-from modularml.core.data.sample_collection import SampleCollection, _ensure_domain_prefix
-from modularml.core.data.sample_schema import (
-    FEATURES_COLUMN,
-    RAW_VARIANT,
-    SAMPLE_ID_COLUMN,
-    TAGS_COLUMN,
-    TARGETS_COLUMN,
-    TRANSFORMED_VARIANT,
-    validate_str_list,
+from modularml.core.data.sample_collection import SampleCollection
+from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
+from modularml.core.data.sample_schema import validate_str_list
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+    REP_RAW,
+    REP_TRANSFORMED,
 )
-from modularml.core.splitting.base_splitter import BaseSplitter
+from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_node import ExperimentNode
+from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.splitting.split_mixin import SplitMixin, SplitterRecord
 from modularml.core.transforms.scaler import Scaler
 from modularml.core.transforms.scaler_record import ScalerRecord
 from modularml.utils.data_conversion import flatten_to_2d, to_numpy, unflatten_from_2d
 from modularml.utils.data_format import DataFormat, ensure_list
 from modularml.utils.exceptions import SplitOverlapWarning
-from modularml.utils.pyarrow_data import build_sample_schema_table
-from modularml.utils.serialization import SerializableMixin
+from modularml.utils.pyarrow_data import build_sample_schema_table, resolve_column_selectors
+from modularml.utils.serialization import SerializableMixin, register_serializable
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -41,14 +39,14 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_schema import SampleSchema
 
 
-class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
+class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, SerializableMixin):
     """
     Unified FeatureSet backed by a single SampleCollection.
 
-    Each variant (e.g., "raw", "transformed") lives within the same \
+    Each representation (e.g., "raw", "transformed") lives within the same \
     SampleCollection rather than as separate sub-collections. \
     Splits store indices into this collection and may specify \
-    which variant(s) to use when retrieving data.
+    which representation(s) to use when retrieving data.
     """
 
     def __init__(
@@ -57,7 +55,6 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         table: pa.Table,
         schema: SampleSchema | None = None,
     ):
-        # Instaniate GraphNode with label
         super().__init__(label=label)
 
         # Create SampleCollection attribute
@@ -255,7 +252,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         # 6. Return new FeatureSet
         return cls(label=str(label), table=table)
 
-    from_df = from_pandas  # alias
+    from_df = from_pandas
 
     def __eq__(self, other):
         if not isinstance(other, FeatureSet):
@@ -271,296 +268,17 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
 
     __hash__ = None
 
-    # ==========================================
-    # GraphNode properties
-    # ==========================================
-    @property
-    def allows_upstream_connections(self) -> bool:
-        return False  # FeatureSets do not accept inputs
-
-    @property
-    def allows_downstream_connections(self) -> bool:
-        return True  # FeatureSets can feed into downstream nodes
-
-    @property
-    def max_inputs(self) -> int | None:
-        return 0
-
-    @property
-    def node_shapes(self) -> NodeShapes:
-        # FeatureSet has no inputs
-        # Output is the merged shape of all features
-        out_shape = self.get_features(
-            fmt=DataFormat.NUMPY,
-            keys=None,
-            variant=None,
-        ).shape[1:]
-        return NodeShapes(
-            input_shapes={},
-            output_shapes={0: out_shape},
-        )
-
-    # ==========================================
-    # SampleCollection properties
-    # ==========================================
-    @property
-    def n_samples(self) -> int:
-        """Total number of samples."""
-        return self.collection.n_samples
-
-    @property
-    def feature_shapes(self) -> dict[str, tuple[int, ...]]:
-        """
-        Mapping of feature columns (including variants) to their data shapes.
-
-        Description:
-            Returns a shape tuple keyed by each feature column name.
-
-        Returns:
-            dict[str, tuple[int, ...]]: Per-feature shapes.
-
-        """
-        return self.collection.feature_shapes
-
-    @property
-    def target_shapes(self) -> dict[str, tuple[int, ...]]:
-        """
-        Mapping of target columns (including variants) to their data shapes.
-
-        Description:
-            Returns a shape tuple keyed by each target column name.
-
-        Returns:
-            dict[str, tuple[int, ...]]: Per-target shapes.
-
-        """
-        return self.collection.target_shapes
-
-    @property
-    def tag_shapes(self) -> dict[str, tuple[int, ...]]:
-        """
-        Mapping of tag columns (including variants) to their data shapes.
-
-        Description:
-            Returns a shape tuple keyed by each tag column name.
-
-        Returns:
-            dict[str, tuple[int, ...]]: Per-tag shapes.
-
-        """
-        return self.collection.tag_shapes
-
-    @property
-    def feature_keys(self) -> list[str]:
-        """List of feature column names."""
-        return self.collection.feature_keys
-
-    @property
-    def target_keys(self) -> list[str]:
-        """List of target column names."""
-        return self.collection.target_keys
-
-    @property
-    def tag_keys(self) -> list[str]:
-        """List of tag column names."""
-        return self.collection.tag_keys
-
-    @property
-    def all_keys(self) -> list[str]:
-        return self.collection.get_all_keys(
-            include_domain_prefix=True,
-            include_variant_suffix=True,
-        )
-
-    @property
-    def feature_dtypes(self) -> dict[str, str]:
-        """
-        Mapping of feature columns (including variants) to their data types.
-
-        Description:
-            Returns a dictionary describing the data type of each feature variant \
-            in the FeatureSet. Keys are formatted as `"column.variant"` and \
-            data types are strings (e.g., "float32").
-
-        Returns:
-            dict[str, str]:
-                Mapping of feature column variant names to their data types (as strings).
-
-        Example:
-        ``` python
-            {
-                "voltage.raw": "float32",
-                "voltage.transformed": "float32",
-            }
-        ```
-
-        """
-        return self.collection.feature_dtypes
-
-    @property
-    def target_dtypes(self) -> dict[str, str]:
-        """
-        Mapping of target columns (including variants) to their data types.
-
-        Description:
-            Returns a dictionary describing the data type of each target variant \
-            in the FeatureSet. Keys are formatted as `"column.variant"` and \
-            data types are strings (e.g., "float32").
-
-        Returns:
-            dict[str, str]:
-                Mapping of target column variant names to their data types (as strings).
-
-        Example:
-        ``` python
-            {
-                "soh.raw": "float32",
-                "soh.transformed": "float32",
-            }
-        ```
-
-        """
-        return self.collection.target_dtypes
-
-    @property
-    def tag_dtypes(self) -> dict[str, str]:
-        """
-        Mapping of tag columns (including variants) to their data types.
-
-        Description:
-            Returns a dictionary describing the data type of each tag variant \
-            in the FeatureSet. Keys are formatted as `"column.variant"` and \
-            data types are strings (e.g., "float32").
-
-        Returns:
-            dict[str, str]:
-                Mapping of tag column variant names to their data types (as strings).
-
-        Example:
-        ``` python
-            {
-                "cell_id.raw": "string",
-                "cell_id.transformed": "int8",
-            }
-        ```
-
-        """
-        return self.collection.tag_dtypes
-
-    def get_features(
+    # ============================================
+    # SampleCollectionMixin
+    # ============================================
+    def _resolve_caller_attributes(
         self,
-        fmt: DataFormat = DataFormat.DICT_NUMPY,
-        *,
-        keys: str | list[str] | None = None,
-        variant: str | None = RAW_VARIANT,
-        include_variant_suffix: bool = False,
-        include_domain_prefix: bool = False,
-    ):
-        """
-        Retrieve feature data in a chosen format.
+    ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None]:
+        return (self.collection, None, None)
 
-        Args:
-            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
-                Defaults to a single dictionary of numpy arrays.
-            keys (str | list[str] | None): Optional subset of feature keys to return. \
-                If None, all feature keys are returned. Defaults to None.
-            variant (str, optional): The variant (e.g., "raw" or "transformed") of the feature keys to \
-                return. If None, all variants are returned and `include_variant_suffix` is set to True. \
-                If specfied, `keys` must all have matching variants. Defaults to RAW_VARIANT.
-            include_variant_suffix (bool): Whether to include the variant suffix in the \
-                feature keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
-            include_domain_prefix (bool): Wether to include the domain prefix in the \
-                feature keys (e.g., "voltage" or "features.voltage"). Defaults to False.
-
-        Returns:
-            Feature data in the requested format.
-
-        """
-        return self.collection.get_features(
-            fmt=fmt,
-            keys=keys,
-            variant=variant,
-            include_variant_suffix=include_variant_suffix,
-            include_domain_prefix=include_domain_prefix,
-        )
-
-    def get_targets(
-        self,
-        fmt: DataFormat = DataFormat.DICT_NUMPY,
-        *,
-        keys: str | list[str] | None = None,
-        variant: str | None = RAW_VARIANT,
-        include_variant_suffix: bool = False,
-        include_domain_prefix: bool = False,
-    ):
-        """
-        Retrieve target data in a chosen format.
-
-        Args:
-            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
-                Defaults to a single dictionary of numpy arrays.
-            keys (str | list[str] | None): Optional subset of target keys to return. \
-                If None, all target keys are returned. Defaults to None.
-            variant (str, optional): The variant (e.g., "raw" or "transformed") of the target keys to \
-                return. If None, all variants are returned and `include_variant_suffix` is set to True. \
-                If specfied, `keys` must all have matching variants. Defaults to RAW_VARIANT.
-            include_variant_suffix (bool): Whether to include the variant suffix in the \
-                target keys (e.g., "soh" or "soh.raw"). Defaults to False.
-            include_domain_prefix (bool): Wether to include the domain prefix in the \
-                target keys (e.g., "soh" or "targets.soh"). Defaults to False.
-
-        Returns:
-            Target data in the requested format.
-
-        """
-        return self.collection.get_targets(
-            fmt=fmt,
-            keys=keys,
-            variant=variant,
-            include_variant_suffix=include_variant_suffix,
-            include_domain_prefix=include_domain_prefix,
-        )
-
-    def get_tags(
-        self,
-        fmt: DataFormat = DataFormat.DICT_NUMPY,
-        *,
-        keys: str | list[str] | None = None,
-        variant: str | None = RAW_VARIANT,
-        include_variant_suffix: bool = False,
-        include_domain_prefix: bool = False,
-    ):
-        """
-        Retrieve tag data in a chosen format.
-
-        Args:
-            fmt (DataFormat): Desired output format (see :class:`DataFormat`). \
-                Defaults to a single dictionary of numpy arrays.
-            keys (str | list[str] | None): Optional subset of tag keys to return. \
-                If None, all tag keys are returned. Defaults to None.
-            variant (str, optional): The variant (e.g., "raw" or "transformed") of the tag keys to \
-                return. If None, all variants are returned and `include_variant_suffix` is set to True. \
-                If specfied, `keys` must all have matching variants. Defaults to RAW_VARIANT.
-            include_variant_suffix (bool): Whether to include the variant suffix in the \
-                tag keys (e.g., "cell_id" or "cell_id.raw"). Defaults to False.
-            include_domain_prefix (bool): Wether to include the domain prefix in the \
-                tag keys (e.g., "cell_id" or "tags.cell_id"). Defaults to False.
-
-        Returns:
-            Tag data in the requested format.
-
-        """
-        return self.collection.get_tags(
-            fmt=fmt,
-            keys=keys,
-            variant=variant,
-            include_variant_suffix=include_variant_suffix,
-            include_domain_prefix=include_domain_prefix,
-        )
-
-    # ==========================================
+    # ============================================
     # FeatureSet Properties & Dunders
-    # ==========================================
+    # ============================================
     def __len__(self) -> int:
         return self.n_samples
 
@@ -574,7 +292,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
     def __str__(self):
         return self.__repr__()
 
-    def _as_view(self) -> FeatureSetView:
+    def to_sample_view(self) -> FeatureSetView:
         """
         Create a FeatureSetView over the entire FeatureSet.
 
@@ -587,6 +305,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         return FeatureSetView(
             source=self,
             indices=np.arange(self.collection.n_samples),
+            columns=self.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
             label=f"{self.label}_view",
         )
 
@@ -598,9 +317,9 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
     def n_splits(self) -> int:
         return len(self._splits)
 
-    # ==========================================
+    # ============================================
     # Split Utilities
-    # ==========================================
+    # ============================================
     # Most splitting logic is handled in the SplitterMixin class
     @property
     def available_splits(self) -> list[str]:
@@ -619,7 +338,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
 
         Returns:
             FeatureSetView:
-                A no-copy, filtered view of the FeatureSet.
+                A no-copy, row-wise view of the FeatureSet.
 
         """
         if split_name not in self._splits:
@@ -672,173 +391,27 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         self._splits.clear()
         self._split_configs.clear()
 
-    def select(
-        self,
-        columns: str | list[str] | None = None,
-        *,
-        features: str | list[str] | None = None,
-        targets: str | list[str] | None = None,
-        tags: str | list[str] | None = None,
-        variant: str | None = None,
-        label: str | None = None,
-    ):
-        """
-        Select a subset of columns from this FeatureSet and return a new FeatureSet.
-
-        This method provides flexible and expressive column selection using:
-            - Explicit column names
-            - Domain-based selection (`features=`, `targets=`, `tags=`)
-            - Wildcards (e.g., `"*.raw"`, `"voltage.*"`, `"*.*"`)
-            - Automatic domain prefixing (e.g., `"voltage.raw"` -> `"features.voltage.raw"`)
-            - Automatic variant suffixing via the `variant=` argument
-
-        The returned FeatureSet **shares the same underlying buffers** (no deep copy).
-        Only the visible subset of columns is changed.
-
-        **Supported Patterns & Examples:**
-        1. Exact column selection
-        ```python
-        fs2 = fs.select(columns=["features.voltage.raw", "targets.soh.raw"])
-        ```
-
-        2. Domain-based selection
-        ```python
-        fs2 = fs.select(features="voltage.raw")
-        # automatically interpreted as "features.voltage.raw"
-        ```
-
-        3. Wildcard on variant (`*.raw`): select all keys in a domain having the `.raw` variant:
-        ```python
-        fs2 = fs.select(features="*.raw")
-        # selects: features.voltage.raw, features.current.raw, ...
-        ```
-
-        4. Wildcard on key (`voltage.*`): select all variants for a specific key:
-        ```python
-        fs2 = fs.select(features="voltage.*")
-        # selects: features.voltage.raw, features.voltage.transformed, ...
-        ```
-
-        5. Full wildcard (`*.*`): select all keys and all variants within a domain:
-        ```python
-        fs2 = fs.select(features="*.*")
-        # selects all feature columns (raw, transformed, etc.)
-        ```
-
-        6. Variant inference using `variant=`: if a key is missing a variant suffix:
-        ```python
-        fs2 = fs.select(features="voltage", variant="raw")
-        # selects features.voltage.raw
-        # Does *not* overwrite columns that explicitly specify a variant.
-        ```
-
-        7. Merging multiple sources: explicit columns + domain-based:
-        ```python
-        fs2 = fs.select(columns=["targets.soh.raw"], features=["voltage.raw", "current.raw"])
-        ```
-
-        Args:
-            columns (str | list[str] | None):
-                Fully-qualified column names to include  (e.g., `"features.voltage.raw"`).
-                Must match actual FeatureSet columns.
-
-            features (str | list[str] | None):
-                Feature-domain selectors. Accepts exact names or wildcard patterns.
-                Domain prefix `"features."` may be omitted.
-
-            targets (str | list[str] | None):
-                Same as `features`, but for the targets domain.
-
-            tags (str | list[str] | None):
-                Same as `features`, but for the tags domain.
-
-            variant (str | None):
-                Default variant suffix to apply when a selector provides no variant.
-                Does *not* overwrite explicit variants.
-
-            label(str | None):
-                Label of the returned FeatureSet. Defaults to `<original>-selection`.
-
-
-        Returns:
-            FeatureSet:
-                A new FeatureSet referencing the same underlying arrow table, but
-                restricted to the selected columns.
-
-        """
-        # Extract real columns from collection
-        all_cols: list[str] = self.all_keys
-
-        # Build final column selection
-        selected: set[str] = set()
-
-        # 1. Exact columns defined via `columns`
-        for col in ensure_list(columns):
-            if col not in all_cols:
-                msg = f"Columns '{col}' does not exist. Available columns: {all_cols}"
-                raise KeyError(msg)
-            selected.add(col)
-
-        # 2. Domain-based selection
-        domain_inputs: dict[str, list[str]] = {
-            FEATURES_COLUMN: [_ensure_domain_prefix(element=x, domain=FEATURES_COLUMN) for x in ensure_list(features)],
-            TARGETS_COLUMN: [_ensure_domain_prefix(element=x, domain=TARGETS_COLUMN) for x in ensure_list(targets)],
-            TAGS_COLUMN: [_ensure_domain_prefix(element=x, domain=TAGS_COLUMN) for x in ensure_list(tags)],
-        }
-        for domain, cols in domain_inputs.items():
-            for c in cols:
-                # Parse domain, key, variant
-                parts = c.split(".")
-                if len(parts) != 3:
-                    msg = f"{domain} input, '{c}', contains too many/few elements: {len(parts)} != 3."
-                    raise ValueError(msg)
-                d, k, v = parts
-
-                # Apply `variant` if defined and missing from `c`
-                if v is None and variant is not None:
-                    v = variant
-
-                # Handle key wildcards
-                pattern = f"{d}.{k}.{v or '*'}"
-                matched = fnmatch.filter(all_cols, pattern)
-                if not matched:
-                    msg = f"No columns match pattern '{c}' -> '{pattern}' in domain '{domain}'."
-                    raise KeyError(msg)
-
-                # Add to selected
-                for m in matched:
-                    selected.add(m)
-
-        # 3. Ensure smaple_id col is included
-        if SAMPLE_ID_COLUMN not in selected:
-            selected.add(SAMPLE_ID_COLUMN)
-
-        return FeatureSet(
-            label=label or f"{self.label}-selection",
-            table=self.collection.table.select(selected),
-        )
-
-    # ==========================================
+    # ============================================
     # Transform/Scaling
-    # ==========================================
+    # ============================================
     def _get_flat_data(
         self,
         domain: str,
         keys: list[str],
-        variant: str,
+        rep: str,
         split: str | None,
         merged_axes: int | tuple[int],
     ) -> tuple[np.ndarray, dict]:
         """Returns new 2D array and metadata of flattening process."""
-        # Get collection to flatten
-        coll = self.collection if split is None else self.get_split(split).to_samplecollection()
-
-        # Get data specified by domain + keys + variant
-        data = coll.get_domain_data(
+        # Get data specified by domain + keys + representation
+        source = self if split is None else self.get_split(split_name=split)
+        data = source._get_domain(
             domain=domain,
             fmt=DataFormat.NUMPY,
             keys=keys,
-            variant=variant,
+            rep=rep,
+            include_domain_prefix=True,
+            include_rep_suffix=True,
         )
 
         # Scaler requires 2D array
@@ -884,7 +457,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
             - Fits the provided scaler to samples from `fit_to_split` (or all samples).
             - Transforms all samples.
             - Unflattens results back to original shapes.
-            - Stores a new variant (`TRANSFORMED_VARIANT`) for each key.
+            - Stores a new representation (`REP_TRANSFORMED`) for each key.
             - Appends a ScalerRecord to the transform log.
 
         Args:
@@ -906,7 +479,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         Raises:
             ValueError:
                 - If flattening with `merged_axes` does not result in 2D data.
-                - If variant or domain keys do not exist.
+                - If representation or domain keys do not exist.
             TypeError:
                 If `scaler` is not a valid Scaler or sklearn-transformer-like object.
 
@@ -915,31 +488,35 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         if not isinstance(scaler, Scaler):
             scaler = Scaler(scaler=scaler)
 
-        # Infer variant to fit to:
-        #   - if all specified keys already have a "transformed" variant, use that
-        #   - otherwise, use the "raw" variant
+        # Infer representation to fit to:
+        #   - if all specified keys already have a "transformed" representation, use that
+        #   - otherwise, use the "raw" representation
 
         # Use specified keys, or all keys
         keys = ensure_list(keys)
         if not keys:
-            keys = self.collection.get_domain_keys(domain=domain)
+            keys = self.collection._get_domain_keys(
+                domain=domain,
+                include_domain_prefix=False,
+                include_rep_suffix=False,
+            )
 
-        # Find common variant
-        variant_to_use = RAW_VARIANT
+        # Find common representation
+        rep_to_use = REP_RAW
         if self._scaler_logs:
-            has_transformed_variant = True
+            has_transformed_rep = True
             for k in keys:
-                existing_vars = self.collection.get_variant_keys(domain=domain, key=k)
-                if TRANSFORMED_VARIANT not in existing_vars:
-                    has_transformed_variant = False
+                existing_vars = self.collection._get_rep_keys(domain=domain, key=k)
+                if REP_TRANSFORMED not in existing_vars:
+                    has_transformed_rep = False
                     break
-            variant_to_use = TRANSFORMED_VARIANT if has_transformed_variant else RAW_VARIANT
+            rep_to_use = REP_TRANSFORMED if has_transformed_rep else REP_RAW
 
         # Get data to fit to and fit Scaler
         x_fit, _ = self._get_flat_data(
             domain=domain,
             keys=keys,
-            variant=variant_to_use,
+            rep=rep_to_use,
             split=fit_to_split,
             merged_axes=merged_axes,
         )
@@ -949,7 +526,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         x_all, x_all_meta = self._get_flat_data(
             domain=domain,
             keys=keys,
-            variant=variant_to_use,
+            rep=rep_to_use,
             split=None,
             merged_axes=merged_axes,
         )
@@ -962,10 +539,10 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         for k_idx, k in enumerate(keys):
             # x_trans has shape like (n_samples, n_f, f_shape) where n_f is number of keys
             # We need to select data belonging to each key -> shape = (n_samples, f_shape)
-            self.collection.add_variant(
+            self.collection.add_rep(
                 domain=domain,
                 key=k,
-                variant=TRANSFORMED_VARIANT,
+                rep=REP_TRANSFORMED,
                 data=x_trans[:, k_idx],
                 overwrite=True,
             )
@@ -976,8 +553,8 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
                 order=len(self._scaler_logs),
                 domain=domain,
                 keys=keys,
-                variant_in=variant_to_use,
-                variant_out=TRANSFORMED_VARIANT,
+                rep_in=rep_to_use,
+                rep_out=REP_TRANSFORMED,
                 fit_split=fit_to_split,
                 merged_axes=merged_axes,
                 flatten_meta=x_all_meta,
@@ -1004,7 +581,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
                 - Flattens data using stored metadata.
                 - Applies `inverse_transform()`.
                 - Unflattens back to the original shape.
-                - Replaces the transformed variant.
+                - Replaces the transformed representation.
                 - Removes the ScalerRecord and updates order indices.
 
         Args:
@@ -1042,7 +619,11 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         # Use specified keys, or all keys
         keys = ensure_list(keys)
         if not keys:
-            keys = self.collection.get_domain_keys(domain=domain)
+            keys = self.collection._get_domain_keys(
+                domain=domain,
+                include_domain_prefix=False,
+                include_rep_suffix=False,
+            )
 
         # Get most recent ScalerRecord for:
         #   a. scalers using only the specified domain + keys (`last_exact`)
@@ -1084,7 +665,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         x_flat, x_flat_meta = self._get_flat_data(
             domain=last_exact.domain,
             keys=last_exact.keys,
-            variant=last_exact.variant_out,
+            rep=last_exact.rep_out,
             split=None,
             merged_axes=last_exact.merged_axes,
         )
@@ -1101,18 +682,16 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
 
         # Store this data back into collection table
         for k_idx, k in enumerate(last_exact.keys):
-            self.collection.add_variant(
+            self.collection.add_rep(
                 domain=last_exact.domain,
                 key=k,
-                variant=last_exact.variant_out,
+                rep=last_exact.rep_out,
                 data=x_inv[:, k_idx],
                 overwrite=True,
             )
 
         # Delete record from logs
         if self._scaler_logs[last_exact.order] != last_exact:
-            print(self._scaler_logs[last_exact.order])
-            print(last_exact.order)
             raise ValueError("The record to be deleted is out of order. Check `_scaler_logs`")
 
         # Update other records to their new positions
@@ -1137,7 +716,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
 
         Note:
             Raw (untransformed) data is always available via \
-            `get_features(..., variant="raw")`, even without undoing.
+            `get_features(..., rep="raw")`, even without undoing.
 
         Args:
             domain (str | None):
@@ -1153,7 +732,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
 
         """
         try:
-            domains = [domain] if domain is not None else [FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN]
+            domains = [domain] if domain is not None else [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]
             for d in domains:
                 while True:
                     self.undo_last_transform(domain=d, keys=keys)
@@ -1172,35 +751,123 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
             # Any other ValueError is unexpected -> re-raise
             raise
 
-    # ==========================================
+    # ============================================
+    # Referencing
+    # ============================================
+    def reference(
+        self,
+        columns: list[str] | None = None,
+        *,
+        features: str | list[str] | None = None,
+        targets: str | list[str] | None = None,
+        tags: str | list[str] | None = None,
+        rep: str | None = None,
+    ) -> FeatureSetReference:
+        """
+        Create a FeatureSetReference object pointing to columns in this FeatureSet.
+
+        Description:
+            Uses the same column-selection semantics as `FeatureSet.select`, but
+            returns symbolic DataReference objects instead of a view or materialized data.
+
+            References preserve:
+                - Domain (features / targets / tags)
+                - Key name
+                - Representation
+                - Transform history
+
+            This is the preferred mechanism for wiring FeatureSets into ModelStages
+            and other graph components.
+
+        Notes:
+            All columns of a domain are included unless specified. I.e., if `tags=None`
+            and no tags are specified in `columns`, then all tag columns are included in
+            the returned FeatureSetReference.
+
+        Args:
+            columns (list[str] | None):
+                Fully-qualified column names to reference
+                (e.g. "features.voltage.raw").
+
+            features (str | list[str] | None):
+                Feature-domain selectors. Accepts exact names or wildcards.
+                Domain prefix may be omitted.
+
+            targets (str | list[str] | None):
+                Target-domain selectors, following the same rules as `features`.
+
+            tags (str | list[str] | None):
+                Tag-domain selectors, following the same rules as `features`.
+
+            rep (str | None):
+                Default representation suffix applied when a selector omits a
+                representation.
+
+        Returns:
+            FeatureSetReference
+
+        """
+        # Get all available keys
+        all_cols = self.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
+        )
+        all_cols.remove(DOMAIN_SAMPLE_ID)
+
+        # Perform column selection (organized by domain)
+        selected: dict[str, set[str]] = resolve_column_selectors(
+            all_columns=all_cols,
+            columns=columns,
+            features=features,
+            targets=targets,
+            tags=tags,
+            rep=rep,
+            include_all_if_empty=True,
+        )
+
+        return FeatureSetReference(
+            node=self.label,
+            features=tuple(selected[DOMAIN_FEATURES]),
+            targets=tuple(selected[DOMAIN_TARGETS]),
+            tags=tuple(selected[DOMAIN_TAGS]),
+        )
+
+    # ============================================
     # Serialization
-    # ==========================================
+    # ============================================
     def get_state(self) -> dict[str, Any]:
         """
         Serialize this FeatureSet into a fully reconstructable Python dictionary.
 
         Includes:
-            - label
+            - parent state
             - collection.table
             - collection.schema
             - split configs (SplitterRecord)
             - scaler logs (ScalerRecord)
 
         Notes:
-            - FeatureSetView objects are *not* serialized directly (they are views),
+            - FeatureSetViews are *not* serialized directly (they are views),
               only their SplitterRecord configs are serialized.
 
         """
         # Copy PyArrow table
         copied_table = pa.Table.from_pandas(self.collection.table.to_pandas())
-        return {
-            "_target": f"{self.__class__.__module__}.{self.__class__.__qualname__}",
-            "label": self.label,
-            "table": copied_table,
-            "schema": self.collection.schema,
-            "split_configs": [rec.get_state() for rec in self._split_configs],
-            "scaler_logs": [rec.get_state() for rec in self._scaler_logs],
-        }
+
+        # Get parent state (ExperimentNode) --> very important for node_id serialization
+        state = super().get_state()
+
+        # Update with local FeatureSet attributes
+        state.update(
+            {
+                "_target": f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+                "table": copied_table,
+                "schema": self.collection.schema,
+                "split_configs": [rec.get_state() for rec in self._split_configs],
+                "scaler_logs": [rec.get_state() for rec in self._scaler_logs],
+            },
+        )
+        return state
 
     def set_state(self, state: dict[str, Any]):
         """
@@ -1212,20 +879,29 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
         from modularml.core.splitting.split_mixin import SplitterRecord
         from modularml.core.transforms.scaler_record import ScalerRecord
 
-        # Core identifiers
-        self.label = state["label"]
-        table = state["table"]
-        schema = state["schema"]
+        # Set parent state first
+        super().set_state(state=state)
 
-        # Rebuild fresh collection
-        self.collection = SampleCollection(table=table, schema=schema)
+        # Restore sample collection
+        self.collection = SampleCollection(
+            table=state["table"],
+            schema=state["schema"],
+        )
+        # Remove any residual transformed representations (we fully rebuild from raw rep)
+        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
+            for k in self.collection._get_domain_keys(
+                domain=domain,
+                include_domain_prefix=False,
+                include_rep_suffix=False,
+            ):
+                if REP_TRANSFORMED in self.collection._get_rep_keys(domain=domain, key=k):
+                    self.collection.delete_rep(domain=domain, key=k, rep=REP_TRANSFORMED)
 
-        # Reset split/scaler storage
+        # Restore splits
         self._splits = {}
         self._split_configs = []
         self._scaler_logs = []
 
-        # Restore splits
         split_records = [SplitterRecord.from_state(cfg) for cfg in state["split_configs"]]
         for rec in split_records:
             # Recreate the split
@@ -1236,13 +912,7 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
             splitter = BaseSplitter.from_state(rec.splitter_state)
             src.split(splitter=splitter, register=True, return_views=False)
 
-        # Remove any residual transformed variants (same logic used in load())
-        for domain in [FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN]:
-            for k in self.collection.get_domain_keys(domain=domain):
-                if TRANSFORMED_VARIANT in self.collection.get_variant_keys(domain=domain, key=k):
-                    self.collection.delete_variant(domain=domain, key=k, variant=TRANSFORMED_VARIANT)
-
-        # Restore scaler logs
+        # Restore transforms
         scaler_records = [
             ScalerRecord.from_state(cfg) for cfg in sorted(state["scaler_logs"], key=lambda x: x["order"])
         ]
@@ -1260,108 +930,19 @@ class FeatureSet(GraphNode, SplitMixin, SerializableMixin):
     @classmethod
     def from_state(cls, state: dict[str, Any]) -> FeatureSet:
         """Construct a new FeatureSet instance from serialized state."""
-        fs = cls(label=state["label"], table=state["table"], schema=state["schema"])
-        fs.set_state(state)
-        return fs
-
-    # ==========================================
-    # State/Config Management Methods
-    # ==========================================
-    def save(self, path: str | Path, *, overwrite_existing: bool = False):
-        """
-        Saves FeatureSet into a single compressed Joblib file.
-
-        Args:
-            path: Filepath to save. ".mmfs.joblib" extension is added if missing.
-            overwrite_existing: If False (default), raises an error if the file exists.
-
-        """
-        path = Path(path)
-        if path.suffix not in (".joblib", ".mmfs", ".mmfs.joblib"):
-            path = path.with_suffix(".mmfs.joblib")
-
-        if path.exists() and not overwrite_existing:
-            msg = f"{path} already exists. Use overwrite_existing=True to replace it."
-            raise FileExistsError(msg)
-
-        # Build serializable object
-        obj = {
-            "label": self.label,
-            "table": self.collection.table,  # PyArrow table (picklable)
-            "schema": self.collection.schema,  # SampleSchema (picklable)
-            "scaler_logs": [r.get_state() for r in self._scaler_logs],
-            "split_configs": [r.get_state() for r in self._split_configs],
-        }
-
-        joblib.dump(obj, path, compress=("lzma", 3))
-
-    @classmethod
-    def load(cls, path: str | Path) -> FeatureSet:
-        """
-        Load a FeatureSet saved via `save()`.
-
-        Args:
-            path: Path to the ".mmfs.joblib" file.
-
-        Returns:
-            FeatureSet: Fully reconstructed instance.
-
-        """
-        path = Path(path)
-        if path.suffix not in (".joblib", ".mmfs", ".mmfs.joblib"):
-            path = path.with_suffix(".mmfs.joblib")
-
-        if not path.exists():
-            msg = f"No FeatureSet found at: {path}"
-            raise FileNotFoundError(msg)
-
-        obj = joblib.load(path)
-
-        # Reconstruct base FeatureSet
+        # Instantiate a new FeatureSet
+        # Its important that we restore node_id and do not auto-register
         fs = cls(
-            label=obj["label"],
-            table=obj["table"],
-            schema=obj["schema"],
+            label=state["label"],
+            table=state["table"],
+            schema=state["schema"],
+            node_id=state["node_id"],
+            register=False,
         )
-
-        # Restore split configs - need to manually create splits again
-        split_states = [SplitterRecord.from_state(cfg) for cfg in obj["split_configs"]]
-
-        # Now recreate those same splits
-        for split_record in split_states:
-            # Get view to apply splitter to
-            source = fs
-            if split_record.applied_to.node != fs.label:
-                raise ValueError("SplitterRecord.applied_to.node != FeatureSet.label")
-            if split_record.applied_to.split is not None:
-                source = fs.get_split(split_record.applied_to.split)
-            # Apply splitter
-            splitter = BaseSplitter.from_state(split_record.splitter_state)
-            source.split(splitter=splitter, register=True, return_views=False)
-
-        # Restore scaler logs (in sorted order)
-        scaler_states = sorted(
-            (ScalerRecord.from_state(cfg) for cfg in obj["scaler_logs"]),
-            key=lambda rec: rec.order,
-        )
-        # We need to clear the "transformed" variant of the loaded collection
-        # Otherwise the transform get stacked (ie applied) twice
-        for domain in [FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN]:
-            for k in fs.collection.get_domain_keys(domain=domain):
-                if TRANSFORMED_VARIANT in fs.collection.get_variant_keys(domain=domain, key=k):
-                    fs.collection.delete_variant(
-                        domain=domain,
-                        key=k,
-                        variant=TRANSFORMED_VARIANT,
-                    )
-        # Now reapply the transformation (must be done after splits are created)
-        for scaler_record in scaler_states:
-            # Apply transform from log
-            fs.fit_transform(
-                scaler=scaler_record.scaler_object,
-                domain=scaler_record.domain,
-                keys=scaler_record.keys,
-                fit_to_split=scaler_record.fit_split,
-                merged_axes=scaler_record.merged_axes,
-            )
+        # Use set_state and manually register to ensure node_id is preserved
+        fs.set_state(state=state)
+        ExperimentContext.register_experiment_node(fs)
         return fs
+
+
+register_serializable(FeatureSet.__name__, kind="fs")
