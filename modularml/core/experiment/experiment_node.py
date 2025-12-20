@@ -5,11 +5,13 @@ from typing import Any
 
 from modularml.core.data.schema_constants import INVALID_LABEL_CHARACTERS
 from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.utils.representation.summary import format_summary_box
+from modularml.utils.serialization.serializable_mixin import SerializableMixin
 
 
-class ExperimentNode:
+class ExperimentNode(SerializableMixin):
     """
-    Abstract base class for all nodes within an Experiment.
+    Base class for all nodes within an Experiment.
 
     Each node is identified by a unique `label`.
     """
@@ -45,9 +47,6 @@ class ExperimentNode:
             )
             raise ValueError(msg)
 
-    def __repr__(self):
-        return f"ExperimentNode(label='{self.label}')"
-
     @property
     def node_id(self) -> str:
         """Immutable internal identifier."""
@@ -65,9 +64,27 @@ class ExperimentNode:
         ExperimentContext.update_node_label(self, new_label)
         self._label = new_label
 
-    # ============================
-    # Serialization (BASE)
-    # ============================
+    # ================================================
+    # Representation
+    # ================================================
+    def summary(self, max_width: int = 88) -> str:
+        rows = [
+            ("label", self.label),
+            ("node_id", self.node_id),
+        ]
+
+        return format_summary_box(
+            title=self.__class__.__name__,
+            rows=rows,
+            max_width=max_width,
+        )
+
+    def __repr__(self):
+        return f"ExperimentNode(label='{self.label}')"
+
+    # ================================================
+    # Serialization
+    # ================================================
     def get_state(self) -> dict[str, Any]:
         """Base serialization for all ExperimentNodes."""
         return {
@@ -88,15 +105,3 @@ class ExperimentNode:
         self._node_id = state["node_id"]
         self._label = state["label"]
         self._validate_label(self._label)
-
-    @classmethod
-    def from_state(cls, state: dict[str, Any]) -> ExperimentNode:
-        """Construct a node with a fixed node_id (no regeneration)."""
-        node = cls(
-            label=state["label"],
-            node_id=state["node_id"],
-            register=False,
-        )
-        node.set_state(state)
-        ExperimentContext.register_experiment_node(node)
-        return node

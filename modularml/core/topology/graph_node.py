@@ -1,0 +1,482 @@
+import warnings
+from abc import ABC, abstractmethod
+from typing import Literal
+
+from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_node import ExperimentNode
+from modularml.core.references.reference_like import ReferenceLike
+from modularml.utils.data.formatting import ensure_list
+from modularml.utils.errors.error_handling import ErrorMode
+from modularml.utils.errors.exceptions import GraphNodeInputError, GraphNodeOutputError
+from modularml.utils.representation.summary import format_summary_box
+
+
+class GraphNode(ABC, ExperimentNode):
+    """
+    Abstract base class for all nodes within a ModelGraph.
+
+    Each node is identified by a unique `label` and may have one or more upstream (input)
+    and downstream (output) connections. GraphNode defines the base interface for managing
+    these connections and enforcing structural constraints like maximum allowed connections.
+
+    Subclasses must define the `input_shape` and `output_shape` properties, as well as
+    whether the node supports incoming and outgoing edges.
+    """
+
+    def __init__(
+        self,
+        label: str,
+        upstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
+        downstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
+    ):
+        """
+        Initialize a GraphNode with optional upstream and downstream connections.
+
+        Args:
+            label (str): Unique identifier for this node.
+            upstream_refs (ReferenceLike | list[ReferenceLike] | None): References of upstream connections.
+            downstream_refs (ReferenceLike | list[ReferenceLike] | None): References of downstream connections.
+
+        Raises:
+            TypeError: If `upstream_refs` or `downstream_refs` are not valid types.
+
+        """
+        super().__init__(label=label, node_id=None, register=True)
+
+        # Normalize inputs as lists
+        self._upstream_refs: list[ReferenceLike] = ensure_list(upstream_refs)
+        self._downstream_refs: list[ReferenceLike] = ensure_list(downstream_refs)
+
+        # Validate connections
+        self._validate_connections()
+
+    def _validate_connections(self):
+        # Enforce max_upstream_refs
+        if self.max_upstream_refs is not None and len(self._upstream_refs) > self.max_upstream_refs:
+            msg = f"{len(self._upstream_refs)} upstream_refs provided, but max_upstream_refs = {self.max_upstream_refs}"
+            if self._handle_fatal_error(GraphNodeInputError, msg, ErrorMode.RAISE) is False:
+                self._upstream_refs = self._upstream_refs[: self.max_upstream_refs]
+
+        # Enforce max_downstream_refs
+        if self.max_downstream_refs is not None and len(self._downstream_refs) > self.max_downstream_refs:
+            msg = f"{len(self._downstream_refs)} downstream_refs provided, but max_downstream_refs = {self.max_downstream_refs}"
+            if self._handle_fatal_error(GraphNodeOutputError, msg, ErrorMode.RAISE) is False:
+                self._downstream_refs = self._downstream_refs[: self.max_downstream_refs]
+
+        # Ensure referenced connections exist in this ExperimentContext
+        def _val_ref_existence(refs: list[ReferenceLike], direction: Literal["upstream", "downstream"]):
+            failed: list[ReferenceLike] = [r for r in refs if not ExperimentContext.has_node_for_ref(r)]
+            if failed:
+                details = "\n".join(f"  - {ref.__class__.__name__}: {ref!r}" for ref in failed)
+                msg = (
+                    f"The following {direction} reference(s) could not be resolved "
+                    f"in the current ExperimentContext:\n{details}"
+                )
+                raise ValueError(msg)
+
+        _val_ref_existence(self._upstream_refs, "upstream")
+        _val_ref_existence(self._downstream_refs, "downstream")
+
+    @property
+    def max_upstream_refs(self) -> int | None:
+        """
+        Maximum number of upstream (input) nodes allowed.
+
+        Returns:
+            int | None: If None, unlimited upstream nodes are allowed.
+
+        """
+        return None
+
+    @property
+    def max_downstream_refs(self) -> int | None:
+        """
+        Maximum number of downstream (output) nodes allowed.
+
+        Returns:
+            int | None: If None, unlimited downstream nodes are allowed.
+
+        """
+        return None
+
+    @property
+    def upstream_ref(self) -> ReferenceLike | None:
+        """
+        Return the single upstream reference, if only one is allowed.
+
+        Raises:
+            RuntimeError: If multiple upstream references are allowed.
+
+        """
+        if self.max_upstream_refs == 1:
+            return self.get_upstream_refs()[0] if self._upstream_refs else None
+        raise RuntimeError(
+            "This node allows multiple upstream_refs. Use `get_upstream_refs()`",
+        )
+
+    @property
+    def downstream_ref(self) -> ReferenceLike | None:
+        """
+        Return the single downstream reference, if only one is allowed.
+
+        Raises:
+            RuntimeError: If multiple downstream references are allowed.
+
+        """
+        if self.max_downstream_refs == 1:
+            return self.get_downstream_refs()[0] if self._downstream_refs else None
+        raise RuntimeError(
+            "This node allows multiple downstream_refs. Use `get_downstream_refs()`",
+        )
+
+    # ================================================
+    # Representation
+    # ================================================
+    def summary(self, max_width: int = 88) -> str:
+        rows = [
+            ("label", self.label),
+            ("upstream_refs", [f"{r!r}" for r in self._upstream_refs]),
+            ("downstream_refs", [f"{r!r}" for r in self._downstream_refs]),
+            ("node_id", self.node_id),
+        ]
+
+        return format_summary_box(
+            title=self.__class__.__name__,
+            rows=rows,
+            max_width=max_width,
+        )
+
+    def __repr__(self):
+        return f"GraphNode(label='{self.label}', upstream_refs={self._upstream_refs}, downstream_refs={self._downstream_refs})"
+
+    def __str__(self):
+        return f"GraphNode('{self.label}')"
+
+    # ==========================================
+    # Connection Management
+    # ==========================================
+    def get_upstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE) -> list[ReferenceLike]:
+        """
+        Retrieve all upstream (input) references.
+
+        Args:
+            error_mode (ErrorMode): Error handling strategy if input is invalid.
+
+        Returns:
+            list[ReferenceLike]: List of upstream connection references.
+
+        """
+        if not self.allows_upstream_connections:
+            handled = self._handle_benign_error(
+                GraphNodeInputError,
+                "This node does not allow upstream connections.",
+                error_mode,
+            )
+            return [] if handled is False else self._upstream_refs
+        return self._upstream_refs
+
+    def get_downstream_refs(
+        self,
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ) -> list[ReferenceLike]:
+        """
+        Retrieve all downstream (output) references.
+
+        Args:
+            error_mode (ErrorMode): Error handling strategy if input is invalid.
+
+        Returns:
+            list[ReferenceLike]: List of downstream connection references.
+
+        """
+        if not self.allows_downstream_connections:
+            handled = self._handle_benign_error(
+                GraphNodeOutputError,
+                "This node does not allow downstream connections.",
+                error_mode,
+            )
+            return [] if handled is False else self._downstream_refs
+        return self._downstream_refs
+
+    def add_upstream_ref(self, ref: ReferenceLike, error_mode: ErrorMode = ErrorMode.RAISE):
+        """
+        Add a new upstream connection.
+
+        Args:
+            ref (ReferenceLike): Reference of upstream connection.
+            error_mode (ErrorMode): Error handling mode for duplicates or limits.
+
+        """
+        if (
+            not self.allows_upstream_connections
+            and self._handle_fatal_error(
+                GraphNodeInputError,
+                "Upstream connections not allowed.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        if (
+            ref in self._upstream_refs
+            and self._handle_benign_error(
+                GraphNodeInputError,
+                f"Upstream reference '{ref!r}' already exists.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        if (
+            self.max_upstream_refs is not None
+            and len(self._upstream_refs) > self.max_upstream_refs
+            and self._handle_fatal_error(
+                GraphNodeInputError,
+                f"Only {self.max_upstream_refs} upstream_refs allowed. Received: {self._upstream_refs}",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        self._upstream_refs.append(ref)
+
+    def remove_upstream_ref(self, ref: ReferenceLike, error_mode: ErrorMode = ErrorMode.RAISE):
+        """
+        Remove an upstream reference.
+
+        Args:
+            ref (ReferenceLike): Upstream reference to remove.
+            error_mode (ErrorMode): Error handling mode if ref not found.
+
+        """
+        if (
+            not self.allows_upstream_connections
+            and self._handle_benign_error(
+                GraphNodeInputError,
+                "Upstream connections not allowed.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        if (
+            ref not in self._upstream_refs
+            and self._handle_benign_error(
+                GraphNodeInputError,
+                f"Upstream reference '{ref!r}' does not exist.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        self._upstream_refs.remove(ref)
+
+    def clear_upstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE):
+        """
+        Remove all upstream connections.
+
+        Args:
+            error_mode (ErrorMode): Error handling mode if disallowed.
+
+        """
+        if (
+            not self.allows_upstream_connections
+            and self._handle_benign_error(
+                GraphNodeInputError,
+                "Upstream connections not allowed.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+        self._upstream_refs = []
+
+    def set_upstream_refs(
+        self,
+        upstream_refs: list[ReferenceLike],
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ):
+        """
+        Replace all upstream connections with a new list of references.
+
+        Args:
+            upstream_refs (list[ReferenceLike]): List of new upstream references.
+            error_mode (ErrorMode): Error handling mode for violations.
+
+        """
+        self.clear_upstream_refs(error_mode=error_mode)
+        for ref in upstream_refs:
+            self.add_upstream_ref(ref, error_mode=error_mode)
+
+    def add_downstream_ref(self, ref: ReferenceLike, error_mode: ErrorMode = ErrorMode.RAISE):
+        """
+        Add a new downstream connection.
+
+        Args:
+            ref (ReferenceLike): Reference of downstream connection.
+            error_mode (ErrorMode): Error handling mode for duplicates or limits.
+
+        """
+        if (
+            not self.allows_downstream_connections
+            and self._handle_fatal_error(
+                GraphNodeOutputError,
+                "Downstream connections not allowed.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        if (
+            ref in self._downstream_refs
+            and self._handle_benign_error(
+                GraphNodeOutputError,
+                f"Downstream reference '{ref!r}' already exists.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        if (
+            self.max_downstream_refs is not None
+            and len(self._downstream_refs) > self.max_downstream_refs
+            and self._handle_fatal_error(
+                GraphNodeOutputError,
+                f"Only {self.max_downstream_refs} downstream_refs allowed.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        self._downstream_refs.append(ref)
+
+    def remove_downstream_ref(
+        self,
+        ref: ReferenceLike,
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ):
+        """
+        Remove a downstream reference.
+
+        Args:
+            ref (ReferenceLike): Downstream reference to remove.
+            error_mode (ErrorMode): Error handling mode if ref not found.
+
+        """
+        if (
+            not self.allows_downstream_connections
+            and self._handle_benign_error(
+                GraphNodeOutputError,
+                "Downstream connections not allowed.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        if (
+            ref not in self._downstream_refs
+            and self._handle_benign_error(
+                GraphNodeOutputError,
+                f"Downstream reference '{ref!r}' does not exist.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+
+        self._downstream_refs.remove(ref)
+
+    def clear_downstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE):
+        """
+        Remove all downstream connections.
+
+        Args:
+            error_mode (ErrorMode): Error handling mode if disallowed.
+
+        """
+        if (
+            not self.allows_downstream_connections
+            and self._handle_benign_error(
+                GraphNodeOutputError,
+                "Downstream connections not allowed.",
+                error_mode,
+            )
+            is False
+        ):
+            return
+        self._downstream_refs = []
+
+    def set_downstream_refs(
+        self,
+        downstream_refs: list[str],
+        error_mode: ErrorMode = ErrorMode.RAISE,
+    ):
+        """
+        Replace all downstream connections with a new list of references.
+
+        Args:
+            downstream_refs (list[ReferenceLike]): List of new downstream references.
+            error_mode (ErrorMode): Error handling mode for violations.
+
+        """
+        self.clear_downstream_refs(error_mode=error_mode)
+        for ref in downstream_refs:
+            self.add_downstream_ref(ref, error_mode=error_mode)
+
+    # ==========================================
+    # Abstract Methods / Properties
+    # ==========================================
+    @property
+    @abstractmethod
+    def allows_upstream_connections(self) -> bool:
+        """
+        Whether this node allows incoming (upstream) connections.
+
+        Returns:
+            bool: True if input connections are allowed.
+
+        """
+
+    @property
+    @abstractmethod
+    def allows_downstream_connections(self) -> bool:
+        """
+        Whether this node allows outgoing (downstream) connections.
+
+        Returns:
+            bool: True if output connections are allowed.
+
+        """
+
+    # ==========================================
+    # Internal Helpers
+    # ==========================================
+    def _handle_fatal_error(self, exc_class, message: str, error_mode: ErrorMode):
+        """Raise or suppress a fatal error based on the provided error mode."""
+        if error_mode == ErrorMode.IGNORE:
+            return False
+        if error_mode in (ErrorMode.WARN, ErrorMode.COERCE, ErrorMode.RAISE):
+            raise exc_class(message)
+        msg = f"Unsupported ErrorMode: {error_mode}"
+        raise NotImplementedError(msg)
+
+    def _handle_benign_error(self, exc_class, message: str, error_mode: ErrorMode):
+        """Raise, warn, or ignore a non-fatal error based on the error mode."""
+        if error_mode == ErrorMode.RAISE:
+            raise exc_class(message)
+        if error_mode == ErrorMode.WARN:
+            warnings.warn(message, stacklevel=2, category=UserWarning)
+            return False
+        if error_mode in (ErrorMode.COERCE, ErrorMode.IGNORE):
+            return False
+        msg = f"Unsupported ErrorMode: {error_mode}"
+        raise NotImplementedError(msg)
