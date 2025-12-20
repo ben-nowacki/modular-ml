@@ -1,218 +1,200 @@
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
-from modularml.core.data.sample_schema import FEATURES_COLUMN, SAMPLE_ID_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
+from modularml.core.data.role_view import RoleView
+from modularml.core.data.sample_data import SampleData
+from modularml.core.data.sample_shapes import SampleShapes
+from modularml.utils.representation.summary import format_summary_box
 
+# @dataclass
+# class Batch:
+#     """
+#     Materialized data container for one forward or training pass through the graph.
 
-class RoleData:
-    """
-    Tensor-like data container for a single role across all schema domains.
+#     Description:
+#         A Batch represents a collection of role-specific data derived from one or \
+#         more FeatureSets, organized per model-graph node. Each node's output data \
+#         is stored as a mapping of roles to SampleData objects, containing tensors \
+#         for the standardized schema domains (features, targets, tags).
 
-    Description:
-        Represents the runtime data (features, targets, and tags) associated with \
-        a single role within a Batch. Each RoleData instance stores tensors or \
-        array-like objects under standardized domain keys defined in \
-        `SampleSchema`, including:
-          - FEATURES_COLUMN
-          - TARGETS_COLUMN
-          - TAGS_COLUMN
+#         The Batch also records optional sample weights and per-node output shapes.
 
-        This structure allows consistent access to domain data using either \
-        standardized constants or convenience properties.
+#     Args:
+#         batch_size (int):
+#             Batch size. Corresponds to first dimension of output tensors.
 
-    Args:
-        data (dict[str, Any]):
-            Dictionary mapping schema domain names \
-            (FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN) to tensor-like values.
-        features:
-            Tensor-like object representing feature data.
-        targets:
-            Tensor-like object representing target data.
-        tags:
-            Tensor-like object representing tag data.
+#         outputs:
+#             Dictionary mapping node labels to role mappings, where each role maps \
+#             to a SampleData object. Structure: \
+#                 node_label -> role -> SampleData(domain -> tensor-like data)
 
-    """
+#         role_sample_weights:
+#             Optional mapping of role names to per-sample weights \
+#             (array-like of shape (batch_size,)).
 
-    __slots__ = ("data",)
-    data: dict[str, Any]
+#         shapes:
+#             Optional mapping of node labels to SampleShapes objects, describing the \
+#             tensor shapes for each schema domain (excluding batch dimension).
 
-    def __init__(
-        self,
-        data: dict[str, Any] | None = None,
-        *,
-        sample_uuids: Any = None,
-        features: Any = None,
-        targets: Any = None,
-        tags: Any = None,
-    ):
-        if data is not None:
-            # Use provided dictionary directly
-            self.data = dict(data)
-        else:
-            # Construct standardized mapping
-            self.data = {}
-            if sample_uuids is not None:
-                self.data[SAMPLE_ID_COLUMN] = sample_uuids
-            if features is not None:
-                self.data[FEATURES_COLUMN] = features
-            if targets is not None:
-                self.data[TARGETS_COLUMN] = targets
-            if tags is not None:
-                self.data[TAGS_COLUMN] = tags
+#         uuid:
+#             Unique identifier automatically generated for tracking/logging this batch.
 
-    @property
-    def sample_uuids(self):
-        """Tensor-like data stored under SAMPLE_ID_COLUMN."""
-        return self.data.get(SAMPLE_ID_COLUMN)
+#     """
 
-    @property
-    def features(self):
-        """Tensor-like data stored under FEATURES_COLUMN."""
-        return self.data.get(FEATURES_COLUMN)
+#     batch_size: int
 
-    @property
-    def targets(self):
-        """Tensor-like data stored under TARGETS_COLUMN."""
-        return self.data.get(TARGETS_COLUMN)
+#     # Outputs of each node
+#     # Initiallized with FeatureSet sample during batch creation
+#     # Keyed as follows: node_label -> role -> SampleData(feature/target/tag -> tensor-like data)
+#     outputs: dict[str, dict[str, SampleData]]
 
-    @property
-    def tags(self):
-        """Tensor-like data stored under TAGS_COLUMN."""
-        return self.data.get(TAGS_COLUMN)
+#     # Weights of each sample in each role
+#     # Initiallize during batch creation (and then immutable?)
+#     # Keyed as follows: role -> np.ndarray with shape (batch_size,)
+#     role_sample_weights: dict[str, np.ndarray]
 
-    def __repr__(self) -> str:
-        return f"RoleData(features={self.features.shape}, targets={self.targets.shape}, tags={self.tags.shape})"
+#     # Shape of outputs
+#     # Keyed as follows: node_label -> SampleShapes(feature/target/tag -> tuple[int, ...])
+#     shapes: dict[str, SampleShapes]
 
-    def __str__(self):
-        return self.__repr__()
+#     # Unique ID for logging/tracking batches
+#     uuid: str = field(default_factory=lambda: str(uuid.uuid4()))
 
+#     def __repr__(self) -> str:
+#         """
+#         Return a concise summary of the batch contents.
 
-class NodeShapes:
-    """
-    Shape specification for all schema domains within a single graph node.
+#         Examples:
+#             Batch(nodes=["enc", "clf"], roles={"enc":['anchor','pair'], ...}, shapes={"enc":(32,1,16), ...}, uuid=...)
 
-    Description:
-        Defines the per-sample tensor shapes of all schema domains \
-        (features, targets, tags) for one node in the model graph. \
-        Shapes are stored without the batch dimension, since batch size \
-        may vary at runtime and is not part of the static schema.
+#         """
+#         # Collect summary information
+#         node_labels = list(self.outputs.keys())
+#         node_roles = {node: list(self.outputs[node].keys()) for node in node_labels}
 
-        The same shape applies to all roles associated with the node.
+#         return f"Batch(nodes={len(node_labels)}, roles={node_roles}, shapes={self.shapes}, uuid='{self.uuid}')"
 
-    Args:
-        shapes (dict[str, tuple[int, ...]]):
-            Dictionary mapping each schema domain name \
-            (FEATURES_COLUMN, TARGETS_COLUMN, TAGS_COLUMN) to a shape \
-            tuple (excluding batch dimension).
-        features_shape (tuple[int, ...]]):
-            Tuple of ints representing feature shape.
-        targets_shape (tuple[int, ...]]):
-            Tuple of ints representing target shape.
-        tags_shape (tuple[int, ...]]):
-            Tuple of ints representing tag shape.
+#     def __str__(self) -> str:
+#         return self.__repr__()
 
-    """
+#     def summary(self) -> str:
+#         rows = []
 
-    __slot__ = ("shapes",)
-    shapes: dict[str, tuple[int, ...]]
+#         rows.append(f"batch_size  : {self.batch_size}")
+#         rows.append("nodes       : " + ", ".join(self.outputs.keys()))
 
-    def __init__(
-        self,
-        shapes: dict[str, tuple[int, ...]] | None = None,
-        *,
-        features_shape: tuple[int, ...] | None = None,
-        targets_shape: tuple[int, ...] | None = None,
-        tags_shape: tuple[int, ...] | None = None,
-    ):
-        if shapes is not None:
-            # Use provided dictionary directly
-            self.shapes = dict(shapes)
-        else:
-            # Construct standardized mapping
-            self.shapes = {}
-            if features_shape is not None:
-                self.shapes[FEATURES_COLUMN] = features_shape
-            if targets_shape is not None:
-                self.shapes[TARGETS_COLUMN] = targets_shape
-            if tags_shape is not None:
-                self.shapes[TAGS_COLUMN] = tags_shape
+#         roles_fmt = {node: list(roles.keys()) for node, roles in self.outputs.items()}
+#         rows.append(f"roles       : {roles_fmt}")
 
-    def __getitem__(self, domain: str) -> tuple[int, ...]:
-        """The shape tuple corresponding to a given schema domain."""
-        return self.shapes[domain]
+#         shapes_fmt = {}
+#         for node, node_shapes in self.shapes.items():
+#             shapes_fmt[node] = dict(node_shapes.shapes.items())
+#         rows.append(f"shapes      : {shapes_fmt}")
 
-    def __repr__(self):
-        return f"ShapeSpec({self.shapes})"
+#         # weight_fmt = {role: list(w.shape) for role, w in self.role_sample_weights.items()}
+#         # rows.append(f"weights     : {weight_fmt}")
 
-    @property
-    def features_shape(self) -> tuple[int, ...]:
-        """Shape tuple for the FEATURES_COLUMN domain."""
-        return self.shapes[FEATURES_COLUMN]
+#         rows.append(f"uuid        : {self.uuid}")
 
-    @property
-    def targets_shape(self) -> tuple[int, ...]:
-        """Shape tuple for the TARGETS_COLUMN domain."""
-        return self.shapes[TARGETS_COLUMN]
-
-    @property
-    def tags_shape(self) -> tuple[int, ...]:
-        """Shape tuple for the TAGS_COLUMN domain."""
-        return self.shapes[TAGS_COLUMN]
+#         # Formatting
+#         width = max(len(r) for r in rows) if rows else 0
+#         title = f"{self.__class__.__name__}"
+#         border = "─" * width
+#         body = "\n".join(rows)
+#         return f"┌─ {title} {'─' * (width - len(title) - 3)}┐\n{body}\n└{border}┘"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Batch:
     """
-    Materialized data container for one forward or training pass through the graph.
+    Immutable, role-structured tensor container produced from a single BatchView.
 
-    Description:
-        A Batch represents a collection of role-specific data derived from one or \
-        more FeatureSets, organized per model-graph node. Each node's output data \
-        is stored as a mapping of roles to RoleData objects, containing tensors \
-        for the standardized schema domains (features, targets, tags).
-
-        The Batch also records optional sample weights and per-node output shapes.
-
-    Args:
-        outputs:
-            Dictionary mapping node labels to role mappings, where each role maps \
-            to a RoleData object. Structure: \
-                node_label -> role -> RoleData(domain -> tensor-like data)
-
-        role_sample_weights:
-            Optional mapping of role names to per-sample weights \
-            (array-like of shape (batch_size,)).
-
-        shapes:
-            Optional mapping of node labels to NodeShapes objects, describing the \
-            tensor shapes for each schema domain (excluding batch dimension).
-
-        uuid:
-            Unique identifier automatically generated for tracking/logging this batch.
-
+    A Batch represents one sampler's worth of data for a single
+    execution step. It contains no graph or node semantics.
     """
 
-    # Outputs of each node
-    # Initiallized with FeatureSet sample during batch creation
-    # Keyed as follows: node_label -> role -> RoleData(feature/target/tag -> tensor-like data)
-    outputs: dict[str, dict[str, RoleData]]
+    batch_size: int
 
-    # Weights of each sample in each role
-    # Initiallize during batch creation (and then immutable?)
-    # Keyed as follows: role -> np.ndarray with shape (batch_size,)
-    role_sample_weights: dict[str, np.ndarray]
+    # Core role-based storage
+    role_data: Mapping[str, SampleData]
+    shapes: SampleShapes
+    role_weights: Mapping[str, NDArray[np.float32]]
 
-    # Shape of outputs
-    # Keyed as follows: node_label -> NodeShapes(feature/target/tag -> tuple[int, ...])
-    shapes: dict[str, NodeShapes]
-
-    # Unique ID for logging/tracking batches
+    # Tracking
     uuid: str = field(default_factory=lambda: str(uuid.uuid4()))
 
-    # TODO: Other data that might be good to track:
-    # The FeatureSet/Subset/view that was used to instantiate this batch
-    # The sampler used in conjunction with above to instantiate this batch
-    # This might be better to track in BatchContext
+    # ================================================
+    # Validation
+    # ================================================
+    def __post_init__(self):
+        roles = set(self.role_data)
+
+        if not roles:
+            raise ValueError("MaterializedBatch must contain at least one role.")
+
+        if set(self.role_weights) != roles:
+            raise ValueError("role_weights keys must match role_data keys.")
+
+        for role in roles:
+            data = self.role_data[role]
+            weights = self.role_weights[role]
+
+            if weights.shape != (self.batch_size,):
+                msg = f"role_weights['{role}'] has shape {weights.shape}, expected ({self.batch_size},)"
+                raise ValueError(msg)
+
+            # Validate batch dimension consistency
+            for domain, tensor in data.data.items():
+                if tensor is not None and tensor.shape[0] != self.batch_size:
+                    msg = (
+                        f"{role}.{domain} has leading dimension {tensor.shape[0]}, "
+                        f"expected batch_size={self.batch_size}"
+                    )
+                    raise ValueError(msg)
+
+    # ================================================
+    # Role access
+    # ================================================
+    @property
+    def roles(self) -> list[str]:
+        return list(self.role_data.keys())
+
+    def get_role(self, role: str) -> RoleView:
+        if role not in self.role_data:
+            msg = f"Role '{role}' not found. Available roles: {self.roles}"
+            raise KeyError(msg)
+        return RoleView(self, role)
+
+    # ================================================
+    # Pseudo-attribute access
+    # ================================================
+    def __getattr__(self, name: str):
+        # Called only if attribute not found normally
+        if name in self.role_data:
+            return self.get_role(name)
+        msg = f"{self.__class__.__name__} has no attribute '{name}' (available roles: {self.roles})"
+        raise AttributeError(msg)
+
+    # ================================================
+    # Introspection
+    # ================================================
+    def summary(self, max_width: int = 88) -> str:
+        rows = [
+            ("batch_size", self.batch_size),
+            ("roles", [(role, "") for role in self.roles]),
+            ("shapes", [(k, str(v)) for k, v in self.shapes.shapes.items()]),
+            ("uuid", self.uuid),
+        ]
+
+        return format_summary_box(
+            title=self.__class__.__name__,
+            rows=rows,
+            max_width=max_width,
+        )
+
+    def __repr__(self) -> str:
+        return f"Batch(batch_size={self.batch_size}, roles={self.roles}, uuid='{self.uuid}')"

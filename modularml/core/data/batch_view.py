@@ -1,16 +1,13 @@
 import numpy as np
 
 from modularml.core.data.batch import Batch, SampleData, SampleShapes
+from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.sample_schema import (
-    FEATURES_COLUMN,
-    TAGS_COLUMN,
-    TARGETS_COLUMN,
-    TRANSFORMED_VARIANT,
-)
-from modularml.core.graph.featureset import FeatureSet
-from modularml.utils.data_conversion import to_numpy
-from modularml.utils.data_format import DataFormat, format_is_tensorlike
+from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.utils.data.conversion import to_numpy
+from modularml.utils.data.data_format import DataFormat, format_is_tensorlike
+from modularml.utils.data.pyarrow_data import resolve_column_selectors
+from modularml.utils.representation.summary import format_summary_box
 
 
 class BatchView:
@@ -28,20 +25,24 @@ class BatchView:
         role_indices: dict[str, np.ndarray],
         role_indice_weights: dict[str, np.ndarray] | None = None,
     ):
+        # Validate source
+        if not isinstance(source, FeatureSet):
+            msg = f"`source` must be of type FeatureSet. Received: {type(source)}"
+            raise TypeError(msg)
         self.source = source
+
+        # Validate indices
+        if not isinstance(role_indices, dict):
+            raise TypeError("role_indices must be a dict[str, np.ndarray]")
         self.role_indices = role_indices
         self.role_indice_weights = role_indice_weights
-
-        # validation
-        if not isinstance(self.source, FeatureSet):
-            raise TypeError("BatchView.source must be a FeatureSet")
-        if not isinstance(self.role_indices, dict):
-            raise TypeError("role_indices must be a dict[str, np.ndarray]")
-
-        # ensure arrays
+        # Ensure np arrays
         for r, idx in self.role_indices.items():
             self.role_indices[r] = np.asarray(idx, dtype=int)
 
+    # ==========================================
+    # Properties
+    # ==========================================
     @property
     def roles(self) -> list[str]:
         return list(self.role_indices.keys())
@@ -53,6 +54,9 @@ class BatchView:
         first_role = next(iter(self.role_indices))
         return len(self.role_indices[first_role])
 
+    # ==========================================
+    # Data Accessors
+    # ==========================================
     def get_role_view(self, role: str) -> FeatureSetView:
         """
         Construct a FeatureSetView for a specific role.
@@ -83,71 +87,64 @@ class BatchView:
         return FeatureSetView(
             source=self.source,
             indices=self.role_indices[role],
+            columns=self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
             label=role,
         )
 
     def materialize_batch(
         self,
-        *,
         fmt: DataFormat = DataFormat.NUMPY,
-        feature_keys: list[str] | None = None,
-        target_keys: list[str] | None = None,
-        tag_keys: list[str] | None = None,
-        variant: str = TRANSFORMED_VARIANT,
-        missing: str = "error",
+        *,
+        columns: str | list[str] | None = None,
+        features: str | list[str] | None = None,
+        targets: str | list[str] | None = None,
+        tags: str | list[str] | None = None,
+        rep: str | None = None,
     ) -> Batch:
         """
         Convert this BatchView into a fully materialized in-memory Batch.
 
         Description:
-            Builds a runtime-ready :class:`Batch` object from the current
-            BatchView by converting all role-based subsets into backend-specific
-            tensor formats. Each role (e.g., "anchor", "pair") is materialized
-            independently based on its assigned sample indices and selected
-            feature/target/tag columns.
+            Builds a runtime-ready :class:`Batch` object from the current BatchView
+            by converting all role-based subsets into backend-specific tensor formats.
+            Each role (e.g., "anchor", "pair") is materializedindependently based
+            on its assigned sample indices and selected feature/target/tag columns.
 
-            The resulting Batch contains:
-            - A mapping of node_label → role → :class:`SampleData`
-            - Optional per-sample weights for each role
-            - Recorded output shapes (excluding batch dimension) for each domain
+            By default, all columns (and all representations) are used in batch creation.
 
-            This method enforces that the leading dimension of all tensors
-            matches the expected batch size (`self.n_samples`).
+            This method enforces that the leading dimension of all tensors matches
+            the expected batch size (`self.n_samples`).
 
         Args:
             fmt (DataFormat):
                 Desired output data format, typically one of
                 :attr:`DataFormat.NUMPY`, :attr:`DataFormat.TORCH`,
                 or :attr:`DataFormat.TENSORFLOW`. Defaults to `NUMPY`.
-            feature_keys (list[str] | None):
-                Only the specified feature_keys will be included in the returned
-                Batch. If None, all features in the original source view are included.
-                Defaults to None.
-            target_keys (list[str] | None):
-                Only the specified target_keys will be included in the returned
-                Batch. If None, all features in the original source view are included.
-                Defaults to None.
-            tag_keys (list[str] | None):
-                Only the specified tag_keys will be included in the returned
-                Batch. If None, all features in the original source view are included.
-                Defaults to None.
-            variant (str):
-                The variant to use in instantiating tensors. Any columns that do
-                not have the specified variant will default to use the RAW_VARIANT.
-                Defaults to TRANSFORMED_VARIANT.
-            missing ({"error", "warn", "ignore"}):
-                Behavior when a requested key or variant is missing:
-                    "error" -> raise KeyError
-                    "warn"  -> issue a warning and skip the key/variant
-                    "ignore"-> silently skip the key/variant
+
+            columns (str | list[str] | None):
+                Fully-qualified column names to include in the materialized tensor.
+
+            features (str | list[str] | None):
+                Feature-domain selectors. Accepts bare keys, key/rep pairs,
+                or wildcards.
+
+            targets (str | list[str] | None):
+                Target-domain selectors.
+
+            tags (str | list[str] | None):
+                Tag-domain selectors.
+
+            rep (str | None):
+                Default representation suffix applied when omitted in selectors.
+
 
         Returns:
             Batch:
                 A fully materialized :class:`Batch` instance containing:
-                - ``outputs``: node- and role-specific :class:`SampleData` objects \
+                - `outputs`: node- and role-specific :class:`SampleData` objects \
                     with "features", "targets", and "tags".
-                - ``role_sample_weights``: optional array-like weight vectors.
-                - ``shapes``: per-node :class:`SampleShapes` objects describing \
+                - `role_sample_weights`: optional array-like weight vectors.
+                - `shapes`: per-node :class:`SampleShapes` objects describing \
                     per-sample tensor shapes (without batch dimension).
 
         Example:
@@ -159,10 +156,10 @@ class BatchView:
 
         Raises:
             TypeError:
-                If the requested ``fmt`` is not a tensor-compatible DataFormat.
+                If the requested `fmt` is not a tensor-compatible DataFormat.
             ValueError:
                 If any tensor does not have the batch size as its leading dimension,
-                or if sample weight shapes do not match ``n_samples``.
+                or if sample weight shapes do not match `n_samples`.
 
         """
         # Format must be tensor-like:
@@ -170,25 +167,54 @@ class BatchView:
             msg = f"DataFormat must be tensor-like. Received: {fmt}"
             raise TypeError(msg)
 
+        # Get column filters
+        # Each domain defaults to all columns, unless subset specified
+        all_cols = self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
+        all_cols.remove(DOMAIN_SAMPLE_ID)
+
+        # Fill any empty domain keys with all columns
+        selected: dict[str, set[str]] = resolve_column_selectors(
+            all_columns=all_cols,
+            columns=columns,
+            features=features,
+            targets=targets,
+            tags=tags,
+            rep=rep,
+            include_all_if_empty=True,
+        )
+
+        # Construct tensors for each role
         role_data: dict[str, SampleData] = {}
         shapes: SampleShapes | None = None
         role_sample_weights: dict[str, np.ndarray] = {}
-
         for role in self.role_indices:
             # Get tensor-like data for each domain
-            coll = self.get_role_view(role).to_samplecollection(
-                feature_keys=feature_keys,
-                target_keys=target_keys,
-                tag_keys=tag_keys,
-                variant=variant,
-                missing=missing,
+            fsv = self.get_role_view(role).select(
+                features=list(selected[DOMAIN_FEATURES]),
+                targets=list(selected[DOMAIN_TARGETS]),
+                tags=list(selected[DOMAIN_TAGS]),
             )
 
             # Extract feature/target/tag values in chosen format
-            features = coll.get_features(fmt=fmt, variant=None)
-            targets = coll.get_targets(fmt=fmt, variant=None)
-            tags = coll.get_tags(fmt=fmt, variant=None)
-            uuids = coll.get_sample_uuids(fmt=fmt)
+            features = fsv.get_features(
+                fmt=fmt,
+                rep=None,
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
+            targets = fsv.get_targets(
+                fmt=fmt,
+                rep=None,
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
+            tags = fsv.get_tags(
+                fmt=fmt,
+                rep=None,
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
+            uuids = fsv.get_sample_uuids(fmt=fmt)
 
             # Build SampleData for this role
             role_data[role] = SampleData(
@@ -200,9 +226,9 @@ class BatchView:
 
             # Ensure shapes are as expected (batch_size is first dim)
             all_shapes = {
-                FEATURES_COLUMN: features.shape,
-                TARGETS_COLUMN: targets.shape,
-                TAGS_COLUMN: tags.shape,
+                DOMAIN_FEATURES: features.shape,
+                DOMAIN_TARGETS: targets.shape,
+                DOMAIN_TAGS: tags.shape,
             }
             for k, v in all_shapes.items():
                 if v[0] != self.n_samples:
@@ -229,15 +255,12 @@ class BatchView:
             else:
                 role_sample_weights[role] = np.ones(shape=(self.n_samples))
 
-        # Get GraphNode label of originating FeatureSet
-        node_label = f"{self.source.label}"
-
         # Construct Batch
         return Batch(
             batch_size=self.n_samples,
-            outputs={node_label: role_data},
-            role_sample_weights=role_sample_weights,
-            shapes={node_label: shapes},
+            role_data=role_data,
+            shapes=shapes,
+            role_weights=role_sample_weights,
         )
 
     def __repr__(self) -> str:
@@ -245,3 +268,16 @@ class BatchView:
 
     def __str__(self):
         return self.__repr__()
+
+    def summary(self, max_width: int = 88) -> str:
+        rows = [
+            ("source", self.source.label),
+            ("n_samples", self.n_samples),
+            ("roles", [(r, "") for r in self.roles]),
+        ]
+
+        return format_summary_box(
+            title=self.__class__.__name__,
+            rows=rows,
+            max_width=max_width,
+        )
