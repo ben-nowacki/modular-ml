@@ -1,4 +1,4 @@
-from modularml.utils.backend import Backend
+from modularml.utils.nn.backend import Backend
 
 
 class ModularMLError(Exception):

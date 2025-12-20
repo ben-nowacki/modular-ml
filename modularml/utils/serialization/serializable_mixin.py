@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import importlib
 import io
 import pathlib
-from abc import ABC, abstractmethod
 from typing import Any
 
 import joblib
 from typing_extensions import Self
 
 from modularml.core.data.schema_constants import MML_EXTENSION, MML_FILE_VERSION
-from modularml.utils.backend import Backend
-from modularml.utils.optional_imports import ensure_torch
 
 # Map each class to a unique file extension
 # class -> short kind string (e.g. FeatureSet -> "fs")
@@ -51,7 +47,7 @@ def _get_suffix_for_class(cls_name: str) -> str:
     return f".{_CLASS_TO_KIND[cls_name]}{MML_EXTENSION}"
 
 
-class SerializableMixin(ABC):
+class SerializableMixin:
     """
     Standardized 3-level serialization interface for all ModularML core classes.
 
@@ -89,7 +85,6 @@ class SerializableMixin(ABC):
     # ================================================
     # Structured State
     # ================================================
-    @abstractmethod
     def get_state(self) -> dict[str, Any]:
         """
         Returns the complete internal state as a pure-Python dictionary.
@@ -97,12 +92,14 @@ class SerializableMixin(ABC):
         Must be fully reconstructable via set_state().
         Must contain version information.
         """
-        ...
+        raise NotImplementedError
 
-    @abstractmethod
     def set_state(self, state: dict[str, Any]) -> None:
         """Restore the internal state from a dictionary produced by get_state()."""
-        ...
+        # Call next set_state in MRO *only if it exists*
+        parent = super()
+        if hasattr(parent, "set_state"):
+            parent.set_state(state)
 
     @classmethod
     def from_state(cls, state: dict):
@@ -188,76 +185,3 @@ class SerializableMixin(ABC):
             blob = f.read()
 
         return cls.from_bytes(blob)
-
-
-class TorchSerializableMixin(SerializableMixin):
-    """
-    A lightweight reusable serialization mixin for torch models.
-
-    Description:
-        The model must already have:
-            - `self.config`: a dict of constructor kwargs
-            - `self._input_shape`
-            - `self._output_shape`
-
-        This mixin only handles the generic logic. Your model must:
-            - Provide a constructor `__init__(..., **config)`
-            - Provide `.config` dict describing the model
-            - Implement `build(input_shape, output_shape)`
-    """
-
-    # Get structured state
-    def get_state(self) -> dict:
-        return {
-            "class": self.__class__.__module__ + "." + self.__class__.__qualname__,
-            "config": self.config,  # constructor args
-            "input_shape": self._input_shape,
-            "output_shape": self._output_shape,
-            "weights": self.get_weights(),  # numpy arrays
-        }
-
-    def set_state(self, state: dict):
-        # Step 1: reconstruct model
-        self.config = state["config"]
-        self._input_shape = state["input_shape"]
-        self._output_shape = state["output_shape"]
-
-        # Build internal torch layers
-        self.build(self._input_shape, self._output_shape)
-
-        # Step 2: load weights
-        self.set_weights(state["weights"])
-
-    @classmethod
-    def from_state(cls, state: dict):
-        from modularml.models.base_model import BaseModel
-
-        torch = ensure_torch()
-
-        # Dynamically import class
-        full_name = state["class"]
-        module_name, class_name = full_name.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        klass = getattr(module, class_name)
-
-        # Create empty instance
-        obj = klass.__new__(klass)
-
-        # Initialize base classes manually
-        torch.nn.Module.__init__(obj)
-        BaseModel.__init__(obj, backend=Backend.TORCH)
-
-        # Restore state
-        obj.set_state(state)
-        return obj
-
-    # Weight handling
-    def get_weights(self) -> dict:
-        if not self.is_built:
-            return {}
-        return {k: v.detach().cpu().numpy() for k, v in self.state_dict().items()}
-
-    def set_weights(self, weights: dict):
-        torch = ensure_torch()
-        torch_state = {k: torch.tensor(v) for k, v in weights.items()}
-        self.load_state_dict(torch_state, strict=True)

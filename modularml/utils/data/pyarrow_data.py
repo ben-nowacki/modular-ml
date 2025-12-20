@@ -20,8 +20,8 @@ from modularml.core.data.schema_constants import (
     REP_RAW,
     REP_TRANSFORMED,
 )
-from modularml.utils.data_format import ensure_list
-from modularml.utils.shape_utils import get_shape, shape_to_tuple
+from modularml.utils.data.formatting import ensure_list
+from modularml.utils.data.shape_utils import get_shape, shape_to_tuple
 
 
 def resolve_column_selectors(

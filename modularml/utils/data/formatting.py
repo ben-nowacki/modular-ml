@@ -1,4 +1,5 @@
 import math
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -127,3 +128,42 @@ def flatten_dict_paths(d: dict[str, any], prefix: str = "", separator: str = "."
             raise TypeError(msg)
 
     return paths
+
+
+def ensure_list(x):
+    """
+    Ensure that the input is returned as a list.
+
+    - None: return []
+    - list: return itself (unchanged)
+    - scalar (str, int, float, bool, etc.): return wrapped in a list
+    - any other non-sequence type: return wrapped in a list
+    - any other sequence (tuple, set, np.ndarray): return converted to list
+
+    Args:
+        x: Any input value.
+
+    Returns:
+        list: A list representation of `x`.
+
+    Raises:
+        TypeError: If the input is not convertible to a list.
+
+    """
+    if x is None:
+        return []
+
+    # If it's already a list, return directly
+    if isinstance(x, list):
+        return x
+
+    # Treat strings and all scalar types as atomic -> wrap in list
+    if isinstance(x, (str, bytes, int, float, bool)):
+        return [x]
+
+    # If it's a sequence (tuple, np.array, etc.), convert to list
+    if isinstance(x, Sequence):
+        return list(x)
+
+    # For any other single object (e.g. Enum, custom class), also wrap in list
+    return [x]

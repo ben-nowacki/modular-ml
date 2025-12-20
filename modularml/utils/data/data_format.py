@@ -1,10 +1,9 @@
-from collections.abc import Sequence
 from enum import Enum
 
 import numpy as np
 
-from modularml.utils.backend import Backend
-from modularml.utils.optional_imports import check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+from modularml.utils.nn.backend import Backend
 
 
 class DataFormat(Enum):
@@ -126,42 +125,3 @@ def get_data_format_for_backend(backend: str | Backend) -> DataFormat:
         return DataFormat.NUMPY
     msg = f"Unsupported backend: {backend}"
     raise ValueError(msg)
-
-
-def ensure_list(x):
-    """
-    Ensure that the input is returned as a list.
-
-    - None: return []
-    - list: return itself (unchanged)
-    - scalar (str, int, float, bool, etc.): return wrapped in a list
-    - any other non-sequence type: return wrapped in a list
-    - any other sequence (tuple, set, np.ndarray): return converted to list
-
-    Args:
-        x: Any input value.
-
-    Returns:
-        list: A list representation of `x`.
-
-    Raises:
-        TypeError: If the input is not convertible to a list.
-
-    """
-    if x is None:
-        return []
-
-    # If it's already a list, return directly
-    if isinstance(x, list):
-        return x
-
-    # Treat strings and all scalar types as atomic -> wrap in list
-    if isinstance(x, (str, bytes, int, float, bool)):
-        return [x]
-
-    # If it's a sequence (tuple, np.array, etc.), convert to list
-    if isinstance(x, Sequence):
-        return list(x)
-
-    # For any other single object (e.g. Enum, custom class), also wrap in list
-    return [x]

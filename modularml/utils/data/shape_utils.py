@@ -3,7 +3,7 @@ from typing import Any
 
 import numpy as np
 
-from modularml.utils.optional_imports import check_pandas, check_tensorflow, check_torch
+from modularml.utils.environment.optional_imports import check_pandas, check_tensorflow, check_torch
 
 ShapeLike = tuple[int, ...] | dict[str, Any]
 

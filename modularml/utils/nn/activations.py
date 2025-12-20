@@ -1,8 +1,8 @@
 from typing import Any
 
-from modularml.utils.backend import Backend
-from modularml.utils.exceptions import ActivationError, BackendNotSupportedError
-from modularml.utils.optional_imports import ensure_tensorflow, ensure_torch
+from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
+from modularml.utils.errors.exceptions import ActivationError, BackendNotSupportedError
+from modularml.utils.nn.backend import Backend
 
 
 def resolve_activation(

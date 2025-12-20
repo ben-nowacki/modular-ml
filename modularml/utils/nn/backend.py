@@ -20,6 +20,22 @@ class Backend(str, Enum):
     NONE = "none"
 
 
+def normalize_backend(value: str | Backend):
+    if isinstance(value, Backend):
+        return value
+    if isinstance(value, str):
+        value = value.lower().strip("backend").strip(".")
+        if value in ["torch", "pytorch"]:
+            return Backend.TORCH
+        if value in ["tensorflow", "tf", "keras"]:
+            return Backend.TENSORFLOW
+        if value in ["scikit", "sklearn"]:
+            return Backend.SCIKIT
+        return Backend(value)
+    msg = f"Unsupported Backend value: {value}"
+    raise ValueError(msg)
+
+
 def backend_requires_optimizer(backend: Backend) -> bool:
     """
     Determines whether a given backend requires an optimizer for training.
