@@ -12,7 +12,7 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
     REP_RAW,
 )
-from modularml.utils.data_format import DataFormat
+from modularml.utils.data.data_format import DataFormat
 
 if TYPE_CHECKING:
     import numpy as np
@@ -52,7 +52,7 @@ class SampleCollectionMixin:
         sub_table = collection.table if columns is None else collection.table.select(columns)
 
         # Row filtering
-        sub_table = collection.table if indices is None else collection.table.take(pa.array(indices))
+        sub_table = sub_table if indices is None else sub_table.take(pa.array(indices))
         return SampleCollection(table=sub_table)
 
     # ================================================
@@ -509,7 +509,13 @@ class SampleCollectionMixin:
     # ==========================================================
     def to_arrow(self) -> pa.Table:
         collection = self._resolve_collection()
-        return collection.table
+
+        # Sort columns (not necessary but nicer for manual inspection)
+        sorted_cols = collection.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
+        )
+        return collection.table.select(sorted_cols)
 
     def to_pandas(self) -> pd.DataFrame:
         return self.to_arrow().to_pandas()

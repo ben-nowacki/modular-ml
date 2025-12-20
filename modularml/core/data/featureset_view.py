@@ -7,11 +7,11 @@ import numpy as np
 import pyarrow as pa
 
 from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
-from modularml.core.data.schema_constants import DOMAIN_SAMPLE_ID
+from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.core.splitting.split_mixin import SplitMixin
+from modularml.utils.representation.summary import format_summary_box
 
 if TYPE_CHECKING:
-    from modularml.core.data._data_view import DataView
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.sample_collection import SampleCollection
 
@@ -29,9 +29,6 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin):
     columns: list[str]
     label: str | None = None
 
-    # ================================================
-    # Constructors
-    # ================================================
     @classmethod
     def from_featureset(
         cls,
@@ -39,7 +36,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin):
         *,
         rows: np.ndarray | None = None,
         columns: list[str] | None = None,
-    ) -> DataView:
+    ) -> FeatureSetView:
         if rows is None:
             rows = np.arange(fs.n_samples)
         if columns is None:
@@ -57,6 +54,21 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin):
         """Number of rows (samples) in this view."""
         return len(self.indices)
 
+    @property
+    def feature_keys(self) -> tuple[str, ...]:
+        """Feature keys without domain prefix (with rep suffix)."""
+        return self._feature_cols
+
+    @property
+    def target_keys(self) -> tuple[str, ...]:
+        """Target keys without domain prefix (with rep suffix)."""
+        return self._target_cols
+
+    @property
+    def tag_keys(self) -> tuple[str, ...]:
+        """Tag keys without domain prefix (with rep suffix)."""
+        return self._tag_cols
+
     def __len__(self) -> int:
         return self.n_samples
 
@@ -72,6 +84,27 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin):
         return self.source == other.source and self.indices == other.indices
 
     __hash__ = None
+
+    def summary(self, max_width: int = 88) -> str:
+        rows = [
+            ("label", self.label),
+            ("source", self.source.label),
+            ("n_samples", self.n_samples),
+            (
+                "columns",
+                [
+                    (DOMAIN_FEATURES, str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                    (DOMAIN_TARGETS, str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                    (DOMAIN_TAGS, str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                ],
+            ),
+        ]
+
+        return format_summary_box(
+            title=self.__class__.__name__,
+            rows=rows,
+            max_width=max_width,
+        )
 
     # ================================================
     # SampleCollectionMixin

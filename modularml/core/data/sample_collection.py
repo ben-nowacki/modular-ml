@@ -24,9 +24,10 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
     REP_RAW,
 )
-from modularml.utils.data_conversion import convert_dict_to_format, convert_to_format, stack_nested_numpy
-from modularml.utils.data_format import DataFormat, ensure_list
-from modularml.utils.pyarrow_data import (
+from modularml.utils.data.conversion import convert_dict_to_format, convert_to_format, stack_nested_numpy
+from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.formatting import ensure_list
+from modularml.utils.data.pyarrow_data import (
     get_dtype_of_pyarrow_array,
     get_shape_of_pyarrow_array,
     numpy_to_sample_schema_column,

@@ -18,17 +18,18 @@ from modularml.core.data.schema_constants import (
     REP_RAW,
     REP_TRANSFORMED,
 )
-from modularml.core.experiment.experiment_context import ExperimentContext
-from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.splitting.split_mixin import SplitMixin, SplitterRecord
+from modularml.core.topology.graph_node import GraphNode
 from modularml.core.transforms.scaler import Scaler
 from modularml.core.transforms.scaler_record import ScalerRecord
-from modularml.utils.data_conversion import flatten_to_2d, to_numpy, unflatten_from_2d
-from modularml.utils.data_format import DataFormat, ensure_list
-from modularml.utils.exceptions import SplitOverlapWarning
-from modularml.utils.pyarrow_data import build_sample_schema_table, resolve_column_selectors
-from modularml.utils.serialization import SerializableMixin, register_serializable
+from modularml.utils.data.conversion import flatten_to_2d, to_numpy, unflatten_from_2d
+from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.formatting import ensure_list
+from modularml.utils.data.pyarrow_data import build_sample_schema_table, resolve_column_selectors
+from modularml.utils.errors.exceptions import SplitOverlapWarning
+from modularml.utils.representation.summary import format_summary_box
+from modularml.utils.serialization.serializable_mixin import SerializableMixin, register_serializable
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_schema import SampleSchema
 
 
-class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, SerializableMixin):
+class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin):
     """
     Unified FeatureSet backed by a single SampleCollection.
 
@@ -55,7 +56,11 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, Serializable
         table: pa.Table,
         schema: SampleSchema | None = None,
     ):
-        super().__init__(label=label)
+        super().__init__(
+            label=label,
+            upstream_refs=None,
+            downstream_refs=None,
+        )
 
         # Create SampleCollection attribute
         self.collection: SampleCollection = SampleCollection(table=table, schema=schema)
@@ -268,6 +273,19 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, Serializable
 
     __hash__ = None
 
+    # ==========================================
+    # GraphNode
+    # ==========================================
+    @property
+    def allows_upstream_connections(self) -> bool:
+        """FeatureSets do not allow input (upstream) connections."""
+        return False
+
+    @property
+    def allows_downstream_connections(self) -> bool:
+        """FeatureSets do allow output (downstream) connections."""
+        return True
+
     # ============================================
     # SampleCollectionMixin
     # ============================================
@@ -292,7 +310,30 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, Serializable
     def __str__(self):
         return self.__repr__()
 
-    def to_sample_view(self) -> FeatureSetView:
+    def summary(self, max_width: int = 88) -> str:
+        rows = [
+            ("label", self.label),
+            ("n_samples", self.n_samples),
+            (
+                "columns",
+                [
+                    (DOMAIN_FEATURES, str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                    (DOMAIN_TARGETS, str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                    (DOMAIN_TAGS, str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                ],
+            ),
+            ("splits", [(name, len(self._splits[name])) for name in self.available_splits]),
+            # ("transforms", [(f"{rec.domain}", ", ".join(rec.keys)) for rec in self._scaler_logs]),
+            # ("node_id", self.node_id),
+        ]
+
+        return format_summary_box(
+            title=self.__class__.__name__,
+            rows=rows,
+            max_width=max_width,
+        )
+
+    def to_view(self) -> FeatureSetView:
         """
         Create a FeatureSetView over the entire FeatureSet.
 
@@ -334,7 +375,13 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, Serializable
 
     def get_split(self, split_name: str) -> FeatureSetView:
         """
-        Gets the specified split.
+        Gets the specified split, rebuilding the FeatureSetView if necessary.
+
+        Description:
+            If new columns (e.g. transformed representations) have been added to
+            the FeatureSet after the split was defined, the cached FeatureSetView
+            is re-created to include all current columns while preserving row
+            indices.
 
         Returns:
             FeatureSetView:
@@ -344,7 +391,22 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, Serializable
         if split_name not in self._splits:
             msg = f"Split '{split_name}' does not exist. Available: {self.available_splits}"
             raise KeyError(msg)
-        return self._splits[split_name]
+
+        # If columns differ, rebuild the view
+        view = self._splits[split_name]
+        current_cols = self.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
+        if set(view.columns) != set(current_cols):
+            from modularml.core.data.featureset_view import FeatureSetView
+
+            view = FeatureSetView(
+                source=self,
+                indices=view.indices,  # preserve row selection
+                columns=current_cols,  # refresh columns
+                label=view.label,
+            )
+        self._splits[split_name] = view
+
+        return view
 
     def add_split(self, split: FeatureSetView):
         """
@@ -912,12 +974,10 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, Serializable
             splitter = BaseSplitter.from_state(rec.splitter_state)
             src.split(splitter=splitter, register=True, return_views=False)
 
-        # Restore transforms
+        # Restore transforms in order
         scaler_records = [
             ScalerRecord.from_state(cfg) for cfg in sorted(state["scaler_logs"], key=lambda x: x["order"])
         ]
-
-        # Reapply transforms in order
         for rec in scaler_records:
             self.fit_transform(
                 scaler=rec.scaler_object,
@@ -926,23 +986,6 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin, Serializable
                 fit_to_split=rec.fit_split,
                 merged_axes=rec.merged_axes,
             )
-
-    @classmethod
-    def from_state(cls, state: dict[str, Any]) -> FeatureSet:
-        """Construct a new FeatureSet instance from serialized state."""
-        # Instantiate a new FeatureSet
-        # Its important that we restore node_id and do not auto-register
-        fs = cls(
-            label=state["label"],
-            table=state["table"],
-            schema=state["schema"],
-            node_id=state["node_id"],
-            register=False,
-        )
-        # Use set_state and manually register to ensure node_id is preserved
-        fs.set_state(state=state)
-        ExperimentContext.register_experiment_node(fs)
-        return fs
 
 
 register_serializable(FeatureSet.__name__, kind="fs")
