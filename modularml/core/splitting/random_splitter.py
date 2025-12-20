@@ -4,9 +4,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.core.data.schema_constants import DOMAIN_TAGS, REP_RAW
+from modularml.core.data.schema_constants import DOMAIN_TAGS, MML_STATE_TARGET, REP_RAW
 from modularml.core.splitting.base_splitter import BaseSplitter
-from modularml.utils.data_format import DataFormat, ensure_list
+from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.formatting import ensure_list
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -192,80 +193,25 @@ class RandomSplitter(BaseSplitter):
             current += count
         return boundaries
 
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
+    # ============================================
+    # Serialization
+    # ============================================
     def get_state(self) -> dict[str, Any]:
-        """
-        Retrieve the internal state of the RandomSplitter.
-
-        Description:
-            This method encapsulates the state of the splitter for serialization or deep copying.
-
-        Returns:
-            dict[str, Any]:
-                A dictionary containing the splitter's state, including version,
-                target, ratios, group_by, and seed.
-
-        """
-        return {
-            "version": "1.0",
-            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+        """Serialize this Splitter into a fully reconstructable Python dictionary."""
+        state: dict[str, Any] = {
+            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
             "ratios": self.ratios,
             "group_by": self.group_by,
             "seed": self.seed,
         }
+        return state
 
     def set_state(self, state: dict[str, Any]):
-        """
-        Restore the internal state of the RandomSplitter.
+        """Restore this Splitter configuration in-place from serialized state."""
+        # Restore rng
+        self.seed = state.get("seed")
+        self.rng = np.random.default_rng(self.seed)
 
-        Description:
-            This method allows restoring a splitter from a saved state, ensuring consistency
-            and reproducibility.
-
-        Args:
-            state (dict[str, Any]):
-                The state dictionary to restore from.
-
-        """
-        version = state.get("version")
-        if version != "1.0":
-            msg = f"Unsupported RandomSplitter version: {version}"
-            raise NotImplementedError(msg)
-
+        # Restore other attribute
+        self.group_by = state["group_by"]
         self.ratios = state["ratios"]
-        self.group_by = state.get("group_by")
-        self.seed = state.get("seed", 13)
-
-    @classmethod
-    def from_state(cls, state: dict) -> RandomSplitter:
-        """
-        Create a RandomSplitter from a saved state.
-
-        Description:
-            This classmethod allows creating a new RandomSplitter instance from a saved state,
-            useful for loading pre-configured splitters.
-
-        Args:
-            state (dict):
-                The state dictionary containing the splitter's configuration.
-
-        Returns:
-            RandomSplitter:
-                A new RandomSplitter instance initialized from the provided state.
-
-        """
-        version = state.get("version")
-        if version != "1.0":
-            msg = f"Unsupported RandomSplitter version: {version}"
-            raise NotImplementedError(msg)
-        if "_target_" in state and state["_target_"] != f"{cls.__module__}.{cls.__name__}":
-            msg = f"State _target_ mismatch: expected {cls.__module__}.{cls.__name__}, got {state['_target_']}"
-            raise ValueError(msg)
-
-        return cls(
-            ratios=state["ratios"],
-            group_by=state.get("group_by"),
-            seed=state.get("seed", 13),
-        )

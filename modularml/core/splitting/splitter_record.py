@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.references.data_reference import DataReference
-from modularml.utils.serialization import SerializableMixin
+from modularml.utils.serialization.serializable_mixin import SerializableMixin
 
 
 @dataclass
@@ -40,30 +41,19 @@ class SplitterRecord(SerializableMixin):
     splitter_state: dict[str, Any]
     applied_to: DataReference
 
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
-    def get_state(self) -> dict:
-        """Return full serializable state."""
-        return {
-            "version": "1.0",
+    # ============================================
+    # Serialization
+    # ============================================
+    def get_state(self) -> dict[str, Any]:
+        """Serialize this SplitterRecord into a fully reconstructable Python dictionary."""
+        state: dict[str, Any] = {
+            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
             "splitter_state": self.splitter_state,
             "applied_to": self.applied_to.get_state(),
         }
+        return state
 
-    def set_state(self, state: dict) -> None:
-        """Restore SplitterRecord state from a serialized dictionary."""
-        version = state.get("version")
-        if version != "1.0":
-            msg = f"Unsupported SplitterRecord version: {version}"
-            raise NotImplementedError(msg)
-
+    def set_state(self, state: dict[str, Any]):
+        """Restore this SplitterRecord in-place from serialized state."""
         self.splitter_state = state["splitter_state"]
         self.applied_to = DataReference.from_state(state["applied_to"])
-
-    @classmethod
-    def from_state(cls, state: dict) -> SplitterRecord:
-        return cls(
-            splitter_state=state["splitter_state"],
-            applied_to=DataReference.from_state(state["applied_to"]),
-        )

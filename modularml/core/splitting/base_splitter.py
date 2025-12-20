@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import importlib
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from modularml.utils.serialization import SerializableMixin
+from modularml.core.data.schema_constants import MML_STATE_TARGET
+from modularml.utils.serialization.serializable_mixin import SerializableMixin, register_serializable
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -36,9 +36,9 @@ class BaseSplitter(SerializableMixin, ABC):
 
     """
 
-    # =====================================================
+    # ================================================
     # Core abstract methods
-    # =====================================================
+    # ================================================
     @abstractmethod
     def split(
         self,
@@ -72,48 +72,9 @@ class BaseSplitter(SerializableMixin, ABC):
 
         """
 
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
-    @abstractmethod
-    def get_state(self) -> dict[str, Any]:
-        pass
-
-    @abstractmethod
-    def set_state(self, state: dict[str, Any]):
-        pass
-
-    @classmethod
-    def from_state(cls, state: dict) -> BaseSplitter:
-        """
-        Reconstruct the correct splitter subclass from serialized state.
-
-        Expected state:
-            {
-                "version": "1.0",
-                "_target_": "modularml.core.splitting.random_splitter.RandomSplitter",
-                ... other subclass-specific fields ...
-            }
-        """
-        if "_target_" not in state:
-            raise ValueError("State dict is missing required '_target_' field.")
-        target_path = state["_target_"]
-
-        # Load splitter class from path
-        module_name, cls_name = target_path.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        splitter_cls = getattr(module, cls_name)
-        if not issubclass(splitter_cls, BaseSplitter):
-            msg = f"Target '{target_path}' does not resolve to a BaseSplitter subclass."
-            raise TypeError(msg)
-
-        # Create instance
-        obj = splitter_cls.from_state(state)
-        return obj
-
-    # =====================================================
+    # ================================================
     # Convenience methods for subclasses
-    # =====================================================
+    # ================================================
     def _return_splits(
         self,
         view: FeatureSetView,
@@ -161,3 +122,34 @@ class BaseSplitter(SerializableMixin, ABC):
 
         # FeatureSetView.select_rows constructs new views from itself
         return {label: view.take(rel_indices=idxs, label=label) for label, idxs in split_indices.items()}
+
+    # ============================================
+    # Serialization
+    # ============================================
+    @abstractmethod
+    def get_state(self) -> dict[str, Any]:
+        """Serialize this Splitter into a fully reconstructable Python dictionary."""
+        ...
+
+    @abstractmethod
+    def set_state(self, state: dict[str, Any]):
+        """Restore this Splitter configuration in-place from serialized state."""
+        ...
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> BaseSplitter:
+        """Dynamically reconstruct a splitter (including subclasses) from state."""
+        from modularml.utils.environment.environment import import_from_path
+
+        splitter_cls = import_from_path(state[MML_STATE_TARGET])
+
+        # Allocate without calling __init__
+        obj: BaseSplitter = splitter_cls.__new__(splitter_cls)
+
+        # Restore internal state
+        obj.set_state(state)
+
+        return obj
+
+
+register_serializable(BaseSplitter, kind="sp")

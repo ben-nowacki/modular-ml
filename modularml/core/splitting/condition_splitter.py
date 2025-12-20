@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.splitting.base_splitter import BaseSplitter
-from modularml.utils.exceptions import SplitOverlapWarning
+from modularml.utils.errors.exceptions import SplitOverlapWarning
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -58,9 +59,6 @@ class ConditionSplitter(BaseSplitter):
         """
         self.conditions = conditions
 
-    # =====================================================
-    # Core logic
-    # =====================================================
     def split(
         self,
         view: FeatureSetView,
@@ -125,30 +123,17 @@ class ConditionSplitter(BaseSplitter):
             return_views=return_views,
         )
 
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
+    # ============================================
+    # Serialization
+    # ============================================
     def get_state(self) -> dict[str, Any]:
-        return {
-            "version": "1.0",
-            "_target_": f"{self.__class__.__module__}.{self.__class__.__name__}",
+        """Serialize this Splitter into a fully reconstructable Python dictionary."""
+        state: dict[str, Any] = {
+            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
             "conditions": self.conditions,
         }
+        return state
 
     def set_state(self, state: dict[str, Any]):
-        version = state.get("version")
-        if version != "1.0":
-            msg = f"Unsupported ConditionSplitter version: {version}"
-            raise NotImplementedError(msg)
+        """Restore this Splitter configuration in-place from serialized state."""
         self.conditions = state["conditions"]
-
-    @classmethod
-    def from_state(cls, state: dict) -> ConditionSplitter:
-        version = state.get("version")
-        if version != "1.0":
-            msg = f"Unsupported ConditionSplitter version: {version}"
-            raise NotImplementedError(msg)
-        if "_target_" in state and state["_target_"] != f"{cls.__module__}.{cls.__name__}":
-            msg = f"State _target_ mismatch: expected {cls.__module__}.{cls.__name__}, got {state['_target_']}"
-            raise ValueError(msg)
-        return cls(**state.get("conditions", {}))

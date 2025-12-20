@@ -8,8 +8,8 @@ import numpy as np
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.core.references.data_reference import DataReference
 from modularml.core.splitting.splitter_record import SplitterRecord
-from modularml.utils.data_format import DataFormat
-from modularml.utils.pyarrow_data import resolve_column_selectors
+from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.pyarrow_data import resolve_column_selectors
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
