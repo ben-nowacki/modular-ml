@@ -1,12 +1,18 @@
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from numpy.typing import NDArray
 
 from modularml.core.data.batch_view import BatchView
-from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.references.data_reference import DataReference
-from modularml.utils.data_format import DataFormat, ensure_list
+from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.formatting import ensure_list
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from modularml.core.data.featureset_view import FeatureSetView
 
 
 class Batcher:
@@ -45,6 +51,7 @@ class Batcher:
         if self.group_by and self.stratify_by:
             raise ValueError("`group_by` and `stratify_by` are mutually exclusive.")
 
+        self.seed = seed
         self.rng = np.random.default_rng(seed)
 
     def batch(
@@ -390,3 +397,23 @@ class Batcher:
                 )
 
         return batches
+
+    # ============================================
+    # Configuration
+    # ============================================
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "batch_size": self.batch_size,
+            "shuffle": self.shuffle,
+            "drop_last": self.drop_last,
+            "group_by": self.group_by,
+            "group_by_role": self.group_by_role,
+            "stratify_by": self.stratify_by,
+            "stratify_by_role": self.stratify_by_role,
+            "strict_stratification": self.strict_stratification,
+            "seed": self.seed,
+        }
+
+    @classmethod
+    def from_config(cls, cfg: dict[str, Any]) -> Batcher:
+        return cls(**cfg)

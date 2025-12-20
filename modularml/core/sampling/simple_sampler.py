@@ -1,5 +1,8 @@
+from typing import Any
+
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
+from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.sampling.base_sampler import BaseSampler, Samples
 
 
@@ -98,3 +101,29 @@ class SimpleSampler(BaseSampler):
 
     def __repr__(self):
         return f"SimpleSampler(n_batches={len(self.batches)}, batch_size={self.batcher.batch_size})"
+
+    # ============================================
+    # Serialization
+    # ============================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Serialize this Sampler into a fully reconstructable Python dictionary.
+
+        Notes:
+            This serializes only the sampler config and source name/id.
+            The source data is not saved.
+
+        """
+        state = super().get_state()
+        state[MML_STATE_TARGET] = f"{self.__class__.__module__}.{self.__class__.__qualname__}"
+        return state
+
+    def set_state(self, state: dict[str, Any]):
+        """
+        Restore this Sampler configuration in-place from serialized state.
+
+        This fully restores the Sampler configuration.
+        If a source was previously bound, an attempt will be made to re-bind it.
+        For this to work, the source must exist in the active ExperimentContext.
+        """
+        super().set_state(state)

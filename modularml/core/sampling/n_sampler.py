@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modularml.core.data.featureset_view import FeatureSetView
+from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.references.data_reference import DataReference
 from modularml.core.sampling.base_sampler import BaseSampler, Samples
-from modularml.utils.data_format import DataFormat
+from modularml.utils.data.data_format import DataFormat
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -197,101 +198,6 @@ class NSampler(BaseSampler):
             role_indices=role_idxs,
             role_weights=role_weights,
         )
-
-    # def build_batches(self) -> list[BatchView]:
-    #     """
-    #     Construct N-way samples using similarity-based matching logic.
-
-    #     Description:
-    #         For each anchor sample in the bound FeatureSetView:
-    #             1. Resolve role-specific columns for each role.
-    #             2. Generate role-specific candidate matches using
-    #                similarity and fallback rules.
-    #             3. Intersect anchors across all roles so only anchors
-    #                with valid matches in every role are retained.
-    #             4. Align role indices according to the canonical anchor
-    #                ordering.
-    #             5. Shuffle results if requested.
-    #             6. Slice aligned data into batches of size ``batch_size``.
-
-    #         The resulting BatchView objects contain:
-    #             - "anchor": aligned anchor indices
-    #             - one key per role: aligned role indices
-    #             - role-specific sample weights
-
-    #     Args:
-    #         None
-
-    #     Returns:
-    #         list[BatchView]:
-    #             A list of BatchView objects, each representing an
-    #             N-way batch of aligned sample indices and weights.
-
-    #     Raises:
-    #         RuntimeError:
-    #             If no source is bound.
-    #         TypeError:
-    #             If the bound source is not a FeatureSetView.
-    #         ValueError:
-    #             If fewer than two samples are available, or if roles
-    #             fail to produce a valid non-empty intersection of
-    #             anchor samples.
-
-    #     """
-    #     if self.source is None:
-    #         raise RuntimeError("`bind_source` must be called first.")
-    #     if not isinstance(self.source, FeatureSetView):
-    #         raise TypeError("NSampler expects a FeatureSetView source.")
-
-    #     view: FeatureSetView = self.source
-    #     if len(view) < 2:
-    #         msg = f"NSampler requires at least 2 samples; got {len(view)}."
-    #         raise ValueError(msg)
-
-    #     # Precompute specs per role
-    #     role_specs: dict[str, list[dict[str, Any]]] = {
-    #         role: self._resolve_columns_for_role(view=view, conds=role_conds)
-    #         for role, role_conds in self.condition_mapping.items()
-    #     }
-
-    #     # Build role-specific matchings
-    #     # Each role key contains a tuple of: anchor indices, role indices, and role scores
-    #     # All returned indices are absolute indicies from the parent source
-    #     role_results: dict[str, tuple[np.ndarray]] = {
-    #         role: self._generate_role_matches(view=view, specs=specs) for role, specs in role_specs.items()
-    #     }
-    #     # Each role may return a different array of anchor indices
-    #     # We need to get the intersection and ensure proper alignment
-    #     role_idxs, role_weights = self._standardize_role_idxs(d=role_results)
-
-    #     # If shuffle requested to shuffle anchors and all roles jointly
-    #     if self.shuffle:
-    #         perm = self.rng.permutation(len(role_idxs["anchor"]))
-    #         for k in role_idxs:
-    #             role_idxs[k] = role_idxs[k][perm]
-    #             role_weights[k] = role_weights[k][perm]
-
-    #     # Build batches
-    #     batches: list[BatchView] = []
-    #     total = len(role_idxs["anchor"])
-
-    #     for start in range(0, total, self.batch_size):
-    #         stop = start + self.batch_size
-
-    #         # Handle incomplete batch
-    #         if stop > total and self.drop_last:
-    #             break
-
-    #         # Create batch
-    #         batches.append(
-    #             BatchView(
-    #                 source=view.source,
-    #                 role_indices={k: v[start:stop] for k, v in role_idxs.items()},
-    #                 role_indice_weights={k: v[start:stop] for k, v in role_weights.items()},
-    #             ),
-    #         )
-
-    #     return batches
 
     # =====================================================
     # Helpers
@@ -806,3 +712,47 @@ class NSampler(BaseSampler):
                 role_scores.append(score)
 
         return anchor_abs_idxs, role_abs_idxs, role_scores
+
+    # ============================================
+    # Serialization
+    # ============================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Serialize this Sampler into a fully reconstructable Python dictionary.
+
+        Notes:
+            This serializes only the sampler config and source name/id.
+            The source data is not saved.
+
+        """
+        state = super().get_state()
+        state[MML_STATE_TARGET] = f"{self.__class__.__module__}.{self.__class__.__qualname__}"
+        state["condition_mapping"] = {
+            k: {k1: v1.get_config() for k1, v1 in v.items()} for k, v in self.condition_mapping.items()
+        }
+        state["max_samples_per_anchor"] = self.max_samples_per_anchor
+        state["choose_best_only"] = self.choose_best_only
+
+        return state
+
+    def set_state(self, state: dict[str, Any]):
+        """
+        Restore this Sampler configuration in-place from serialized state.
+
+        This fully restores the Sampler configuration.
+        If a source was previously bound, an attempt will be made to re-bind it.
+        For this to work, the source must exist in the active ExperimentContext.
+        """
+        from modularml.core.sampling.similiarity_condition import SimilarityCondition
+
+        # Restore condition mapping
+        self.condition_mapping = {
+            k: {k1: SimilarityCondition.from_config(v1) for k1, v1 in v.items()}
+            for k, v in state["condition_mapping"].items()
+        }
+
+        # Restore other attributes
+        self.max_samples_per_anchor = int(state["max_samples_per_anchor"])
+        self.choose_best_only = bool(state["choose_best_only"])
+
+        super().set_state(state)

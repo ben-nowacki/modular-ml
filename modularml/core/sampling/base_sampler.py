@@ -1,14 +1,22 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from numpy.typing import NDArray
 
-from modularml.core.data.batch_view import BatchView
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
+from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.sampling.batcher import Batcher
-from modularml.utils.data_format import ensure_list
+from modularml.utils.data.formatting import ensure_list
+from modularml.utils.serialization.serializable_mixin import SerializableMixin, register_serializable
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from modularml.core.data.batch_view import BatchView
 
 
 @dataclass
@@ -17,7 +25,7 @@ class Samples:
     role_weights: dict[str, NDArray[np.float32]] | None = None
 
 
-class BaseSampler(ABC):
+class BaseSampler(ABC, SerializableMixin):
     """
     Base class for all samplers.
 
@@ -75,6 +83,8 @@ class BaseSampler(ABC):
     @property
     def batches(self) -> list[BatchView]:
         """All batches for this sampler."""
+        if self.is_bound:
+            self._batches = self.build_batches()
         if self._batches is None:
             raise RuntimeError("Sampler has no bound source. Call bind_source().")
         return self._batches
@@ -118,3 +128,92 @@ class BaseSampler(ABC):
     def build_samples(self) -> Samples:
         """Construct and return Samples."""
         raise NotImplementedError
+
+    # ============================================
+    # Serialization
+    # ============================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Serialize this Sampler into a fully reconstructable Python dictionary.
+
+        Notes:
+            This serializes only the sampler config and source name/id.
+            The source data is not saved.
+
+        """
+        state: dict[str, Any] = {
+            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+            "seed": self.seed,
+            "batcher": self.batcher.get_config(),
+        }
+        if self.source is not None:
+            state["source"] = {
+                "label": self.source.source.label,
+                "node_id": self.source.source.node_id,
+                "indices": self.source.indices.tolist(),
+                "columns": list(self.source.columns),
+                "label_view": self.source.label,
+            }
+        else:
+            state["source"] = None
+
+        return state
+
+    def set_state(self, state: dict[str, Any]):
+        """
+        Restore this Sampler configuration in-place from serialized state.
+
+        This fully restores the Sampler configuration.
+        If a source was previously bound, an attempt will be made to re-bind it.
+        For this to work, the source must exist in the active ExperimentContext.
+        """
+        # Restore rng
+        self.seed = state.get("seed")
+        self.rng = np.random.default_rng(self.seed)
+
+        # Restore batcher
+        self.batcher = Batcher.from_config(state["batcher"])
+
+        # Reset runtime fields
+        self.source = None
+        self._batches = None
+
+        # Attempt to rebind source if present
+        src = state.get("source")
+        if src is not None:
+            from modularml.core.data.featureset_view import FeatureSetView
+            from modularml.core.experiment.experiment_context import ExperimentContext
+
+            fs = ExperimentContext.get_node(node_id=src["node_id"])
+            if fs is None:
+                msg = (
+                    f"Cannot restore sampler source '{src['label']}' (node_id={src['node_id']}). FeatureSet not found."
+                )
+                raise RuntimeError(msg)
+
+            view = FeatureSetView(
+                source=fs,
+                indices=np.asarray(src["indices"], dtype=int),
+                columns=src["columns"],
+                label=src["label_view"],
+            )
+
+            self.bind_source(view)
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> BaseSampler:
+        """Dynamically reconstruct a sampler (including subclasses) from state."""
+        from modularml.utils.environment.environment import import_from_path
+
+        sampler_cls = import_from_path(state[MML_STATE_TARGET])
+
+        # Allocate without calling __init__
+        obj: BaseSampler = sampler_cls.__new__(sampler_cls)
+
+        # Restore internal state
+        obj.set_state(state)
+
+        return obj
+
+
+register_serializable(BaseSampler, kind="sm")
