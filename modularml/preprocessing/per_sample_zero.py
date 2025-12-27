@@ -19,10 +19,6 @@ class PerSampleZeroStart(BaseEstimator, TransformerMixin):
         return params
 
     def fit(self, X, y=None):
-        # No global fitting needed for per-sample normalization
-        return self
-
-    def transform(self, X):
         if X.ndim != 2:
             msg = f"Expected 2D array (n_samples, n_features), got shape {X.shape}"
             raise ValueError(msg)
@@ -30,6 +26,9 @@ class PerSampleZeroStart(BaseEstimator, TransformerMixin):
 
         # store offsets for later inverse
         self._x0 = X[:, [0]]
+
+    def transform(self, X):
+        self.fit(X)
         return X - self._x0
 
     def inverse_transform(self, X):

@@ -2,7 +2,6 @@
 from modularml.core.transforms.scaler_registry import SCALER_REGISTRY
 
 # Import all scaler modules
-# These imports execute the module-level register() calls.
 from .absolute import Absolute
 from .negate import Negate
 from .per_sample_min_max import PerSampleMinMaxScaler
