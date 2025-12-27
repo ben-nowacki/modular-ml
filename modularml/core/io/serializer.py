@@ -105,9 +105,9 @@ class Serializer:
         save_path: Path = Path(save_path)
 
         # Enforce 'kind.mml' suffix
-        exp_suffix = kind_registry.get_file_suffix(obj.__class__)
+        exp_suffix = kind_registry.get_kind(cls=obj.__class__).file_suffix
         if "".join(save_path.suffixes) != exp_suffix:
-            save_path = save_path.with_name(save_path.stem + exp_suffix)
+            save_path = save_path.with_name(save_path.stem.split(".")[0] + exp_suffix)
 
         if save_path.exists() and not overwrite:
             msg = f"Artifact already exists at: {save_path}"

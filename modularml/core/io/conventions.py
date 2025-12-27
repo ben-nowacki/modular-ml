@@ -21,7 +21,7 @@ class SerializationKind:
 
     @property
     def file_suffix(self) -> str:
-        return f"{self.kind}.{MML_FILE_EXTENSION}"
+        return f".{self.kind}.{MML_FILE_EXTENSION}"
 
 
 class KindRegistry:
@@ -105,10 +105,6 @@ class KindRegistry:
                 return self._registry[base]
         msg = f"No serialization kind registered for class hierarchy of {cls.__name__}"
         raise KeyError(msg)
-
-    def get_file_suffix(self, cls: type) -> str:
-        """Returns the required file suffix for the given class (eg., "fs.mml")."""
-        return f"{self.get_kind(cls=cls)}.{MML_FILE_EXTENSION}"
 
     def clear(self):
         """Clears all registered items."""
