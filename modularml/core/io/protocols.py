@@ -11,7 +11,7 @@ class Configurable(Protocol):
     The config must contain only JSON-safe values (dict/list/str/int/float/bool/None).
     """
 
-    def get_config(self) -> dict:
+    def get_config(self) -> dict[str, Any]:
         """
         Return a JSON-serializable configuration for reconstructing the object.
 

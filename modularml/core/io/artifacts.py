@@ -12,8 +12,10 @@ class ArtifactHeader:
     Args:
         mml_version (str):
             ModularML version used to save the artifact.
-        schema_version (int):
-            Artifact schema version for migrations.
+        schema_version (str):
+            Artifact schema version.
+        object_version (str):
+            Version of object being serialized.
         kind (str):
             Kind code (e.g., "fs", "mg") used for naming conventions.
         class_spec (dict[str, Any]):
@@ -22,43 +24,61 @@ class ArtifactHeader:
     """
 
     mml_version: str
-    schema_version: int
+    schema_version: str
+    object_version: str
     kind: str
     class_spec: dict[str, Any]
 
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "mml_version": self.mml_version,
+            "schema_version": self.schema_version,
+            "object_version": self.object_version,
+            "kind": self.kind,
+            "class_spec": self.class_spec,
+        }
 
-@dataclass(frozen=True)
-class StateSpec:
-    """
-    Description of how runtime state is stored on disk.
-
-    Args:
-        format (str):
-            Encoding format (e.g., "json", "pickle", "torch", "npz").
-        files (dict[str, str]):
-            Logical state names mapped to filenames.
-
-    """
-
-    format: str
-    files: dict[str, str]
+    @classmethod
+    def from_json(cls, json: dict[str, Any]) -> ArtifactHeader:
+        return cls(
+            mml_version=json["mml_version"],
+            schema_version=json["schema_version"],
+            object_version=json["object_version"],
+            kind=json["kind"],
+            class_spec=json["class_spec"],
+        )
 
 
 @dataclass(frozen=True)
 class Artifact:
     """
-    Full serialized description of an object: header + config + optional state.
+    Artifact manifest describing where all serialized components live.
 
     Args:
         header (ArtifactHeader):
             Artifact metadata.
-        config (dict[str, Any]):
-            Object config needed for instantiation.
-        state (StateSpec | None):
-            Optional state file mapping for runtime state.
+        files (dict[str, Any]):
+            Logical file map (e.g., `{"config": "config.json", "state": "state.json", ...}`)
+        schema_version (str) = "1.0"
+            Artifact version.
 
     """
 
     header: ArtifactHeader
-    config: dict[str, Any]
-    state: StateSpec | None
+    files: dict[str, Any]
+    schema_version: str = "1.0"
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "header": self.header.to_json(),
+            "files": self.files,
+            "schema_version": self.schema_version,
+        }
+
+    @classmethod
+    def from_json(cls, json: dict[str, Any]) -> Artifact:
+        return cls(
+            header=ArtifactHeader.from_json(json["header"]),
+            files=json["files"],
+            schema_version=json["schema_version"],
+        )

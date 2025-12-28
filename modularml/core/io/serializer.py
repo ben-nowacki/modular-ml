@@ -9,12 +9,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from modularml.core.io.artifacts import Artifact, ArtifactHeader, StateSpec
+from modularml.core.io.artifacts import Artifact, ArtifactHeader
 from modularml.core.io.class_registry import ClassRegistry, ClassResolutionError, class_registry
 from modularml.core.io.class_spec import ClassSpec
 from modularml.core.io.conventions import KindRegistry, kind_registry
 from modularml.core.io.handlers.handler import HandlerRegistry, LoadContext, SaveContext
 from modularml.core.io.handlers.registry import handler_registry
+from modularml.core.io.migrations.registry import migration_registry
 from modularml.core.io.packaged_code_loaders.default_loader import default_packaged_code_loader
 from modularml.core.io.serialization_policy import SerializationPolicy, normalize_policy
 
@@ -62,13 +63,11 @@ class Serializer:
         class_registry: ClassRegistry,
         handler_registry: HandlerRegistry,
         mml_version: str = "0.0.0",
-        schema_version: int = 1,
     ):
         self.kind_registry = kind_registry
         self.class_registry = class_registry
         self.handler_registry = handler_registry
         self.mml_version = mml_version
-        self.schema_version = schema_version
 
     # ================================================
     # Save
@@ -138,38 +137,56 @@ class Serializer:
             spec.validate()
 
             # Config & state encoding
-            config = handler.encode_config(
+            file_mapping = handler.encode(
                 obj=obj,
+                save_dir=tmp_path,
                 ctx=SaveContext(
                     artifact_path=tmp_path,
                     policy=policy,
                     serializer=self,
                 ),
             )
-            dir_state = tmp_path / "state"
-            state_spec_dict = handler.encode_state(obj=obj, state_dir=dir_state)
 
-            state_spec = None
-            if state_spec_dict is not None:
-                state_spec = StateSpec(
-                    format=state_spec_dict["format"],
-                    files=state_spec_dict["files"],
-                )
+            # config = handler.encode_config(
+            #     obj=obj,
+            #     ctx=SaveContext(
+            #         artifact_path=tmp_path,
+            #         policy=policy,
+            #         serializer=self,
+            #     ),
+            # )
+            # dir_state = tmp_path  # / "state"
+            # state_spec_dict = handler.encode_state(
+            #     obj=obj,
+            #     state_dir=dir_state,
+            #     ctx=SaveContext(
+            #         artifact_path=tmp_path,
+            #         policy=policy,
+            #         serializer=self,
+            #     ),
+            # )
+
+            # state_spec = None
+            # if state_spec_dict is not None:
+            #     state_spec = StateSpec(
+            #         format=state_spec_dict["format"],
+            #         files=state_spec_dict["files"],
+            #     )
 
             artifact = Artifact(
                 header=ArtifactHeader(
                     mml_version=self.mml_version,
-                    schema_version=self.schema_version,
+                    schema_version=Artifact.schema_version,
+                    object_version=handler.object_version,
                     kind=kind,
                     class_spec=asdict(spec),
                 ),
-                config=config,
-                state=state_spec,
+                files=file_mapping,
             )
 
             # Write artifact.json
             with (tmp_path / "artifact.json").open("w", encoding="utf-8") as f:
-                json.dump(self._artifact_to_json(artifact), f, indent=2, sort_keys=True)
+                json.dump(artifact.to_json(), f, indent=2, sort_keys=True)
 
             # Zip the entire artifact directory
             _zip_dir(tmp_path, save_path)
@@ -214,13 +231,13 @@ class Serializer:
 
             # Read artifact
             with artifact_json.open("r", encoding="utf-8") as f:
-                artifact = self._artifact_from_json(json.load(f))
+                artifact = Artifact.from_json(json.load(f))
 
             # Extract ClassSpec
             spec = ClassSpec(**artifact.header.class_spec)
             spec.validate()
 
-            # Resolve class
+            # Resolve class (no object instantiation yet)
             if spec.policy is SerializationPolicy.STATE_ONLY:
                 if provided_class is None:
                     raise ClassResolutionError("STATE_ONLY artifacts require provided_class.")
@@ -236,11 +253,18 @@ class Serializer:
                     ),
                 )
 
-            # Construct object from config (use proper handler)
+            # Apply any registered migrations
+            artifact = migration_registry.apply(
+                artifact=artifact,
+                artifact_path=tmp_path,
+                handler=handler_registry.resolve(cls=cls),
+            )
+
+            # Reconstruct object (handler class handles this logic)
             handler = self.handler_registry.resolve(cls)
-            obj = handler.decode_config(
+            obj = handler.decode(
                 cls=cls,
-                config=artifact.config,
+                parent_dir=tmp_path,
                 ctx=LoadContext(
                     artifact_path=tmp_path,
                     allow_packaged_code=allow_packaged_code,
@@ -249,17 +273,33 @@ class Serializer:
                 ),
             )
 
-            # Restore state
-            if artifact.state is not None:
-                dir_state = tmp_path / "state"
-                handler.decode_state(
-                    obj,
-                    dir_state,
-                    {
-                        "format": artifact.state.format,
-                        "files": artifact.state.files,
-                    },
-                )
+            # # Construct object from config (use proper handler)
+            # handler = self.handler_registry.resolve(cls)
+            # obj = handler.decode_config(
+            #     cls=cls,
+            #     config=artifact.config,
+            #     ctx=LoadContext(
+            #         artifact_path=tmp_path,
+            #         allow_packaged_code=allow_packaged_code,
+            #         packaged_code_loader=default_packaged_code_loader,
+            #         serializer=self,
+            #     ),
+            # )
+
+            # # Restore state
+            # if artifact.state is not None:
+            #     dir_state = tmp_path  # / "state"
+            #     handler.decode_state(
+            #         obj=obj,
+            #         state_dir=dir_state,
+            #         state_spec=artifact.state,
+            #         ctx=LoadContext(
+            #             artifact_path=tmp_path,
+            #             allow_packaged_code=allow_packaged_code,
+            #             packaged_code_loader=default_packaged_code_loader,
+            #             serializer=self,
+            #         ),
+            #     )
 
             return obj
 
@@ -307,7 +347,11 @@ class Serializer:
         # Copy source file (entire file) into an artifact
         code_dir = artifact_path / "code"
         code_dir.mkdir(exist_ok=True)
+
         dest_file = code_dir / src_file.name
+        if dest_file.exists():
+            msg = f"File for packaged code already exists: {dest_file}"
+            raise FileExistsError(msg)
         shutil.copy2(src_file, dest_file)
 
         # Build source_ref
@@ -327,7 +371,7 @@ class Serializer:
         source_ref = None
 
         if policy is SerializationPolicy.PACKAGED:
-            source_ref = self._package_class_source(cls, artifact_path)
+            source_ref = self._package_class_source(cls=cls, artifact_path=artifact_path)
 
         spec = self.class_registry.identify_class(
             cls,
@@ -337,39 +381,6 @@ class Serializer:
         )
         spec.validate()
         return spec
-
-    # ================================================
-    # JSON helpers
-    # ================================================
-    @staticmethod
-    def _artifact_to_json(artifact: Artifact) -> dict[str, Any]:
-        return {
-            "header": {
-                "mml_version": artifact.header.mml_version,
-                "schema_version": artifact.header.schema_version,
-                "kind": artifact.header.kind,
-                "class_spec": artifact.header.class_spec,
-            },
-            "config": artifact.config,
-            "state": None
-            if artifact.state is None
-            else {"format": artifact.state.format, "files": artifact.state.files},
-        }
-
-    @staticmethod
-    def _artifact_from_json(data: dict[str, Any]) -> Artifact:
-        header = data["header"]
-        state = data.get("state")
-        return Artifact(
-            header=ArtifactHeader(
-                mml_version=header["mml_version"],
-                schema_version=header["schema_version"],
-                kind=header["kind"],
-                class_spec=header["class_spec"],
-            ),
-            config=data.get("config", {}),
-            state=None if state is None else StateSpec(format=state["format"], files=state["files"]),
-        )
 
 
 serializer = Serializer(

@@ -2,6 +2,8 @@ import json
 import pathlib
 import zipfile
 
+from modularml.core.io.artifacts import Artifact
+
 
 def inspect_packaged_code(path: pathlib.Path) -> dict[str, str]:
     """
@@ -37,9 +39,29 @@ def inspect_packaged_code(path: pathlib.Path) -> dict[str, str]:
         # Validate artifact.json
         try:
             with zf.open("artifact.json") as f:
-                artifact = json.load(f)
+                artifact: Artifact = Artifact.from_json(json.load(f))
         except KeyError as exc:
             raise ValueError("Not a valid ModularML artifact (missing artifact.json).") from exc
+
+        # Extract config from artifact
+        config_rel_path = artifact.files.get("config")
+        if not config_rel_path:
+            return {}
+
+        file_config: pathlib.Path = path / config_rel_path
+
+        # Attempt to load config based on suffix
+        config = {}
+        if pathlib.Path(file_config).suffix.lower() == ".json":
+            try:
+                with zf.open(config_rel_path) as f:
+                    config = json.load(f)
+            except Exception as e:
+                msg = f"Failed to read 'config.json'. {e}"
+                raise RuntimeError(msg) from e
+        else:
+            msg = f"Config with suffix '{file_config.suffix}' is not supported yet."
+            raise NotImplementedError(msg)
 
         # Recursively scan for packaged ClassSpecs
         def collect(obj: object) -> None:
@@ -63,6 +85,6 @@ def inspect_packaged_code(path: pathlib.Path) -> dict[str, str]:
                 for v in obj:
                     collect(v)
 
-        collect(artifact)
+        collect(config)
 
     return sources

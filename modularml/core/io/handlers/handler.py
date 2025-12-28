@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from modularml.core.io.protocols import Configurable, Stateful
+from modularml.core.io.serialization_policy import SerializationPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from modularml.core.io.serialization_policy import SerializationPolicy
+    from modularml.core.io.class_spec import ClassSpec
     from modularml.core.io.serializer import Serializer
 
 T = TypeVar("T")
@@ -45,6 +47,14 @@ class SaveContext:
     policy: SerializationPolicy
     serializer: Serializer
 
+    def package_class(self, cls: type) -> ClassSpec:
+        """Ensure `cls` is packaged into the artifact and return its ClassSpec."""
+        return self.serializer.make_class_spec(
+            cls=cls,
+            policy=SerializationPolicy.PACKAGED,
+            artifact_path=self.artifact_path,
+        )
+
 
 @dataclass(frozen=True)
 class LoadContext:
@@ -66,48 +76,189 @@ class LoadContext:
     artifact_path: Path
     allow_packaged_code: bool
     packaged_code_loader: Callable[[str], object]
-    serializer: Any
+    serializer: Serializer
 
 
 class TypeHandler(Generic[T]):
     """Base handler for encoding/decoding config and state for a family of objects."""
 
-    def encode_config(self, obj: T, *, ctx: SaveContext | None = None) -> dict[str, Any]:  # noqa: ARG002
+    object_version: ClassVar[str] = "1.0"
+
+    # ================================================
+    # Object encoding
+    # ================================================
+    def encode(
+        self,
+        obj: T,
+        save_dir: Path,
+        *,
+        ctx: SaveContext | None = None,
+    ) -> dict[str, str | None]:
         """
-        Encode object configuration required for reconstruction.
+        Encodes state and config to files.
 
         Args:
-            obj (T): Object to encode.
-            ctx (SaveContext): Optional context (reference to Serializer) to adjust
-                config for serialization (required for packaged code).
+            obj (T):
+                Object instance to encode.
+            save_dir (Path):
+                Parent dir to save config and state files.
+            ctx (SaveContext, optional):
+                Additional serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            dict[str, Any]: JSON-serializable config.
+            dict[str, str | None]: Mapping of "config" and "state" keys to saved files.
 
         """
-        if isinstance(obj, Configurable):
-            return obj.get_config()
-        msg = f"{type(obj).__name__} is not Configurable and has no handler override."
-        raise TypeError(msg)
+        file_mapping = self.encode_config(obj=obj, save_dir=save_dir, ctx=ctx)
+        file_mapping.update(self.encode_state(obj=obj, save_dir=save_dir, ctx=ctx))
+        return file_mapping
 
-    def decode_config(self, cls: type[T], config: dict[str, Any], *, ctx: LoadContext | None = None) -> T:  # noqa: ARG002
+    def encode_config(
+        self,
+        obj: T,
+        save_dir: Path,
+        *,
+        ctx: SaveContext | None = None,
+    ) -> dict[str, str]:
         """
-        Construct object from config.
+        Encodes config to a json file.
 
         Args:
-            cls (type[T]): Target class.
-            config (dict[str, Any]): JSON-serializable config.
-            ctx (LoadContext): Optional context (reference to Serializer) to adjust
-                config for deserialization (required for packaged code).
+            obj (T):
+                Object to encode config for.
+            save_dir (Path):
+                Parent dir to save 'config.json' file.
+            ctx (SaveContext, optional):
+                Additional serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            T: Constructed object.
+            dict[str, str]: Mapping of config to saved json file
 
         """
-        if issubclass(cls, Configurable):  # type: ignore[arg-type]
-            return cls.from_config(config)  # type: ignore[return-value]
-        msg = f"{cls.__name__} is not Configurable and has no handler override."
-        raise TypeError(msg)
+        return self._encode_config_json(obj=obj, save_dir=save_dir, ctx=ctx)
+
+    def encode_state(
+        self,
+        obj: T,
+        save_dir: Path,
+        *,
+        ctx: SaveContext | None = None,
+    ) -> dict[str, str]:
+        """
+        Encodes object state to a pickle file.
+
+        Args:
+            obj (T):
+                Object to encode state for.
+            save_dir (Path):
+                Parent dir to save 'state.pkl' file.
+            ctx (SaveContext, optional):
+                Additional serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
+
+        Returns:
+            dict[str, str]: Mapping of state to saved pkl file
+
+        """
+        return self._encode_state_pickle(obj=obj, save_dir=save_dir, ctx=ctx)
+
+    # ================================================
+    # Object decoding
+    # ================================================
+    def decode(
+        self,
+        cls: type[T],
+        parent_dir: Path,
+        *,
+        ctx: LoadContext | None = None,
+    ) -> T:
+        """
+        Decodes an object from a saved artifact.
+
+        Description:
+            Instantiates an object (instantiates from config and sets state).
+
+        Args:
+            cls (type[T]):
+                Load config for class.
+            parent_dir (Path):
+                Directory contains a saved 'config.json' file
+            ctx (LoadContext, optional):
+                Additional de-serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
+
+        Returns:
+            T: The re-instantiated Scaler.
+
+        """
+        config = self.decode_config(config_dir=parent_dir, ctx=ctx)
+        obj = cls(**config)
+        if hasattr(obj, "set_state"):
+            state = self.decode_state(state_dir=parent_dir, ctx=ctx)
+            obj.set_state(**state)
+        return obj
+
+    def decode_config(
+        self,
+        config_dir: Path,
+        *,
+        ctx: LoadContext | None = None,
+    ) -> dict[str, Any]:
+        """
+        Decodes config from a json file.
+
+        Args:
+            config_dir (Path):
+                Directory contains a saved 'config.json' file
+            ctx (LoadContext, optional):
+                Additional de-serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
+
+        Returns:
+            dict[str, Any]: The decoded config data.
+
+        """
+        return self._decode_config_json(config_dir=config_dir, ctx=ctx)
+
+    def decode_state(
+        self,
+        state_dir: str,
+        *,
+        ctx: LoadContext | None = None,
+    ) -> dict[str, Any]:
+        """
+        Decodes state from a pkl file.
+
+        Args:
+            state_dir (Path):
+                Directory containing a saved 'state.pkl' file
+            ctx (LoadContext, optional):
+                Additional de-serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
+
+        Returns:
+            dict[str, Any]: The decoded state data.
+
+        """
+        return self._decode_state_pickle(state_dir=state_dir, ctx=ctx)
+
+    # ================================================
+    # Convenience Methods
+    # ================================================
+    def has_config(self, obj: T) -> bool:
+        """
+        Return True if object has config that should be serialized.
+
+        Args:
+            obj (T): Object to inspect.
+
+        Returns:
+            bool: True if Configurable.
+
+        """
+        return isinstance(obj, Configurable)
 
     def has_state(self, obj: T) -> bool:
         """
@@ -122,62 +273,170 @@ class TypeHandler(Generic[T]):
         """
         return isinstance(obj, Stateful)
 
-    def encode_state(self, obj: T, state_dir: str) -> dict[str, Any] | None:
+    # ================================================
+    # JSON-based config encode/decode
+    # ================================================
+    def _encode_config_json(
+        self,
+        obj: Configurable,
+        save_dir: Path,
+        *,
+        config_rel_path: str = "config.json",
+        ctx: SaveContext | None = None,  # noqa: ARG002
+    ) -> dict[str, str | None]:
         """
-        Encode object state to disk and return a serializable state spec.
+        Encodes config to a json file.
 
         Args:
-            obj (T): Object to encode.
-            state_dir (str): Directory where state blobs should be written.
+            obj (Configurable):
+                Configurable object to encode config for.
+            save_dir (Path):
+                Parent dir to save 'config.json' file.
+            config_rel_path (str):
+                Relative path to saved config file.
+                Defaults to "config.json"
+            ctx (SaveContext, optional):
+                Additional serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            dict[str, Any] | None: StateSpec-like dict or None if no state.
+            dict[str, str | None]: Mapping of config to saved json file
 
         """
-        if not isinstance(obj, Stateful):
-            return None
-        # Default encoding: JSON-only state via a handler override if needed.
-        # Default to pickle (works for most)
-        return self._encode_state_pickle(obj, state_dir)
+        if not self.has_config(obj):
+            return {"config": None}
 
-    def decode_state(self, obj: T, state_dir: str, state_spec: dict[str, Any]) -> None:
+        if not hasattr(obj, "get_config"):
+            raise NotImplementedError("Object must implement a `get_config` method.")
+
+        config = obj.get_config()
+
+        # Save config to file
+        with (Path(save_dir) / config_rel_path).open("w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, sort_keys=True)
+
+        return {"config": config_rel_path}
+
+    def _decode_config_json(
+        self,
+        config_dir: str,
+        *,
+        config_rel_path: str = "config.json",
+        ctx: LoadContext | None = None,  # noqa: ARG002
+    ) -> dict[str, Any] | None:
         """
-        Restore object state from disk.
+        Decodes config from a json file.
 
         Args:
-            obj (T): Object instance to restore.
-            state_dir (str): Directory containing state blobs.
-            state_spec (dict[str, Any]): StateSpec-like dict describing stored state.
+            config_dir (Path):
+                Directory contains a saved 'config.json' file
+            config_rel_path (str):
+                Relative path to saved config file.
+                Defaults to "config.json"
+            ctx (LoadContext, optional):
+                Additional de-serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
+
+        Returns:
+            dict[str, Any] | None: The decoded config data.
 
         """
-        self._decode_state_pickle(obj, state_dir, state_spec)
+        # Check that config.json exists
+        file_config = Path(config_dir) / config_rel_path
+        if not file_config.exists():
+            msg = f"Could not find config file in directory: '{file_config}'."
+            raise FileNotFoundError(msg)
+
+        # Read config
+        with file_config.open("r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        return config
 
     # ================================================
-    # Default encoding (pickle) - override per backend/type
+    # Pickle-based state encode/decode
     # ================================================
-    def _encode_state_pickle(self, obj: Stateful, state_dir: str) -> dict[str, Any]:
+    def _encode_state_pickle(
+        self,
+        obj: Stateful,
+        save_dir: Path,
+        *,
+        state_rel_path: str = "state.pkl",
+        ctx: SaveContext | None = None,  # noqa: ARG002
+    ) -> dict[str, str | None]:
+        """
+        Encodes stateful object's state to a pickle file.
+
+        Args:
+            obj (Stateful):
+                Object to encode state for.
+            save_dir (Path):
+                Parent dir to save 'state.pkl' file.
+            state_rel_path (str):
+                Relative path to save state to.
+                Defaults to "state.pkl"
+            ctx (SaveContext, optional):
+                Additional serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
+
+        Returns:
+            dict[str, str | None]: Mapping of state to saved pkl file
+
+        """
         import pickle
 
-        path = Path(state_dir)
-        path.mkdir(parents=True, exist_ok=True)
-        with Path.open(path / "state.pkl", "wb") as f:
-            pickle.dump(obj.get_state(), f)
+        if not self.has_state(obj):
+            return {"state": None}
 
-        return {"format": "pickle", "files": {"state": "state.pkl"}}
+        if not hasattr(obj, "get_state"):
+            raise NotImplementedError("Scaler must implement a `get_state` method.")
 
-    def _decode_state_pickle(self, obj: Stateful, state_dir: str, state_spec: dict[str, Any]) -> None:
+        state = obj.get_state()
+
+        # Save state to file
+        file_state = Path(save_dir) / state_rel_path
+        with Path.open(file_state, "wb") as f:
+            pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        return {"state": state_rel_path}
+
+    def _decode_state_pickle(
+        self,
+        state_dir: str,
+        *,
+        state_rel_path: str = "state.pkl",
+        ctx: LoadContext | None = None,  # noqa: ARG002
+    ) -> dict[str, Any] | None:
+        """
+        Decodes state from a pkl file.
+
+        Args:
+            state_dir (Path):
+                Directory containing a saved 'state.pkl' file
+            state_rel_path (str):
+                Relative path to save state to.
+                Defaults to "state.pkl"
+            ctx (LoadContext, optional):
+                Additional de-serialization context.
+                Strictly required for SerializationPolicy.PACKAGED.
+
+        Returns:
+            dict[str, Any] | None: The decoded state data.
+
+        """
         import pickle
 
-        fmt = state_spec.get("format")
-        if fmt != "pickle":
-            msg = f"Unsupported default state format: {fmt}"
-            raise ValueError(msg)
+        # Check that config.json exists
+        file_state = Path(state_dir) / state_rel_path
+        if not file_state.exists():
+            msg = f"Could not find state file in directory: '{file_state}'."
+            raise FileNotFoundError(msg)
 
-        path = Path(state_dir) / state_spec["files"]["state"]
-        with Path.open(path, "rb") as f:
-            state = pickle.load(f)
+        # Read config
+        with Path.open(file_state, "rb") as f:
+            state: dict[str, Any] = pickle.load(f)
 
-        obj.set_state(state)
+        return state
 
 
 class HandlerRegistry:
