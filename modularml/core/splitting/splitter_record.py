@@ -3,57 +3,51 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from modularml.core.data.schema_constants import MML_STATE_TARGET
+from modularml.core.io.protocols import Configurable
 from modularml.core.references.data_reference import DataReference
-from modularml.utils.serialization.serializable_mixin import SerializableMixin
+from modularml.core.splitting.base_splitter import BaseSplitter
 
 
-@dataclass
-class SplitterRecord(SerializableMixin):
-    """
-    Record describing an applied data-splitting operation.
+@dataclass(frozen=True)
+class SplitterRecord(Configurable):
+    """Record describing an applied data-splitting operation."""
 
-    Description:
-        A `SplitterRecord` captures metadata about a single call to a \
-        :class:`BaseSplitter` subclass (e.g., :class:`RandomSplitter`, \
-        :class:`ConditionSplitter`). It documents where the splitter was \
-        applied, whether it targeted a full :class:`FeatureSet` or a \
-        :class:`FeatureSetView`, and which configuration parameters were used.
-
-        Each FeatureSet instance maintains an ordered list of `SplitterRecord` \
-        entries under its `_split_configs` dictionary, allowing the complete \
-        history of applied splits to be reconstructed or replayed deterministically.
-
-    Attributes:
-        split_config (dict[str, Any]):
-            The configuration dictionary returned by \
-            :meth:`BaseSplitter.get_config()`, containing all parameters \
-            necessary to reproduce the split operation (e.g., ratios, seed, \
-            grouping keys, conditions).
-
-        applied_to (FeatureSetRef):
-            A reference to the FeatureSet or FeatureSetView on which this \
-            splitter was applied. This includes the FeatureSet label, \
-            collection key, and optional split or fold identifiers.
-
-    """
-
-    splitter_state: dict[str, Any]
+    splitter: BaseSplitter
     applied_to: DataReference
 
-    # ============================================
-    # Serialization
-    # ============================================
-    def get_state(self) -> dict[str, Any]:
-        """Serialize this SplitterRecord into a fully reconstructable Python dictionary."""
-        state: dict[str, Any] = {
-            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
-            "splitter_state": self.splitter_state,
-            "applied_to": self.applied_to.get_state(),
-        }
-        return state
+    def __eq__(self, other):
+        if not isinstance(other, SplitterRecord):
+            msg = f"Cannot compare equality between SplitterRecord and {type(other)}"
+            raise TypeError(msg)
 
-    def set_state(self, state: dict[str, Any]):
-        """Restore this SplitterRecord in-place from serialized state."""
-        self.splitter_state = state["splitter_state"]
-        self.applied_to = DataReference.from_state(state["applied_to"])
+        return (self.splitter == other.splitter) and (self.applied_to == other.applied_to)
+
+    __hash__ = None
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return a JSON-serializable configuration.
+
+        Note:
+            This config does not include the splitter instance, only the
+            `splitter.get_config()` dict.
+
+        Returns:
+            dict[str, Any]: Configuration used to reconstruct this record.
+
+        """
+        return {
+            "splitter_config": self.splitter.get_config(),
+            "applied_to_config": self.applied_to.get_config(),
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> SplitterRecord:
+        """Reconstructs the record from config."""
+        return cls(
+            splitter=BaseSplitter.from_config(config["splitter_config"]),
+            applied_to=DataReference.from_config(config["applied_to_config"]),
+        )

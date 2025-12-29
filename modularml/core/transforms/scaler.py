@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from modularml.core.io.class_registry import class_registry
-from modularml.core.io.conventions import SerializationKind, kind_registry
 from modularml.core.io.protocols import Configurable, Stateful
-from modularml.core.transforms.scaler_registry import SCALER_REGISTRY
+from modularml.core.transforms.registry import SCALER_REGISTRY
 
 if TYPE_CHECKING:
     import numpy as np
@@ -240,13 +238,3 @@ class Scaler(Configurable, Stateful):
             msg = f"{self.scaler_name} does not support inverse_transform."
             raise NotImplementedError(msg)
         return self._scaler.inverse_transform(data)
-
-
-kind_registry.register(
-    cls=Scaler,
-    kind=SerializationKind(name="Scaler", kind="sc"),
-)
-class_registry.register_builtin(
-    key="Scaler",
-    cls=Scaler,
-)

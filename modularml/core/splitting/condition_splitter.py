@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.splitting.base_splitter import BaseSplitter
 from modularml.utils.errors.exceptions import SplitOverlapWarning
 
@@ -123,17 +122,31 @@ class ConditionSplitter(BaseSplitter):
             return_views=return_views,
         )
 
-    # ============================================
-    # Serialization
-    # ============================================
-    def get_state(self) -> dict[str, Any]:
-        """Serialize this Splitter into a fully reconstructable Python dictionary."""
-        state: dict[str, Any] = {
-            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this splitter.
+
+        Returns:
+            dict[str, Any]: Splitter configuration.
+
+        """
+        return {
             "conditions": self.conditions,
         }
-        return state
 
-    def set_state(self, state: dict[str, Any]):
-        """Restore this Splitter configuration in-place from serialized state."""
-        self.conditions = state["conditions"]
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> ConditionSplitter:
+        """
+        Construct a Splitter from configuration.
+
+        Args:
+            config (dict[str, Any]): Splitter configuration.
+
+        Returns:
+            BaseSplitter: Unfitted splitter instance.
+
+        """
+        return cls(conditions=config["conditions"])

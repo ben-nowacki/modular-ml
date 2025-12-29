@@ -1,24 +1,21 @@
 from __future__ import annotations
 
-import json
-from dataclasses import asdict
-from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from modularml.core.io.class_registry import class_registry
-from modularml.core.io.class_spec import ClassSpec
 from modularml.core.io.handlers.handler import LoadContext, SaveContext, TypeHandler
-from modularml.core.transforms.registry import SCALER_REGISTRY
-from modularml.core.transforms.scaler import Scaler
+from modularml.core.splitting.base_splitter import BaseSplitter
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
-class ScalerHandler(TypeHandler[Scaler]):
+class SplitterHandler(TypeHandler[BaseSplitter]):
     """
-    TypeHandler for Scaler objects.
+    TypeHandler for BaseSplitter objects.
 
     Description:
-        Encodes Scaler configuration via Configurable and stores learned
-        parameters in JSON form.
+        Encodes splitter configuration and state (if defined).
+        Supports both registry-backed and packaged custom splitters.
     """
 
     object_version: ClassVar[str] = "1.0"
@@ -27,11 +24,11 @@ class ScalerHandler(TypeHandler[Scaler]):
     state_rel_path = "state.pkl"
 
     # ================================================
-    # Scaler encoding
+    # Splitter Encoding
     # ================================================
     def encode(
         self,
-        obj: Scaler,
+        obj: BaseSplitter,
         save_dir: Path,
         *,
         ctx: SaveContext | None = None,
@@ -40,8 +37,8 @@ class ScalerHandler(TypeHandler[Scaler]):
         Encodes state and config to files.
 
         Args:
-            obj (Scaler):
-                Scaler instance to encode.
+            obj (BaseSplitter):
+                BaseSplitter instance to encode.
             save_dir (Path):
                 Parent dir to save config and state files.
             ctx (SaveContext, optional):
@@ -58,7 +55,7 @@ class ScalerHandler(TypeHandler[Scaler]):
 
     def encode_config(
         self,
-        obj: Scaler,
+        obj: BaseSplitter,
         save_dir: Path,
         *,
         ctx: SaveContext | None = None,
@@ -67,8 +64,8 @@ class ScalerHandler(TypeHandler[Scaler]):
         Encodes config to a json file.
 
         Args:
-            obj (Scaler):
-                Scaler to encode config for.
+            obj (BaseSplitter):
+                BaseSplitter to encode config for.
             save_dir (Path):
                 Parent dir to save 'config.json' file.
             ctx (SaveContext, optional):
@@ -79,45 +76,26 @@ class ScalerHandler(TypeHandler[Scaler]):
             dict[str, str]: Mapping of config to saved json file
 
         """
-        if not hasattr(obj, "get_config"):
-            raise NotImplementedError("Scaler must implement a `get_config` method.")
-
-        # JSON-safe config from Scaler class
-        config = obj.get_config()
-
-        # If using custom scaler (and policy==Package), we need to update the config
-        if obj.scaler_name in SCALER_REGISTRY:
-            config["impl_kind"] = "registry"
-            config["impl_name"] = obj.scaler_name
-        else:
-            if ctx is None:
-                msg = "SaveContext must be provided to handler when using PACKAGED serialization."
-                raise RuntimeError(msg)
-
-            impl_spec = ctx.package_class(obj._scaler.__class__)
-
-            config["impl_kind"] = "packaged"
-            config["impl_class"] = asdict(impl_spec)
-
-        # Save config to file
-        with (Path(save_dir) / self.config_rel_path).open("w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, sort_keys=True)
-
-        return {"config": self.config_rel_path}
+        return self._encode_config_json(
+            obj=obj,
+            save_dir=save_dir,
+            config_rel_path=self.config_rel_path,
+            ctx=ctx,
+        )
 
     def encode_state(
         self,
-        obj: Scaler,
+        obj: BaseSplitter,
         save_dir: Path,
         *,
         ctx: SaveContext | None = None,
     ) -> dict[str, str]:
         """
-        Encodes Scaler state to a pickle file.
+        Encodes BaseSplitter state to a pickle file.
 
         Args:
-            obj (Scaler):
-                Scaler to encode state for.
+            obj (BaseSplitter):
+                BaseSplitter to encode state for.
             save_dir (Path):
                 Parent dir to save 'state.pkl' file.
             ctx (SaveContext, optional):
@@ -136,24 +114,24 @@ class ScalerHandler(TypeHandler[Scaler]):
         )
 
     # ================================================
-    # Scaler decoding
+    # Splitter Decoding
     # ================================================
     def decode(
         self,
-        cls: type[Scaler],
+        cls: type[BaseSplitter],
         parent_dir: Path,
         *,
         ctx: LoadContext | None = None,
-    ) -> Scaler:
+    ) -> BaseSplitter:
         """
-        Decodes a Scaler from a saved artifact.
+        Decodes a BaseSplitter from a saved artifact.
 
         Description:
-            Instantiates a Scaler (instantiates from config and sets state).
+            Instantiates a BaseSplitter (instantiates from config and sets state).
 
         Args:
-            cls (type[Scaler]):
-                Load config for Scaler class.
+            cls (type[BaseSplitter]):
+                Load config for BaseSplitter class.
             parent_dir (Path):
                 Directory contains a saved 'config.json' file
             ctx (LoadContext, optional):
@@ -161,57 +139,20 @@ class ScalerHandler(TypeHandler[Scaler]):
                 Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            Scaler: The re-instantiated Scaler.
+            BaseSplitter: The re-instantiated splitter.
 
         """
         config: dict[str, Any] = self.decode_config(config_dir=parent_dir, ctx=ctx)
-        state: dict[str, Any] = self.decode_state(state_dir=parent_dir, ctx=ctx)
 
-        # ================================================
-        # Instantiate Scaler from config
-        # ================================================
-        scaler_obj = None
-        impl_kind = config["impl_kind"]
+        # Instantiate BaseSplitter from config
+        splitter_obj = cls.from_config(config)
 
-        # Case 1: registry-backed scaler
-        if impl_kind == "registry":
-            impl_name = config["impl_name"]
-            impl_cls = SCALER_REGISTRY[impl_name]
-            impl = impl_cls(**config.get("scaler_kwargs", {}))
-            scaler_obj = cls(impl)
+        # Set state (if defined - most don't have a state)
+        if hasattr(splitter_obj, "set_state"):
+            state: dict[str, Any] = self.decode_state(state_dir=parent_dir, ctx=ctx)
+            splitter_obj.set_state(state=state)
 
-        # Case 2: packaged custom scaler
-        elif impl_kind == "packaged":
-            if ctx is None:
-                msg = "LoadContext must be provided to handler when using PACKAGED deserialization."
-                raise RuntimeError(msg)
-
-            impl_spec = ClassSpec(**config["impl_class"])
-            impl_cls = class_registry.resolve_class(
-                impl_spec,
-                allow_packaged_code=True,
-                packaged_code_loader=lambda source_ref: ctx.packaged_code_loader(
-                    artifact_path=ctx.artifact_path,
-                    source_ref=source_ref,
-                    allow_packaged=ctx.allow_packaged_code,
-                ),
-            )
-            impl = impl_cls(**config.get("scaler_kwargs", {}))
-            scaler_obj = cls(impl)
-
-        else:
-            msg = f"Unknown impl_kind: {impl_kind}"
-            raise ValueError(msg)
-
-        # ================================================
-        # Set Scaler state
-        # ================================================
-        if not hasattr(scaler_obj, "set_state"):
-            msg = "Scaler must implement a `set_state` method."
-            raise NotImplementedError(msg)
-
-        scaler_obj.set_state(state=state)
-        return scaler_obj
+        return splitter_obj
 
     def decode_config(
         self,

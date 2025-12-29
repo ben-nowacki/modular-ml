@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.references.data_reference import DataReference
 from modularml.core.splitting.splitter_record import SplitterRecord
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
+from modularml.utils.io.cloning import clone_via_serialization
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -476,17 +478,22 @@ class SplitMixin:
             for split in list(results.values()):
                 source.add_split(split)
 
-            # Record splitter config used
-            source._split_configs.append(
-                SplitterRecord(
-                    splitter_state=splitter.get_state(),
-                    applied_to=DataReference(
-                        node=source.label,
-                        node_id=source.node_id,
-                        split=self.label if is_view else None,
-                    ),
+            # Record this splitter configuration
+            # Splitter is cloned to prevent user from modifying state outside of ModularML
+            cloned_splitter: BaseSplitter = clone_via_serialization(
+                obj=splitter,
+                policy=SerializationPolicy.BUILTIN,
+                builtin_key=splitter.__class__.__qualname__,
+            )
+            rec = SplitterRecord(
+                splitter=cloned_splitter,
+                applied_to=DataReference(
+                    node=source.label,
+                    node_id=source.node_id,
+                    split=self.label if is_view else None,
                 ),
             )
+            source._split_recs.append(rec)
 
         # Return views if requested
         if return_views:
@@ -547,7 +554,11 @@ class SplitMixin:
         from modularml.core.splitting.random_splitter import RandomSplitter
 
         splitter = RandomSplitter(ratios, group_by=group_by, seed=seed)
-        return self.split(splitter, return_views=return_views, register=register)
+        return self.split(
+            splitter,
+            return_views=return_views,
+            register=register,
+        )
 
     def split_by_condition(
         self,
@@ -613,4 +624,8 @@ class SplitMixin:
         from modularml.core.splitting.condition_splitter import ConditionSplitter
 
         splitter = ConditionSplitter(**conditions)
-        return self.split(splitter, return_views=return_views, register=register)
+        return self.split(
+            splitter,
+            return_views=return_views,
+            register=register,
+        )

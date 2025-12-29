@@ -128,6 +128,7 @@ class Serializer:
             final_source_ref = None
             if policy == SerializationPolicy.PACKAGED:
                 final_source_ref = self._package_class_source(cls, tmp_path)
+
             spec = self.class_registry.identify_class(
                 cls,
                 policy=policy,
@@ -146,32 +147,6 @@ class Serializer:
                     serializer=self,
                 ),
             )
-
-            # config = handler.encode_config(
-            #     obj=obj,
-            #     ctx=SaveContext(
-            #         artifact_path=tmp_path,
-            #         policy=policy,
-            #         serializer=self,
-            #     ),
-            # )
-            # dir_state = tmp_path  # / "state"
-            # state_spec_dict = handler.encode_state(
-            #     obj=obj,
-            #     state_dir=dir_state,
-            #     ctx=SaveContext(
-            #         artifact_path=tmp_path,
-            #         policy=policy,
-            #         serializer=self,
-            #     ),
-            # )
-
-            # state_spec = None
-            # if state_spec_dict is not None:
-            #     state_spec = StateSpec(
-            #         format=state_spec_dict["format"],
-            #         files=state_spec_dict["files"],
-            #     )
 
             artifact = Artifact(
                 header=ArtifactHeader(
@@ -272,34 +247,6 @@ class Serializer:
                     serializer=self,
                 ),
             )
-
-            # # Construct object from config (use proper handler)
-            # handler = self.handler_registry.resolve(cls)
-            # obj = handler.decode_config(
-            #     cls=cls,
-            #     config=artifact.config,
-            #     ctx=LoadContext(
-            #         artifact_path=tmp_path,
-            #         allow_packaged_code=allow_packaged_code,
-            #         packaged_code_loader=default_packaged_code_loader,
-            #         serializer=self,
-            #     ),
-            # )
-
-            # # Restore state
-            # if artifact.state is not None:
-            #     dir_state = tmp_path  # / "state"
-            #     handler.decode_state(
-            #         obj=obj,
-            #         state_dir=dir_state,
-            #         state_spec=artifact.state,
-            #         ctx=LoadContext(
-            #             artifact_path=tmp_path,
-            #             allow_packaged_code=allow_packaged_code,
-            #             packaged_code_loader=default_packaged_code_loader,
-            #             serializer=self,
-            #         ),
-            #     )
 
             return obj
 

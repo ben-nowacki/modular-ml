@@ -3,8 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from modularml.core.data.schema_constants import MML_STATE_TARGET
-from modularml.utils.serialization.serializable_mixin import SerializableMixin, register_serializable
+from modularml.core.io.protocols import Configurable
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -12,7 +11,7 @@ if TYPE_CHECKING:
     from modularml.core.data.featureset_view import FeatureSetView
 
 
-class BaseSplitter(SerializableMixin, ABC):
+class BaseSplitter(Configurable, ABC):
     """
     Abstract base class for algorithms that derive FeatureSetViews from a FeatureSet.
 
@@ -123,33 +122,29 @@ class BaseSplitter(SerializableMixin, ABC):
         # FeatureSetView.select_rows constructs new views from itself
         return {label: view.take(rel_indices=idxs, label=label) for label, idxs in split_indices.items()}
 
-    # ============================================
-    # Serialization
-    # ============================================
-    @abstractmethod
-    def get_state(self) -> dict[str, Any]:
-        """Serialize this Splitter into a fully reconstructable Python dictionary."""
-        ...
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this splitter.
 
-    @abstractmethod
-    def set_state(self, state: dict[str, Any]):
-        """Restore this Splitter configuration in-place from serialized state."""
-        ...
+        Returns:
+            dict[str, Any]: Splitter configuration.
+
+        """
+        raise NotImplementedError
 
     @classmethod
-    def from_state(cls, state: dict[str, Any]) -> BaseSplitter:
-        """Dynamically reconstruct a splitter (including subclasses) from state."""
-        from modularml.utils.environment.environment import import_from_path
+    def from_config(cls, config: dict[str, Any]) -> BaseSplitter:
+        """
+        Construct a Splitter from configuration.
 
-        splitter_cls = import_from_path(state[MML_STATE_TARGET])
+        Args:
+            config (dict[str, Any]): Splitter configuration.
 
-        # Allocate without calling __init__
-        obj: BaseSplitter = splitter_cls.__new__(splitter_cls)
+        Returns:
+            BaseSplitter: Unfitted splitter instance.
 
-        # Restore internal state
-        obj.set_state(state)
-
-        return obj
-
-
-register_serializable(BaseSplitter, kind="sp")
+        """
+        raise NotImplementedError

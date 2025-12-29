@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from modularml.core.io.class_spec import ClassSpec
 from modularml.core.io.serialization_policy import SerializationPolicy, normalize_policy
@@ -196,8 +196,13 @@ class ClassRegistry:
         raise TypeError(msg)
 
     # ================================================
-    # Helpers
+    # Helpers & Convenience
     # ================================================
+    def obj_is_a_builtin(self, obj_or_cls: Any) -> bool:
+        """Checks whether an instance is a registered built-in."""
+        cls = obj_or_cls if isinstance(obj_or_cls, type) else obj_or_cls.__class__
+        return cls in set(self._builtin_registry.values())
+
     def _make_runtime_key(self, cls: type) -> str:
         return f"{cls.__module__}:{cls.__qualname__}"
 

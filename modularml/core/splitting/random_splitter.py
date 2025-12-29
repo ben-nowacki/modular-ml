@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from modularml.core.data.schema_constants import DOMAIN_TAGS, MML_STATE_TARGET, REP_RAW
+from modularml.core.data.schema_constants import DOMAIN_TAGS, REP_RAW
 from modularml.core.splitting.base_splitter import BaseSplitter
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list
@@ -193,25 +193,37 @@ class RandomSplitter(BaseSplitter):
             current += count
         return boundaries
 
-    # ============================================
-    # Serialization
-    # ============================================
-    def get_state(self) -> dict[str, Any]:
-        """Serialize this Splitter into a fully reconstructable Python dictionary."""
-        state: dict[str, Any] = {
-            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this splitter.
+
+        Returns:
+            dict[str, Any]: Splitter configuration.
+
+        """
+        return {
             "ratios": self.ratios,
             "group_by": self.group_by,
             "seed": self.seed,
         }
-        return state
 
-    def set_state(self, state: dict[str, Any]):
-        """Restore this Splitter configuration in-place from serialized state."""
-        # Restore rng
-        self.seed = state.get("seed")
-        self.rng = np.random.default_rng(self.seed)
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> BaseSplitter:
+        """
+        Construct a Splitter from configuration.
 
-        # Restore other attribute
-        self.group_by = state["group_by"]
-        self.ratios = state["ratios"]
+        Args:
+            config (dict[str, Any]): Splitter configuration.
+
+        Returns:
+            BaseSplitter: Unfitted splitter instance.
+
+        """
+        return cls(
+            ratios=config["ratios"],
+            group_by=config["group_by"],
+            seed=config["seed"],
+        )
