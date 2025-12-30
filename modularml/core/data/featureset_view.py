@@ -9,7 +9,7 @@ import pyarrow as pa
 from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.core.splitting.split_mixin import SplitMixin
-from modularml.utils.representation.summary import format_summary_box
+from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
     from modularml.core.data.featureset import FeatureSet
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class FeatureSetView(SampleCollectionMixin, SplitMixin):
+class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable):
     """
     Immutable row+column projection of a FeatureSet.
 
@@ -49,29 +49,6 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin):
     # ================================================
     # Properties & Dunders
     # ================================================
-    @property
-    def n_samples(self) -> int:
-        """Number of rows (samples) in this view."""
-        return len(self.indices)
-
-    @property
-    def feature_keys(self) -> tuple[str, ...]:
-        """Feature keys without domain prefix (with rep suffix)."""
-        return self._feature_cols
-
-    @property
-    def target_keys(self) -> tuple[str, ...]:
-        """Target keys without domain prefix (with rep suffix)."""
-        return self._target_cols
-
-    @property
-    def tag_keys(self) -> tuple[str, ...]:
-        """Tag keys without domain prefix (with rep suffix)."""
-        return self._tag_cols
-
-    def __len__(self) -> int:
-        return self.n_samples
-
     def __repr__(self):
         return f"FeatureSetView(source='{self.source.label}', n_samples={self.n_samples}, label='{self.label}')"
 
@@ -81,12 +58,12 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin):
             msg = f"Cannot compare equality between FeatureSetView and {type(other)}"
             raise TypeError(msg)
 
-        return self.source == other.source and self.indices == other.indices
+        return (self.source == other.source) and (self.indices == other.indices)
 
     __hash__ = None
 
-    def summary(self, max_width: int = 88) -> str:
-        rows = [
+    def _summary_rows(self) -> list[tuple]:
+        return [
             ("label", self.label),
             ("source", self.source.label),
             ("n_samples", self.n_samples),
@@ -99,12 +76,6 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin):
                 ],
             ),
         ]
-
-        return format_summary_box(
-            title=self.__class__.__name__,
-            rows=rows,
-            max_width=max_width,
-        )
 
     # ================================================
     # SampleCollectionMixin

@@ -106,7 +106,7 @@ class ScalerRecord(Configurable):
 
         This *does not* rebuild the scaler state, only its config.
         """
-        scaler_cfg = config["scaler_config"]
+        scaler_cfg = config.get("scaler_config")
         return cls(
             order=config["order"],
             domain=config["domain"],

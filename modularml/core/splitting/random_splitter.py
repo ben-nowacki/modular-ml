@@ -205,6 +205,7 @@ class RandomSplitter(BaseSplitter):
 
         """
         return {
+            "splitter_name": "RandomSplitter",
             "ratios": self.ratios,
             "group_by": self.group_by,
             "seed": self.seed,
@@ -227,3 +228,27 @@ class RandomSplitter(BaseSplitter):
             group_by=config["group_by"],
             seed=config["seed"],
         )
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Return runtime (i.e. rng) state of the splitter.
+
+        Returns:
+            dict[str, Any]: Splitter state.
+
+        """
+        return {"rng_state": self.rng.bit_generator.state}
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore runtime state of the splitter.
+
+        Args:
+            state (dict[str, Any]):
+                State produced by get_state().
+
+        """
+        self.rng.bit_generator.state = state["rng_state"]

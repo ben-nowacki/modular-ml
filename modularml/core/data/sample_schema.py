@@ -82,9 +82,9 @@ class SampleSchema:
         all_keys = set(self.features.keys()) | set(self.targets.keys()) | set(self.tags.keys())
         validate_str_list(list(all_keys))
 
-    # =================================================================
+    # ================================================
     # Domain utility methods
-    # =================================================================
+    # ================================================
     def domain_keys(self, domain: str) -> list[str]:
         """
         Return the list of column names for a given domain.
@@ -166,9 +166,9 @@ class SampleSchema:
             raise KeyError(msg)
         return dom_types[key]
 
-    # =================================================================
+    # ================================================
     # Flat schema inference
-    # =================================================================
+    # ================================================
     @classmethod
     def from_table(cls, table: pa.Table) -> SampleSchema:
         """

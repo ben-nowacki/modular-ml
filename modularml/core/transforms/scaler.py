@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from modularml.core.io.protocols import Configurable, Stateful
-from modularml.core.transforms.registry import SCALER_REGISTRY
 
 if TYPE_CHECKING:
     import numpy as np
@@ -35,6 +34,7 @@ class Scaler(Configurable, Stateful):
         """
         # Ensure all items in registry are imported
         import modularml.preprocessing  # noqa: F401
+        from modularml.core.transforms.registry import SCALER_REGISTRY
 
         # Case 1: scaler given by name
         if isinstance(scaler, str):
@@ -149,6 +149,7 @@ class Scaler(Configurable, Stateful):
         """
         # Ensure all scalers are registered
         import modularml.preprocessing  # noqa: F401
+        from modularml.core.transforms.registry import SCALER_REGISTRY
 
         return SCALER_REGISTRY
 

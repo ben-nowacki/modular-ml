@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
-from modularml.core.io.protocols import Configurable
+from modularml.core.io.protocols import Configurable, Stateful
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from modularml.core.data.featureset_view import FeatureSetView
 
 
-class BaseSplitter(Configurable, ABC):
+class BaseSplitter(Configurable, Stateful, ABC):
     """
     Abstract base class for algorithms that derive FeatureSetViews from a FeatureSet.
 
@@ -145,6 +145,36 @@ class BaseSplitter(Configurable, ABC):
 
         Returns:
             BaseSplitter: Unfitted splitter instance.
+
+        """
+        from modularml.core.splitting.registry import SPLITTER_REGISTRY
+
+        if "splitter_name" not in config:
+            msg = "Splitter config must store 'splitter_name' if using BaseSplitter to instantiate."
+            raise KeyError(msg)
+        splitter_cls = SPLITTER_REGISTRY.get(config["splitter_name"])
+        return splitter_cls.from_config(config)
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Return runtime (i.e. rng) state of the splitter.
+
+        Returns:
+            dict[str, Any]: Splitter state.
+
+        """
+        raise NotImplementedError
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore runtime state of the splitter.
+
+        Args:
+            state (dict[str, Any]):
+                State produced by get_state().
 
         """
         raise NotImplementedError

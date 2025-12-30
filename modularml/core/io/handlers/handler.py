@@ -312,10 +312,8 @@ class TypeHandler(Generic[T]):
         config = obj.get_config()
 
         # Save config to file
-        with (Path(save_dir) / config_rel_path).open("w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, sort_keys=True)
-
-        return {"config": config_rel_path}
+        path = self._write_json(config, Path(save_dir) / config_rel_path)
+        return {"config": path.name}
 
     def _decode_config_json(
         self,
@@ -348,9 +346,20 @@ class TypeHandler(Generic[T]):
             raise FileNotFoundError(msg)
 
         # Read config
-        with file_config.open("r", encoding="utf-8") as f:
-            config = json.load(f)
+        config = self._read_json(file_config)
+        return config
 
+    def _write_json(self, data: dict[str, Any], save_path: Path) -> Path:
+        """Saves `data` to `path` as json."""
+        path = Path(save_path).with_suffix(".json")
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, sort_keys=True)
+        return path
+
+    def _read_json(self, data_path: Path) -> Any:
+        """Reads `data` from `data_path` as json."""
+        with Path(data_path).open("r", encoding="utf-8") as f:
+            config = json.load(f)
         return config
 
     # ================================================

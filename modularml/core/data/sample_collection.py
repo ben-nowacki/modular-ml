@@ -220,7 +220,7 @@ class SampleCollection:
 
     def __eq__(self, other):
         if not isinstance(other, SampleCollection):
-            msg = f"Cannot compare equality between FeatureSet and {type(other)}"
+            msg = f"Cannot compare equality between SampleCollection and {type(other)}"
             raise TypeError(msg)
 
         return self.table.equals(other.table)
@@ -1386,7 +1386,7 @@ class SampleCollection:
         reshaped_data = {k: list(v) for k, v in self.to_dict().items()}
         return pd.DataFrame(reshaped_data)
 
-    def save(self, path: str | Path) -> None:
+    def save(self, path: str | Path) -> Path:
         """
         Save SampleCollection to a single file using Arrow IPC (Feather v2).
 
@@ -1398,12 +1398,16 @@ class SampleCollection:
         Args:
             path (str | Path): Destination file path (e.g., "dataset.arrow").
 
+        Returns:
+            Path: Where collection was saved.
+
         """
         path = Path(path).with_suffix(".arrow")
         with pa.OSFile(str(path), "wb") as sink:
             writer = pa.ipc.new_file(sink, self.table.schema)
             writer.write(self.table)
             writer.close()
+        return path
 
     @classmethod
     def load(cls, path: str | Path) -> SampleCollection:

@@ -134,6 +134,7 @@ class ConditionSplitter(BaseSplitter):
 
         """
         return {
+            "splitter_name": "ConditionSplitter",
             "conditions": self.conditions,
         }
 

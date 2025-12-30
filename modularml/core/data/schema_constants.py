@@ -44,6 +44,3 @@ T_ALL_REPS = Literal[
 # Label / naming rules
 # ======================================================
 INVALID_LABEL_CHARACTERS: Final[set[str]] = {".", " ", "/", "\\", ":"}
-
-MML_FILE_VERSION = "1.0"
-MML_EXTENSION = ".mml"

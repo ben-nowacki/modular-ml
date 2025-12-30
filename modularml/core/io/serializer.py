@@ -191,6 +191,8 @@ class Serializer:
             Any: Reconstructed object.
 
         """
+        import modularml.preprocessing  # noqa: F401
+
         path: Path = Path(path)
         if not path.exists():
             raise FileNotFoundError(path)

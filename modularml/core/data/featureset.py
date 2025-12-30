@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import copy
 import warnings
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -18,6 +18,8 @@ from modularml.core.data.schema_constants import (
     REP_RAW,
     REP_TRANSFORMED,
 )
+from modularml.core.io.protocols import Configurable, Stateful
+from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.splitting.split_mixin import SplitMixin, SplitterRecord
 from modularml.core.topology.graph_node import GraphNode
@@ -26,10 +28,9 @@ from modularml.core.transforms.scaler_record import ScalerRecord
 from modularml.utils.data.conversion import flatten_to_2d, to_numpy, unflatten_from_2d
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list
-from modularml.utils.data.pyarrow_data import build_sample_schema_table, resolve_column_selectors
+from modularml.utils.data.pyarrow_data import build_sample_schema_table, hash_pyarrow_table, resolve_column_selectors
 from modularml.utils.errors.exceptions import SplitOverlapWarning
-from modularml.utils.representation.summary import format_summary_box
-from modularml.utils.serialization.serializable_mixin import SerializableMixin, register_serializable
+from modularml.utils.io.cloning import clone_via_serialization
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_schema import SampleSchema
 
 
-class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin):
+class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Stateful):
     """
     Unified FeatureSet backed by a single SampleCollection.
 
@@ -55,11 +56,11 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
         label: str,
         table: pa.Table,
         schema: SampleSchema | None = None,
+        **kwargs,
     ):
         super().__init__(
             label=label,
-            upstream_refs=None,
-            downstream_refs=None,
+            **kwargs,
         )
 
         # Create SampleCollection attribute
@@ -67,10 +68,10 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
 
         # Store splits & spliiter configs
         self._splits: dict[str, FeatureSetView] = {}
-        self._split_configs: list[SplitterRecord] = []
+        self._split_recs: list[SplitterRecord] = []
 
         # Store scaler logs/configs
-        self._scaler_logs: list[ScalerRecord] = []
+        self._scaler_recs: list[ScalerRecord] = []
 
     @classmethod
     def from_dict(
@@ -263,19 +264,43 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
         if not isinstance(other, FeatureSet):
             msg = f"Cannot compare equality between FeatureSet and {type(other)}"
             raise TypeError(msg)
-        return (
-            self.label == other.label
-            and self.collection == other.collection
-            # and self._splits == other._splits  # don't need to comapre views, just configs
-            and self._split_configs == other._split_configs
-            and self._scaler_logs == other._scaler_logs
-        )
+
+        # Compare collection
+        if self.collection != other.collection:
+            return False
+
+        # Compare splits
+        if set(self.available_splits) != set(other.available_splits):
+            return False
+        for k in self.available_splits:
+            s_split = self.get_split(k)
+            o_split = other.get_split(k)
+            if set(s_split.indices) != set(o_split.indices):
+                return False
+            if set(s_split.columns) != set(o_split.columns):
+                return False
+
+        # Compare splitter configs
+        if len(self._split_recs) != len(other._split_recs):
+            return False
+        for i in range(len(self._split_recs)):
+            if self._split_recs[i].get_config() != other._split_recs[i].get_config():
+                return False
+
+        # Compare scaler configs
+        if len(self._scaler_recs) != len(other._scaler_recs):
+            return False
+        for i in range(len(self._scaler_recs)):
+            if self._scaler_recs[i].get_config() != other._scaler_recs[i].get_config():
+                return False
+
+        return True
 
     __hash__ = None
 
-    # ==========================================
+    # ================================================
     # GraphNode
-    # ==========================================
+    # ================================================
     @property
     def allows_upstream_connections(self) -> bool:
         """FeatureSets do not allow input (upstream) connections."""
@@ -286,17 +311,17 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
         """FeatureSets do allow output (downstream) connections."""
         return True
 
-    # ============================================
+    # ================================================
     # SampleCollectionMixin
-    # ============================================
+    # ================================================
     def _resolve_caller_attributes(
         self,
     ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None]:
         return (self.collection, None, None)
 
-    # ============================================
+    # ================================================
     # FeatureSet Properties & Dunders
-    # ============================================
+    # ================================================
     def __len__(self) -> int:
         return self.n_samples
 
@@ -310,8 +335,8 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
     def __str__(self):
         return self.__repr__()
 
-    def summary(self, max_width: int = 88) -> str:
-        rows = [
+    def _summary_rows(self) -> list[tuple]:
+        return [
             ("label", self.label),
             ("n_samples", self.n_samples),
             (
@@ -323,15 +348,9 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
                 ],
             ),
             ("splits", [(name, len(self._splits[name])) for name in self.available_splits]),
-            # ("transforms", [(f"{rec.domain}", ", ".join(rec.keys)) for rec in self._scaler_logs]),
+            # ("transforms", [(f"{rec.domain}", ", ".join(rec.keys)) for rec in self._scaler_recs]),
             # ("node_id", self.node_id),
         ]
-
-        return format_summary_box(
-            title=self.__class__.__name__,
-            rows=rows,
-            max_width=max_width,
-        )
 
     def to_view(self) -> FeatureSetView:
         """
@@ -352,15 +371,15 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
 
     @property
     def splits(self) -> dict[str, FeatureSetView]:
-        return self._splits
+        return {k: self.get_split(k) for k in self.available_splits}
 
     @property
     def n_splits(self) -> int:
         return len(self._splits)
 
-    # ============================================
+    # ================================================
     # Split Utilities
-    # ============================================
+    # ================================================
     # Most splitting logic is handled in the SplitterMixin class
     @property
     def available_splits(self) -> list[str]:
@@ -451,11 +470,28 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
     def clear_splits(self) -> None:
         """Removes all previously defined splits."""
         self._splits.clear()
-        self._split_configs.clear()
+        self._split_recs.clear()
 
-    # ============================================
+    # ================================================
     # Transform/Scaling
-    # ============================================
+    # ================================================
+    def _cleanup_transformed_rep_if_unused(self) -> None:
+        """Remove REP_TRANSFORMED from the SampleCollection for any columns with no scalers."""
+        # Get columns that are not used in any scalers
+        # They should not have a ".transformed" representation
+        all_cols = self.get_all_keys(include_domain_prefix=True, include_rep_suffix=False)
+        all_cols.remove(DOMAIN_SAMPLE_ID)
+        used_cols: list[str] = []
+        for rec in self._scaler_recs:
+            for k in rec.keys:
+                used_cols.append(f"{rec.domain}.{k}")
+
+        unused_cols = set(all_cols).difference(set(used_cols))
+        for col in unused_cols:
+            d, k = col.split(".")
+            if REP_TRANSFORMED in self.collection._get_rep_keys(domain=d, key=k):
+                self.collection.delete_rep(domain=d, key=k, rep=REP_TRANSFORMED)
+
     def _get_flat_data(
         self,
         domain: str,
@@ -506,6 +542,7 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
     def fit_transform(
         self,
         scaler: Scaler | Any,
+        *,
         domain: str,
         keys: str | list[str] | None = None,
         fit_to_split: str | None = None,
@@ -565,7 +602,7 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
 
         # Find common representation
         rep_to_use = REP_RAW
-        if self._scaler_logs:
+        if self._scaler_recs:
             has_transformed_rep = True
             for k in keys:
                 existing_vars = self.collection._get_rep_keys(domain=domain, key=k)
@@ -610,19 +647,26 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
             )
 
         # Record this scaler configuration
-        self._scaler_logs.append(
-            ScalerRecord(
-                order=len(self._scaler_logs),
-                domain=domain,
-                keys=keys,
-                rep_in=rep_to_use,
-                rep_out=REP_TRANSFORMED,
-                fit_split=fit_to_split,
-                merged_axes=merged_axes,
-                flatten_meta=x_all_meta,
-                scaler_object=copy.deepcopy(scaler),
-            ),
+        # Scaler is cloned to prevent user from modifying state outside of ModularML
+        cloned_scaler: Scaler = clone_via_serialization(
+            obj=scaler,
+            policy=SerializationPolicy.BUILTIN,
+            builtin_key="Scaler",
         )
+        cloned_scaler.fit(x_fit)
+        _ = cloned_scaler.transform(x_all)
+        rec = ScalerRecord(
+            order=len(self._scaler_recs),
+            domain=domain,
+            keys=keys,
+            rep_in=rep_to_use,
+            rep_out=REP_TRANSFORMED,
+            fit_split=fit_to_split,
+            merged_axes=merged_axes,
+            flatten_meta=x_all_meta,
+            scaler_obj=cloned_scaler,
+        )
+        self._scaler_recs.append(rec)
 
     def undo_last_transform(
         self,
@@ -692,7 +736,7 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
         #   b. scalers including the specified domain + keys (`last_incl`)
         # If (a) is not more recent than or equal to (b), the transform cannot be undone
         last_exact, last_incl = None, None
-        for record in reversed(self._scaler_logs):
+        for record in reversed(self._scaler_recs):
             if record.domain == domain:
                 # If record matches specified domain + keys exactly (order doesn't matter)
                 if last_exact is None and set(record.keys) == set(keys):
@@ -739,8 +783,8 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
             raise ValueError(msg)
 
         # Inverse data and reshape
-        x_inv_flat = last_exact.scaler_object.inverse_transform(x_flat)
-        x_inv = unflatten_from_2d(flat=x_inv_flat, meta=x_flat_meta)
+        x_inv_flat = last_exact.scaler_obj.inverse_transform(x_flat)
+        x_inv = unflatten_from_2d(flat=x_inv_flat, meta=x_flat_meta) if x_flat_meta else x_inv_flat
 
         # Store this data back into collection table
         for k_idx, k in enumerate(last_exact.keys):
@@ -753,15 +797,23 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
             )
 
         # Delete record from logs
-        if self._scaler_logs[last_exact.order] != last_exact:
-            raise ValueError("The record to be deleted is out of order. Check `_scaler_logs`")
+        if self._scaler_recs[last_exact.order] != last_exact:
+            raise ValueError("The record to be deleted is out of order. Check `_scaler_recs`")
 
         # Update other records to their new positions
-        for x in self._scaler_logs[last_exact.order + 1 :]:
-            x.order -= 1
+        new_recs = []
+        for i in range(len(self._scaler_recs)):
+            if i > last_exact.order:
+                new_recs.append(replace(self._scaler_recs[i], order=self._scaler_recs[i].order - 1))
+            else:
+                new_recs.append(self._scaler_recs[i])
 
         # Delete record
-        last_exact = self._scaler_logs.pop(last_exact.order)
+        last_exact = new_recs.pop(last_exact.order)
+        self._scaler_recs = new_recs
+
+        # Clean up collection
+        self._cleanup_transformed_rep_if_unused()
 
     def undo_all_transforms(
         self,
@@ -793,29 +845,29 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
                 - For any other underlying error encountered by `undo_last_transform()`.
 
         """
-        try:
-            domains = [domain] if domain is not None else [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]
-            for d in domains:
+        domains = [domain] if domain is not None else [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]
+        for d in domains:
+            try:
                 while True:
                     self.undo_last_transform(domain=d, keys=keys)
-        except ValueError as e:
-            msg = str(e)
+            except ValueError as e:  # noqa: PERF203
+                msg = str(e)
 
-            # Case: “There are no Scalers to undo.”
-            if "no scalers to undo" in msg.lower():
-                return  # All transforms successfully undone
+                # Case: “There are no Scalers to undo.”
+                if "no scalers to undo" in msg.lower():
+                    continue  # All transforms successfully undone
 
-            # Case: dependency violation (“cannot be undone… depends on it”)
-            if "cannot be undone" in msg.lower():
-                msg = f"Stopped early. Cannot undo all transforms for: {domain}.{keys}. Reason: {msg}"
-                raise ValueError(msg) from e
+                # Case: dependency violation (“cannot be undone… depends on it”)
+                if "cannot be undone" in msg.lower():
+                    msg = f"Stopped early. Cannot undo all transforms for: {domain}.{keys}. Reason: {msg}"
+                    raise ValueError(msg) from e
 
-            # Any other ValueError is unexpected -> re-raise
-            raise
+                # Any other ValueError is unexpected -> re-raise
+                raise
 
-    # ============================================
+    # ================================================
     # Referencing
-    # ============================================
+    # ================================================
     def reference(
         self,
         columns: list[str] | None = None,
@@ -894,98 +946,68 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, SerializableMixin
             tags=tuple(selected[DOMAIN_TAGS]),
         )
 
-    # ============================================
-    # Serialization
-    # ============================================
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """Structural configuration of the FeatureSet and parents."""
+        config = super().get_config()
+        return config
+
+    @classmethod
+    def from_config(cls, config: dict) -> FeatureSet:
+        """Instantiates a FeatureSet with the schema specified in config."""
+        empty_table = pa.table({})
+        return cls(table=empty_table, **config)
+
+    # ================================================
+    # Stateful
+    # ================================================
     def get_state(self) -> dict[str, Any]:
-        """
-        Serialize this FeatureSet into a fully reconstructable Python dictionary.
-
-        Includes:
-            - parent state
-            - collection.table
-            - collection.schema
-            - split configs (SplitterRecord)
-            - scaler logs (ScalerRecord)
-
-        Notes:
-            - FeatureSetViews are *not* serialized directly (they are views),
-              only their SplitterRecord configs are serialized.
-
-        """
-        # Copy PyArrow table
-        copied_table = pa.Table.from_pandas(self.collection.table.to_pandas())
-
-        # Get parent state (ExperimentNode) --> very important for node_id serialization
-        state = super().get_state()
-
-        # Update with local FeatureSet attributes
-        state.update(
-            {
-                "_target": f"{self.__class__.__module__}.{self.__class__.__qualname__}",
-                "table": copied_table,
-                "schema": self.collection.schema,
-                "split_configs": [rec.get_state() for rec in self._split_configs],
-                "scaler_logs": [rec.get_state() for rec in self._scaler_logs],
-            },
-        )
-        return state
+        """Runtime state (i.e., PyArrow table and records) of the FeatureSet."""
+        return {
+            "sample_collection": self.collection,
+            "table_hash": hash_pyarrow_table(self.collection.table),
+            "splits": {k: self.get_split(k) for k in self.available_splits},
+            "splitter_records": self._split_recs,
+            "scaler_records": self._scaler_recs,
+        }
 
     def set_state(self, state: dict[str, Any]):
-        """
-        Restore this FeatureSet in-place from serialized state.
+        """Restore FeatureSet from semantic state."""
+        from modularml.core.data.featureset_view import FeatureSetView
 
-        Used internally by ModelGraph cloning logic.
-        """
-        from modularml.core.splitting.base_splitter import BaseSplitter
-        from modularml.core.splitting.split_mixin import SplitterRecord
-        from modularml.core.transforms.scaler_record import ScalerRecord
-
-        # Set parent state first
-        super().set_state(state=state)
-
-        # Restore sample collection
+        # Clone sample collection (to prevent shared mutation)
+        state_coll: SampleCollection = state["sample_collection"]
         self.collection = SampleCollection(
-            table=state["table"],
-            schema=state["schema"],
+            table=pa.Table.from_pandas(state_coll.table.to_pandas()),
+            schema=state_coll.schema,
         )
-        # Remove any residual transformed representations (we fully rebuild from raw rep)
-        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
-            for k in self.collection._get_domain_keys(
-                domain=domain,
-                include_domain_prefix=False,
-                include_rep_suffix=False,
-            ):
-                if REP_TRANSFORMED in self.collection._get_rep_keys(domain=domain, key=k):
-                    self.collection.delete_rep(domain=domain, key=k, rep=REP_TRANSFORMED)
 
-        # Restore splits
-        self._splits = {}
-        self._split_configs = []
-        self._scaler_logs = []
+        # PyArrow table integrity check
+        expected = state.get("table_hash")
+        if expected is not None:
+            actual = hash_pyarrow_table(self.collection.table)
+            if actual != expected:
+                msg = f"Arrow table integrity check failed: {actual} != {expected}"
+                raise ValueError(msg)
 
-        split_records = [SplitterRecord.from_state(cfg) for cfg in state["split_configs"]]
-        for rec in split_records:
-            # Recreate the split
-            src = self
-            if rec.applied_to.split is not None:
-                src = self.get_split(rec.applied_to.split)
-
-            splitter = BaseSplitter.from_state(rec.splitter_state)
-            src.split(splitter=splitter, register=True, return_views=False)
-
-        # Restore transforms in order
-        scaler_records = [
-            ScalerRecord.from_state(cfg) for cfg in sorted(state["scaler_logs"], key=lambda x: x["order"])
-        ]
-        for rec in scaler_records:
-            self.fit_transform(
-                scaler=rec.scaler_object,
-                domain=rec.domain,
-                keys=rec.keys,
-                fit_to_split=rec.fit_split,
-                merged_axes=rec.merged_axes,
+        # Restore splits (copy all instances)
+        state_splits: dict[str, FeatureSetView] = state["splits"]
+        self._splits = {
+            k: FeatureSetView(
+                source=self,
+                indices=fsv.indices,
+                columns=fsv.columns,
+                label=fsv.label,
             )
+            for k, fsv in state_splits.items()
+        }
 
+        # TODO: splitter and scaler instances are not copied here
+        # This may result in accidental mutation
+        # Restore split records (copy all instances)
+        self._split_recs = state["splitter_records"]
 
-register_serializable(FeatureSet.__name__, kind="fs")
+        # Restore scalers
+        self._scaler_recs = state["scaler_records"]
