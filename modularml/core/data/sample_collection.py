@@ -4,6 +4,7 @@ import ast
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -28,6 +29,10 @@ from modularml.utils.data.conversion import convert_dict_to_format, convert_to_f
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.data.pyarrow_data import (
+    _ensure_domain_prefix,
+    _ensure_rep_suffix,
+    _remove_domain_prefix,
+    _remove_rep_suffix,
     get_dtype_of_pyarrow_array,
     get_shape_of_pyarrow_array,
     numpy_to_sample_schema_column,
@@ -73,9 +78,9 @@ class SampleCollection:
     table: pa.Table
     schema: SampleSchema | None = None
 
-    # ============================================
+    # ================================================
     # Initialization
-    # ============================================
+    # ================================================
     def __post_init__(self):
         """
         Finalize initialization and validate internal consistency.
@@ -227,9 +232,9 @@ class SampleCollection:
 
     __hash__ = None
 
-    # ============================================
+    # ================================================
     # Helpers
-    # ============================================
+    # ================================================
     def _format_col_str(
         self,
         *,
@@ -620,9 +625,9 @@ class SampleCollection:
         np_arr = stack_nested_numpy(data, shape)
         return convert_to_format(np_arr, fmt=fmt)
 
-    # ============================================
+    # ================================================
     # Core properties
-    # ============================================
+    # ================================================
     @property
     def table_version(self) -> str | None:
         """
@@ -650,9 +655,9 @@ class SampleCollection:
         """Return True if tags domain exists and is non-empty."""
         return len(self.get_tag_keys()) > 0
 
-    # ============================================
+    # ================================================
     # Column name accessors
-    # ============================================
+    # ================================================
     def get_feature_keys(
         self,
         *,
@@ -780,9 +785,9 @@ class SampleCollection:
 
         return keys
 
-    # ============================================
+    # ================================================
     # Column shape accessors
-    # ============================================
+    # ================================================
     def get_feature_shapes(
         self,
         *,
@@ -882,9 +887,9 @@ class SampleCollection:
             include_domain_prefix=include_domain_prefix,
         )
 
-    # ============================================
+    # ================================================
     # Column data-type accessors
-    # ============================================
+    # ================================================
     def get_feature_dtypes(
         self,
         *,
@@ -978,9 +983,77 @@ class SampleCollection:
             include_domain_prefix=include_domain_prefix,
         )
 
-    # ============================================
+    # ================================================
     # Domain data accessors
-    # ============================================
+    # ================================================
+    def get_columns(
+        self,
+        *,
+        columns: list[str],
+        fmt: DataFormat = DataFormat.DICT_NUMPY,
+        include_domain_prefix: bool = True,
+        include_rep_suffix: bool = True,
+    ) -> Any:
+        """
+        Retrieve column data in a chosen format.
+
+        Args:
+            columns (str | list[str] | None):
+                Fully-qualified column names to include
+                (e.g. "features.voltage.raw"). These must exactly match existing
+                columns in this collection.
+
+            fmt (DataFormat):
+                Desired output format (see :class:`DataFormat`).
+                Defaults to a single dictionary of numpy arrays.
+
+            include_domain_prefix (bool):
+                Whether to include domain prefixes (e.g., "tags").
+                Automatically included if multiple domains are included in the
+                selected columns. Defaults to True.
+
+            include_rep_suffix (bool):
+                Whether to include representation suffixes (e.g., "raw").
+                Automatically included if multiple representations are included in
+                the selected columns. Defaults to True.
+
+        """
+        # Enforce domain/rep in naming if more than 1 in selected columns
+        all_ds = []
+        all_rs = []
+        for col in columns:
+            domain, _, rep = col.split(".", maxsplit=2)
+            all_ds.append(domain)
+            all_rs.append(rep)
+        if len(set(all_ds)) > 1:
+            include_domain_prefix = True
+        if len(set(all_rs)) > 1:
+            include_rep_suffix = True
+
+        data = {}
+        for col in columns:
+            if col == DOMAIN_SAMPLE_ID:
+                data[col] = self.get_sample_uuids(fmt=DataFormat.NUMPY)
+                continue
+
+            domain, key, rep = col.split(".", maxsplit=2)
+            col_key = (
+                _ensure_domain_prefix(col, domain) if include_domain_prefix else _remove_domain_prefix(col, domain)
+            )
+            col_key = _ensure_rep_suffix(col_key, rep) if include_rep_suffix else _remove_rep_suffix(col_key, rep)
+
+            data[col_key] = self._get_rep_data(
+                domain=domain,
+                key=key,
+                rep=rep,
+                fmt=DataFormat.NUMPY,
+            )
+
+        if fmt == DataFormat.DICT_NUMPY:
+            return data
+
+        return convert_dict_to_format(data, fmt=fmt, mode="stack", axis=1)
+
     def get_features(
         self,
         fmt: DataFormat = DataFormat.DICT_NUMPY,
@@ -1136,9 +1209,9 @@ class SampleCollection:
         np_arr = stack_nested_numpy(data, (1,))
         return convert_to_format(np_arr, fmt=fmt)
 
-    # ============================================
-    # Controllled Mutation
-    # ============================================
+    # ================================================
+    # Controlled Mutation
+    # ================================================
     # PyArrow tables are immutable, meaning any changes require a full
     # rebuild. This should be done very sparingly.
     # Current rules are:
@@ -1309,9 +1382,9 @@ class SampleCollection:
             del meta[k]
         self.table = self.table.replace_schema_metadata(meta)
 
-    # ============================================
+    # ================================================
     # Export / conversion
-    # ============================================
+    # ================================================
     def select(
         self,
         columns: str | list[str],

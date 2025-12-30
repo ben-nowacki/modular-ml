@@ -503,10 +503,11 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         """Returns new 2D array and metadata of flattening process."""
         # Get data specified by domain + keys + representation
         source = self if split is None else self.get_split(split_name=split)
-        data = source._get_domain(
-            domain=domain,
+        cols = [f"{domain}.{k}.{rep}" for k in keys]
+
+        data = source.get_data(
+            columns=cols,
             fmt=DataFormat.NUMPY,
-            keys=keys,
             rep=rep,
             include_domain_prefix=True,
             include_rep_suffix=True,

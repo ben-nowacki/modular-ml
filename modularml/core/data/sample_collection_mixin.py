@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 
@@ -10,9 +10,9 @@ from modularml.core.data.schema_constants import (
     DOMAIN_SAMPLE_ID,
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
-    REP_RAW,
 )
 from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.pyarrow_data import resolve_column_selectors
 
 if TYPE_CHECKING:
     import numpy as np
@@ -70,7 +70,7 @@ class SampleCollectionMixin:
     # ================================================
     # Key accessors
     # ================================================
-    def get_feature_keys(self, *, include_rep_suffix=False, include_domain_prefix=False):
+    def get_feature_keys(self, *, include_rep_suffix=True, include_domain_prefix=True):
         """
         Retrieves the feature column names.
 
@@ -95,7 +95,7 @@ class SampleCollectionMixin:
             include_domain_prefix=include_domain_prefix,
         )
 
-    def get_target_keys(self, *, include_rep_suffix=False, include_domain_prefix=False):
+    def get_target_keys(self, *, include_rep_suffix=True, include_domain_prefix=True):
         """
         Retrieves the target column names.
 
@@ -120,7 +120,7 @@ class SampleCollectionMixin:
             include_domain_prefix=include_domain_prefix,
         )
 
-    def get_tag_keys(self, *, include_rep_suffix=False, include_domain_prefix=False):
+    def get_tag_keys(self, *, include_rep_suffix=True, include_domain_prefix=True):
         """
         Retrieves the tag column names.
 
@@ -335,154 +335,284 @@ class SampleCollectionMixin:
     # ================================================
     # Domain data access
     # ================================================
-    def _get_domain(
+    def get_data(
         self,
-        domain: str,
         *,
-        fmt: DataFormat,
-        keys=None,
-        rep=REP_RAW,
-        include_rep_suffix=True,
-        include_domain_prefix=True,
-    ):
+        columns: str | list[str] | None = None,
+        features: str | list[str] | None = None,
+        targets: str | list[str] | None = None,
+        tags: str | list[str] | None = None,
+        rep: str | None = None,
+        fmt: DataFormat = DataFormat.DICT_NUMPY,
+        include_domain_prefix: bool = True,
+        include_rep_suffix: bool = True,
+    ) -> Any:
+        """
+        Retrieves a subset of data from this FeatureSet/View.
+
+        Description:
+            Data selection is performed via column-wise filtering and returned
+            in the format specified by `fmt`.
+
+            Selection supports:
+                - Explicit fully-qualified columns (e.g. "features.voltage.raw")
+                - Domain-based selectors via `features`, `targets`, and `tags`
+                - Wildcards (e.g. "*.raw", "voltage.*", "*.*")
+                - Automatic domain prefixing ("voltage.raw" -> "features.voltage.raw")
+                - Optional default representation inference via `rep`
+
+            If multiple columns are selected, and a non-keyed data formed is used,
+            the columns are stacked in the following order:
+                - Domain sorted with: features -> targets -> tags -> sample_id
+                - Within each domain, columns are sorted alphabetically.
+
+        Args:
+            columns (str | list[str] | None):
+                Fully-qualified column names to include
+                (e.g. "features.voltage.raw"). These must exactly match existing
+                columns in the FeatureSet.
+
+            features (str | list[str] | None):
+                Feature-domain selectors. May be bare keys ("voltage"),
+                key/rep pairs ("voltage.raw"), or wildcards.
+                The "features." prefix may be omitted.
+
+            targets (str | list[str] | None):
+                Target-domain selectors, following the same rules as `features`.
+
+            tags (str | list[str] | None):
+                Tag-domain selectors, following the same rules as `features`.
+
+            rep (str | None):
+                Default representation suffix to apply when a selector omits a
+                representation. Explicit representations are never overridden.
+
+            fmt (DataFormat, optional):
+                The format of the returned data. Defaults to a dict of numpy arrays
+                (i.e., each key corresponds to a single column).
+
+            include_domain_prefix (bool):
+                Whether to include domain prefixes (e.g., "tags").
+                Automatically included if multiple domains are included in the
+                selected columns. Defaults to False.
+
+            include_rep_suffix (bool):
+                Whether to include representation suffixes (e.g., "raw").
+                Automatically included if multiple representations are included in
+                the selected columns. Defaults to True.
+
+        Returns:
+            Data from the specified columns, in the request DataFormat.
+
+        """
         collection = self._resolve_collection()
-        data = collection._get_domain_data(
-            domain=domain,
-            fmt=fmt,
-            keys=keys,
-            rep=rep,
-            include_rep_suffix=include_rep_suffix,
-            include_domain_prefix=include_domain_prefix,
+
+        # Extract real columns from collection
+        all_cols: list[str] = collection.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
         )
-        return data
+
+        # Build final column selection (organized by domain)
+        selected: dict[str, set[str]] = resolve_column_selectors(
+            all_columns=all_cols,
+            columns=columns,
+            features=features,
+            targets=targets,
+            tags=tags,
+            rep=rep,
+            include_all_if_empty=False,
+        )
+
+        # Order and flatten columns: features -> targets -> tags
+        sel_cols: list[str] = []
+        for d in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_ID]:
+            if d in selected:
+                sel_cols.extend(sorted(selected[d]))
+
+        # Delegate actual data extraction
+        return collection.get_columns(
+            columns=sel_cols,
+            fmt=fmt,
+            include_domain_prefix=include_domain_prefix,
+            include_rep_suffix=include_rep_suffix,
+        )
 
     def get_features(
         self,
         fmt: DataFormat = DataFormat.DICT_NUMPY,
         *,
-        keys: str | list[str] | None = None,
-        rep: str | None = REP_RAW,
-        include_rep_suffix: bool = False,
+        features: str | list[str] | None = None,
+        rep: str | None = None,
         include_domain_prefix: bool = False,
+        include_rep_suffix: bool = False,
     ):
         """
-        Retrieve feature data in a chosen format.
+        Retrieves a subset of feature data from this FeatureSet/View.
+
+        Description:
+            Data selection is performed via column-wise filtering and returned
+            in the format specified by `fmt`.
+
+            Selection supports:
+                - Explicit fully-qualified features (e.g. "voltage.raw")
+                - Wildcards (e.g. "*.raw", "voltage.*", "*")
+                - Optional default representation inference via `rep`
+
+            If multiple columns are selected, and a non-keyed data formed is used,
+            the columns are sorted alphabetically.
 
         Args:
-            fmt (DataFormat):
-                Desired output format (see :class:`DataFormat`).
-                Defaults to a single dictionary of numpy arrays.
-            keys (str | list[str] | None):
-                Optional subset of feature keys to return.
-                If None, all feature keys are returned. Defaults to None.
-            rep (str, optional):
-                The representation (e.g., "raw" or "transformed") of the feature keys to
-                return. If None, all representations are returned and `include_rep_suffix` is set to True.
-                If specfied, `keys` must all have matching representations. Defaults to REP_RAW.
-            include_rep_suffix (bool):
-                Whether to include the representation suffix in the
-                feature keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
+            fmt (DataFormat, optional):
+                The format of the returned data. Defaults to a dict of numpy arrays
+                (i.e., each key corresponds to a single column).
+
+            features (str | list[str] | None):
+                Feature-domain selectors. May be bare keys ("voltage"),
+                key/rep pairs ("voltage.raw"), or wildcards.
+                The "features." prefix may be omitted.
+
+            rep (str | None):
+                Default representation suffix to apply when a selector omits a
+                representation. Explicit representations are never overridden.
+
             include_domain_prefix (bool):
-                Whether to include the domain prefix in the
-                feature keys (e.g., "voltage" or "features.voltage"). Defaults to False.
+                Whether to include domain prefixes (e.g., "tags").
+                Defaults to False.
+
+            include_rep_suffix (bool):
+                Whether to include representation suffixes (e.g., "raw").
+                Automatically included if multiple representations are included in
+                the selected columns. Defaults to False.
 
         Returns:
-            Feature data in the requested format.
+            Data from the specified columns, in the request DataFormat.
 
         """
-        return self._get_domain(
-            domain=DOMAIN_FEATURES,
-            fmt=fmt,
-            keys=keys,
+        return self.get_data(
+            features=features or "*",
             rep=rep,
-            include_rep_suffix=include_rep_suffix,
+            fmt=fmt,
             include_domain_prefix=include_domain_prefix,
+            include_rep_suffix=include_rep_suffix,
         )
 
     def get_targets(
         self,
         fmt: DataFormat = DataFormat.DICT_NUMPY,
         *,
-        keys: str | list[str] | None = None,
-        rep: str | None = REP_RAW,
-        include_rep_suffix: bool = False,
+        targets: str | list[str] | None = None,
+        rep: str | None = None,
         include_domain_prefix: bool = False,
+        include_rep_suffix: bool = False,
     ):
         """
-        Retrieve target data in a chosen format.
+        Retrieves a subset of target data from this FeatureSet/View.
+
+        Description:
+            Data selection is performed via column-wise filtering and returned
+            in the format specified by `fmt`.
+
+            Selection supports:
+                - Explicit fully-qualified targets (e.g. "soh.raw")
+                - Wildcards (e.g. "*.raw", "soh.*", "*")
+                - Optional default representation inference via `rep`
+
+            If multiple columns are selected, and a non-keyed data formed is used,
+            the columns are sorted alphabetically.
 
         Args:
-            fmt (DataFormat):
-                Desired output format (see :class:`DataFormat`).
-                Defaults to a single dictionary of numpy arrays.
-            keys (str | list[str] | None):
-                Optional subset of target keys to return.
-                If None, all target keys are returned. Defaults to None.
-            rep (str, optional):
-                The representation (e.g., "raw" or "transformed") of the target keys to
-                return. If None, all representations are returned and `include_rep_suffix` is set to True.
-                If specfied, `keys` must all have matching representations. Defaults to REP_RAW.
-            include_rep_suffix (bool):
-                Whether to include the representation suffix in the
-                target keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
+            fmt (DataFormat, optional):
+                The format of the returned data. Defaults to a dict of numpy arrays
+                (i.e., each key corresponds to a single column).
+
+            targets (str | list[str] | None):
+                Feature-domain selectors. May be bare keys ("soh"),
+                key/rep pairs ("soh.raw"), or wildcards.
+                The "targets." prefix may be omitted.
+
+            rep (str | None):
+                Default representation suffix to apply when a selector omits a
+                representation. Explicit representations are never overridden.
+
             include_domain_prefix (bool):
-                Whether to include the domain prefix in the
-                target keys (e.g., "voltage" or "targets.voltage"). Defaults to False.
+                Whether to include domain prefixes (e.g., "tags").
+                Defaults to False.
+
+            include_rep_suffix (bool):
+                Whether to include representation suffixes (e.g., "raw").
+                Automatically included if multiple representations are included in
+                the selected columns. Defaults to False.
 
         Returns:
-            Feature data in the requested format.
+            Data from the specified columns, in the request DataFormat.
 
         """
-        return self._get_domain(
-            domain=DOMAIN_TARGETS,
-            fmt=fmt,
-            keys=keys,
+        return self.get_data(
+            targets=targets or "*",
             rep=rep,
-            include_rep_suffix=include_rep_suffix,
+            fmt=fmt,
             include_domain_prefix=include_domain_prefix,
+            include_rep_suffix=include_rep_suffix,
         )
 
     def get_tags(
         self,
         fmt: DataFormat = DataFormat.DICT_NUMPY,
         *,
-        keys: str | list[str] | None = None,
-        rep: str | None = REP_RAW,
-        include_rep_suffix: bool = False,
+        tags: str | list[str] | None = None,
+        rep: str | None = None,
         include_domain_prefix: bool = False,
+        include_rep_suffix: bool = False,
     ):
         """
-        Retrieve tag data in a chosen format.
+        Retrieves a subset of tag data from this FeatureSet/View.
+
+        Description:
+            Data selection is performed via column-wise filtering and returned
+            in the format specified by `fmt`.
+
+            Selection supports:
+                - Explicit fully-qualified tags (e.g. "group_id.raw")
+                - Wildcards (e.g. "*.raw", "group_id.*", "*")
+                - Optional default representation inference via `rep`
+
+            If multiple columns are selected, and a non-keyed data formed is used,
+            the columns are sorted alphabetically.
 
         Args:
-            fmt (DataFormat):
-                Desired output format (see :class:`DataFormat`).
-                Defaults to a single dictionary of numpy arrays.
-            keys (str | list[str] | None):
-                Optional subset of tag keys to return.
-                If None, all tag keys are returned. Defaults to None.
-            rep (str, optional):
-                The representation (e.g., "raw" or "transformed") of the tag keys to
-                return. If None, all representations are returned and `include_rep_suffix` is set to True.
-                If specfied, `keys` must all have matching representations. Defaults to REP_RAW.
-            include_rep_suffix (bool):
-                Whether to include the representation suffix in the
-                tag keys (e.g., "voltage" or "voltage.raw"). Defaults to False.
+            fmt (DataFormat, optional):
+                The format of the returned data. Defaults to a dict of numpy arrays
+                (i.e., each key corresponds to a single column).
+
+            tags (str | list[str] | None):
+                Feature-domain selectors. May be bare keys ("group_id"),
+                key/rep pairs ("group_id.raw"), or wildcards.
+                The "tags." prefix may be omitted.
+
+            rep (str | None):
+                Default representation suffix to apply when a selector omits a
+                representation. Explicit representations are never overridden.
+
             include_domain_prefix (bool):
-                Whether to include the domain prefix in the
-                tag keys (e.g., "voltage" or "tags.voltage"). Defaults to False.
+                Whether to include domain prefixes (e.g., "tags").
+                Defaults to False.
+
+            include_rep_suffix (bool):
+                Whether to include representation suffixes (e.g., "raw").
+                Automatically included if multiple representations are included in
+                the selected columns. Defaults to False.
 
         Returns:
-            Feature data in the requested format.
+            Data from the specified columns, in the request DataFormat.
 
         """
-        return self._get_domain(
-            domain=DOMAIN_TAGS,
-            fmt=fmt,
-            keys=keys,
+        return self.get_data(
+            tags=tags or "*",
             rep=rep,
-            include_rep_suffix=include_rep_suffix,
+            fmt=fmt,
             include_domain_prefix=include_domain_prefix,
+            include_rep_suffix=include_rep_suffix,
         )
 
     # ==========================================================
