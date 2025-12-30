@@ -8,14 +8,14 @@ from weakref import ref
 from matplotlib.pylab import Enum
 
 from modularml.core.references.reference_like import ReferenceLike
-from modularml.utils.environment import running_in_notebook
+from modularml.utils.environment.environment import running_in_notebook
 
 if TYPE_CHECKING:
     from modularml.core.experiment.experiment import Experiment
     from modularml.core.experiment.experiment_node import ExperimentNode
     from modularml.core.experiment.stage import Stage
-    from modularml.core.graph.model_graph import ModelGraph
     from modularml.core.references.data_reference import DataReference
+    from modularml.core.topology.model_graph import ModelGraph
 
 
 class RegistrationPolicy(Enum):

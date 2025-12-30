@@ -1,6 +1,6 @@
 import warnings
 from abc import ABC, abstractmethod
-from typing import Literal
+from typing import Any, Literal
 
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.experiment_node import ExperimentNode
@@ -8,7 +8,6 @@ from modularml.core.references.reference_like import ReferenceLike
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import GraphNodeInputError, GraphNodeOutputError
-from modularml.utils.representation.summary import format_summary_box
 
 
 class GraphNode(ABC, ExperimentNode):
@@ -28,6 +27,7 @@ class GraphNode(ABC, ExperimentNode):
         label: str,
         upstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
         downstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
+        **kwargs,
     ):
         """
         Initialize a GraphNode with optional upstream and downstream connections.
@@ -36,12 +36,13 @@ class GraphNode(ABC, ExperimentNode):
             label (str): Unique identifier for this node.
             upstream_refs (ReferenceLike | list[ReferenceLike] | None): References of upstream connections.
             downstream_refs (ReferenceLike | list[ReferenceLike] | None): References of downstream connections.
+            kwargs: Extra arguments to pass to super().
 
         Raises:
             TypeError: If `upstream_refs` or `downstream_refs` are not valid types.
 
         """
-        super().__init__(label=label, node_id=None, register=True)
+        super().__init__(label=label, **kwargs)
 
         # Normalize inputs as lists
         self._upstream_refs: list[ReferenceLike] = ensure_list(upstream_refs)
@@ -132,19 +133,13 @@ class GraphNode(ABC, ExperimentNode):
     # ================================================
     # Representation
     # ================================================
-    def summary(self, max_width: int = 88) -> str:
-        rows = [
+    def _summary_rows(self) -> list[tuple]:
+        return [
             ("label", self.label),
             ("upstream_refs", [f"{r!r}" for r in self._upstream_refs]),
             ("downstream_refs", [f"{r!r}" for r in self._downstream_refs]),
             ("node_id", self.node_id),
         ]
-
-        return format_summary_box(
-            title=self.__class__.__name__,
-            rows=rows,
-            max_width=max_width,
-        )
 
     def __repr__(self):
         return f"GraphNode(label='{self.label}', upstream_refs={self._upstream_refs}, downstream_refs={self._downstream_refs})"
@@ -152,9 +147,9 @@ class GraphNode(ABC, ExperimentNode):
     def __str__(self):
         return f"GraphNode('{self.label}')"
 
-    # ==========================================
+    # ================================================
     # Connection Management
-    # ==========================================
+    # ================================================
     def get_upstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE) -> list[ReferenceLike]:
         """
         Retrieve all upstream (input) references.
@@ -432,9 +427,9 @@ class GraphNode(ABC, ExperimentNode):
         for ref in downstream_refs:
             self.add_downstream_ref(ref, error_mode=error_mode)
 
-    # ==========================================
+    # ================================================
     # Abstract Methods / Properties
-    # ==========================================
+    # ================================================
     @property
     @abstractmethod
     def allows_upstream_connections(self) -> bool:
@@ -457,9 +452,9 @@ class GraphNode(ABC, ExperimentNode):
 
         """
 
-    # ==========================================
+    # ================================================
     # Internal Helpers
-    # ==========================================
+    # ================================================
     def _handle_fatal_error(self, exc_class, message: str, error_mode: ErrorMode):
         """Raise or suppress a fatal error based on the provided error mode."""
         if error_mode == ErrorMode.IGNORE:
@@ -480,3 +475,20 @@ class GraphNode(ABC, ExperimentNode):
             return False
         msg = f"Unsupported ErrorMode: {error_mode}"
         raise NotImplementedError(msg)
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        config = super().get_config()
+        config.update(
+            {
+                "upstream_refs": self._upstream_refs,
+                "downstream_refs": self._downstream_refs,
+            },
+        )
+        return config
+
+    @classmethod
+    def from_config(cls, config: dict):
+        return cls(**config)
