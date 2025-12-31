@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -19,7 +20,6 @@ from modularml.core.data.schema_constants import (
     REP_TRANSFORMED,
 )
 from modularml.core.io.protocols import Configurable, Stateful
-from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.splitting.split_mixin import SplitMixin, SplitterRecord
 from modularml.core.topology.graph_node import GraphNode
@@ -28,7 +28,11 @@ from modularml.core.transforms.scaler_record import ScalerRecord
 from modularml.utils.data.conversion import flatten_to_2d, to_numpy, unflatten_from_2d
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list
-from modularml.utils.data.pyarrow_data import build_sample_schema_table, hash_pyarrow_table, resolve_column_selectors
+from modularml.utils.data.pyarrow_data import (
+    build_sample_schema_table,
+    hash_pyarrow_table,
+    resolve_column_selectors,
+)
 from modularml.utils.errors.exceptions import SplitOverlapWarning
 from modularml.utils.io.cloning import clone_via_serialization
 
@@ -342,12 +346,24 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
             (
                 "columns",
                 [
-                    (DOMAIN_FEATURES, str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True))),
-                    (DOMAIN_TARGETS, str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True))),
-                    (DOMAIN_TAGS, str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                    (
+                        DOMAIN_FEATURES,
+                        str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TARGETS,
+                        str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TAGS,
+                        str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
                 ],
             ),
-            ("splits", [(name, len(self._splits[name])) for name in self.available_splits]),
+            (
+                "splits",
+                [(name, len(self._splits[name])) for name in self.available_splits],
+            ),
             # ("transforms", [(f"{rec.domain}", ", ".join(rec.keys)) for rec in self._scaler_recs]),
             # ("node_id", self.node_id),
         ]
@@ -649,11 +665,7 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
 
         # Record this scaler configuration
         # Scaler is cloned to prevent user from modifying state outside of ModularML
-        cloned_scaler: Scaler = clone_via_serialization(
-            obj=scaler,
-            policy=SerializationPolicy.BUILTIN,
-            builtin_key="Scaler",
-        )
+        cloned_scaler: Scaler = clone_via_serialization(obj=scaler)
         cloned_scaler.fit(x_fit)
         _ = cloned_scaler.transform(x_all)
         rec = ScalerRecord(
@@ -1012,3 +1024,56 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
 
         # Restore scalers
         self._scaler_recs = state["scaler_records"]
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this FeatureSet to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the FeatureSet is saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            builtin_key="FeatureSet",
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> FeatureSet:
+        """
+        Load a FeatureSet from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved FeatureSet.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+
+        Returns:
+            FeatureSet: The reloaded FeatureSet.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)
