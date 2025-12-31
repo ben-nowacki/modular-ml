@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from modularml.core.io.handlers.handler import LoadContext, SaveContext, TypeHandler
+from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.splitting.base_splitter import BaseSplitter
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from modularml.core.io.serializer import LoadContext, SaveContext
 
 
 class SplitterHandler(TypeHandler[BaseSplitter]):
@@ -31,19 +33,18 @@ class SplitterHandler(TypeHandler[BaseSplitter]):
         obj: BaseSplitter,
         save_dir: Path,
         *,
-        ctx: SaveContext | None = None,
+        ctx: SaveContext,
     ) -> dict[str, str | None]:
         """
         Encodes state and config to files.
 
         Args:
             obj (BaseSplitter):
-                BaseSplitter instance to encode.
+                Object instance to encode.
             save_dir (Path):
-                Parent dir to save config and state files.
+                Directory to write encodings to.
             ctx (SaveContext, optional):
                 Additional serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, str | None]: Mapping of "config" and "state" keys to saved files.
@@ -58,60 +59,48 @@ class SplitterHandler(TypeHandler[BaseSplitter]):
         obj: BaseSplitter,
         save_dir: Path,
         *,
-        ctx: SaveContext | None = None,
+        ctx: SaveContext,
     ) -> dict[str, str]:
         """
         Encodes config to a json file.
 
         Args:
             obj (BaseSplitter):
-                BaseSplitter to encode config for.
+                Object to encode config for.
             save_dir (Path):
-                Parent dir to save 'config.json' file.
+                Directory to write encodings to.
             ctx (SaveContext, optional):
                 Additional serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, str]: Mapping of config to saved json file
 
         """
-        return self._encode_config_json(
-            obj=obj,
-            save_dir=save_dir,
-            config_rel_path=self.config_rel_path,
-            ctx=ctx,
-        )
+        return super().encode_config(obj=obj, save_dir=save_dir, ctx=ctx, config_rel_path=self.config_rel_path)
 
     def encode_state(
         self,
         obj: BaseSplitter,
         save_dir: Path,
         *,
-        ctx: SaveContext | None = None,
+        ctx: SaveContext,
     ) -> dict[str, str]:
         """
-        Encodes BaseSplitter state to a pickle file.
+        Encodes object state to a pickle file.
 
         Args:
             obj (BaseSplitter):
-                BaseSplitter to encode state for.
+                Object to encode state for.
             save_dir (Path):
-                Parent dir to save 'state.pkl' file.
+                Directory to write encodings to.
             ctx (SaveContext, optional):
                 Additional serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, str]: Mapping of state to saved pkl file
 
         """
-        return self._encode_state_pickle(
-            obj=obj,
-            save_dir=save_dir,
-            state_rel_path=self.state_rel_path,
-            ctx=ctx,
-        )
+        return super().encode_state(obj=obj, save_dir=save_dir, ctx=ctx, state_rel_path=self.state_rel_path)
 
     # ================================================
     # Splitter Decoding
@@ -119,89 +108,78 @@ class SplitterHandler(TypeHandler[BaseSplitter]):
     def decode(
         self,
         cls: type[BaseSplitter],
-        parent_dir: Path,
+        load_dir: Path,
         *,
-        ctx: LoadContext | None = None,
+        ctx: LoadContext,
     ) -> BaseSplitter:
         """
-        Decodes a BaseSplitter from a saved artifact.
+        Decodes an object from a saved artifact.
 
         Description:
-            Instantiates a BaseSplitter (instantiates from config and sets state).
+            Instantiates an object (instantiates from config and sets state).
 
         Args:
             cls (type[BaseSplitter]):
-                Load config for BaseSplitter class.
-            parent_dir (Path):
-                Directory contains a saved 'config.json' file
+                Load config for class.
+            load_dir (Path):
+                Directory to decode from.
             ctx (LoadContext, optional):
                 Additional de-serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            BaseSplitter: The re-instantiated splitter.
+            BaseSplitter: The re-instantiated object.
 
         """
-        config: dict[str, Any] = self.decode_config(config_dir=parent_dir, ctx=ctx)
+        config: dict[str, Any] = self.decode_config(load_dir=load_dir, ctx=ctx)
 
         # Instantiate BaseSplitter from config
         splitter_obj = cls.from_config(config)
 
         # Set state (if defined - most don't have a state)
         if hasattr(splitter_obj, "set_state"):
-            state: dict[str, Any] = self.decode_state(state_dir=parent_dir, ctx=ctx)
+            state: dict[str, Any] = self.decode_state(load_dir=load_dir, ctx=ctx)
             splitter_obj.set_state(state=state)
 
         return splitter_obj
 
     def decode_config(
         self,
-        config_dir: Path,
+        load_dir: Path,
         *,
-        ctx: LoadContext | None = None,
-    ) -> dict[str, Any]:
+        ctx: LoadContext,
+    ) -> dict[str, Any] | None:
         """
         Decodes config from a json file.
 
         Args:
-            config_dir (Path):
-                Directory contains a saved 'config.json' file
+            load_dir (Path):
+                Directory to decode from.
             ctx (LoadContext, optional):
                 Additional de-serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            dict[str, Any]: The decoded config data.
+            dict[str, Any] | None: The decoded config data.
 
         """
-        return self._decode_config_json(
-            config_dir=config_dir,
-            config_rel_path=self.config_rel_path,
-            ctx=ctx,
-        )
+        return super().decode_config(load_dir=load_dir, ctx=ctx, config_rel_path=self.config_rel_path)
 
     def decode_state(
         self,
-        state_dir: str,
+        load_dir: Path,
         *,
-        ctx: LoadContext | None = None,
+        ctx: LoadContext,
     ) -> dict[str, Any]:
         """
         Decodes state from a pkl file.
 
         Args:
-            state_dir (Path):
-                Directory containing a saved 'state.pkl' file
+            load_dir (Path):
+                Directory to decode from.
             ctx (LoadContext, optional):
                 Additional de-serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, Any]: The decoded state data.
 
         """
-        return self._decode_state_pickle(
-            state_dir=state_dir,
-            state_rel_path=self.state_rel_path,
-            ctx=ctx,
-        )
+        return super().decode_state(load_dir=load_dir, ctx=ctx, state_rel_path=self.state_rel_path)

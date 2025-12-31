@@ -8,7 +8,7 @@ import numpy as np
 
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_TAGS, DOMAIN_TARGETS, REP_TRANSFORMED
-from modularml.core.io.handlers.handler import LoadContext, SaveContext, TypeHandler
+from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.references.data_reference import DataReference
 from modularml.utils.data.pyarrow_data import hash_pyarrow_table
@@ -16,6 +16,7 @@ from modularml.utils.data.pyarrow_data import hash_pyarrow_table
 if TYPE_CHECKING:
     from modularml.core.data.featureset_view import FeatureSetView
     from modularml.core.data.sample_collection import SampleCollection
+    from modularml.core.io.serializer import LoadContext, SaveContext
     from modularml.core.splitting.splitter_record import SplitterRecord
     from modularml.core.transforms.scaler_record import ScalerRecord
 
@@ -36,19 +37,18 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         obj: FeatureSet,
         save_dir: Path,
         *,
-        ctx: SaveContext | None = None,
+        ctx: SaveContext,
     ) -> dict[str, str | None]:
         """
-        Encodes FeatureSet to serialized files.
+        Encodes state and config to files.
 
         Args:
             obj (FeatureSet):
-                FeatureSet instance to encode.
+                Object instance to encode.
             save_dir (Path):
-                Parent dir to save config and state files.
+                Directory to write encodings to.
             ctx (SaveContext, optional):
                 Additional serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, str | None]: Mapping of "config" and "state" keys to saved files.
@@ -63,55 +63,47 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         obj: FeatureSet,
         save_dir: Path,
         *,
-        ctx: SaveContext | None = None,
+        ctx: SaveContext,
     ) -> dict[str, str]:
         """
         Encodes config to a json file.
 
         Args:
             obj (FeatureSet):
-                FeatureSet to encode config for.
+                Object to encode config for.
             save_dir (Path):
-                Parent dir to save 'config.json' file.
+                Directory to write encodings to.
             ctx (SaveContext, optional):
                 Additional serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, str]: Mapping of config to saved json file
 
         """
-        return self._encode_config_json(
-            obj=obj,
-            save_dir=save_dir,
-            config_rel_path=self.config_rel_path,
-            ctx=ctx,
-        )
+        return super().encode_config(obj=obj, save_dir=save_dir, ctx=ctx, config_rel_path=self.config_rel_path)
 
     def encode_state(
         self,
         obj: FeatureSet,
         save_dir: Path,
         *,
-        ctx: SaveContext | None = None,  # noqa: ARG002
+        ctx: SaveContext,
     ) -> dict[str, str]:
         """
-        Encodes FeatureSet state to a pickle file.
+        Encodes object state to a pickle file.
 
         Args:
             obj (FeatureSet):
-                FeatureSet to encode state for.
+                Object to encode state for.
             save_dir (Path):
-                Parent dir to save 'state.pkl' file.
+                Directory to write encodings to.
             ctx (SaveContext, optional):
                 Additional serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, str]: Mapping of state to saved pkl file
 
         """
-        from modularml.core.io.serializer import serializer
         # FeatureSet.get_state() -> set_state() works within the same runtime environment
         # To preserve underlying Scaler/Splitter classes that may be user-defined, we need
         # to separately save the Scaler/Splitter classes
@@ -188,11 +180,15 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
             # Save scaler artifact
             scaler_obj = rec.scaler_obj
             if scaler_obj is not None:
-                save_path = serializer.save(
-                    obj=scaler_obj,
-                    save_path=dir_scaler_art / scaler_name,
+                cls_spec = ctx.make_class_spec(
+                    cls=scaler_cfg_files.__class__,
                     policy=SerializationPolicy.BUILTIN,
                     builtin_key="Scaler",
+                )
+                save_path = ctx.emit_mml(
+                    obj=scaler_obj,
+                    cls_spec=cls_spec,
+                    out_path=dir_scaler_art / scaler_name,
                     overwrite=True,
                 )
                 rec_cfg["scaler_ref"] = str(save_path)[str(save_path).rindex(save_dir.name) + len(save_dir.name) + 1 :]
@@ -221,11 +217,15 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
 
             # Save splitter artifact
             if rec.splitter is not None:
-                save_path = serializer.save(
-                    obj=rec.splitter,
-                    save_path=dir_splitter_art / splitter_name,
+                cls_spec = ctx.make_class_spec(
+                    cls=rec.splitter.__class__,
                     policy=SerializationPolicy.BUILTIN,
                     builtin_key="BaseSplitter",
+                )
+                save_path = ctx.emit_mml(
+                    obj=rec.splitter,
+                    cls_spec=cls_spec,
+                    out_path=dir_splitter_art / splitter_name,
                     overwrite=True,
                 )
                 rec_cfg["splitter_ref"] = str(save_path)[
@@ -247,38 +247,37 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
     def decode(
         self,
         cls: type[FeatureSet],
-        parent_dir: Path,
+        load_dir: Path,
         *,
-        ctx: LoadContext | None = None,
+        ctx: LoadContext,
     ) -> FeatureSet:
         """
-        Decodes a FeatureSet from a saved artifact.
+        Decodes an object from a saved artifact.
 
         Description:
-            Instantiates a FeatureSet (instantiates from config and sets state).
+            Instantiates an object (instantiates from config and sets state).
 
         Args:
             cls (type[FeatureSet]):
-                Load config for FeatureSet class.
-            parent_dir (Path):
-                Directory contains a saved 'config.json' file
+                Load config for class.
+            load_dir (Path):
+                Directory to decode from.
             ctx (LoadContext, optional):
                 Additional de-serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            FeatureSet: The re-instantiated FeatureSet.
+            FeatureSet: The re-instantiated object.
 
         """
         from modularml.core.data.featureset_view import FeatureSetView
 
-        config: dict[str, Any] = self.decode_config(config_dir=parent_dir, ctx=ctx)
+        config: dict[str, Any] = self.decode_config(load_dir=load_dir, ctx=ctx)
 
         # Instantiate FeatureSet from config
         fs_obj = cls.from_config(config=config)
 
         # Extract state
-        state: dict[str, Any] = self.decode_state(parent_dir=parent_dir, ctx=ctx)
+        state: dict[str, Any] = self.decode_state(load_dir=load_dir, ctx=ctx)
 
         # Splits need to instantiated with FeatureSet reference
         split_cfgs: dict[str, Any] = state.pop("split_cfgs")
@@ -324,52 +323,45 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
 
     def decode_config(
         self,
-        config_dir: Path,
+        load_dir: Path,
         *,
-        ctx: LoadContext | None = None,
-    ) -> dict[str, Any]:
+        ctx: LoadContext,
+    ) -> dict[str, Any] | None:
         """
         Decodes config from a json file.
 
         Args:
-            config_dir (Path):
-                Directory contains a saved 'config.json' file
+            load_dir (Path):
+                Directory to decode from.
             ctx (LoadContext, optional):
                 Additional de-serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
-            dict[str, Any]: The decoded config data.
+            dict[str, Any] | None: The decoded config data.
 
         """
-        return self._decode_config_json(
-            config_dir=config_dir,
-            config_rel_path=self.config_rel_path,
-            ctx=ctx,
-        )
+        return super().decode_config(load_dir=load_dir, ctx=ctx, config_rel_path=self.config_rel_path)
 
     def decode_state(
         self,
-        parent_dir: str,
+        load_dir: Path,
         *,
-        ctx: LoadContext | None = None,  # noqa: ARG002
+        ctx: LoadContext,
     ) -> dict[str, Any]:
         """
         Decodes state from a pkl file.
 
         Args:
-            parent_dir (Path):
-                Directory containing all state-relevant files.
+            load_dir (Path):
+                Directory to decode from.
             ctx (LoadContext, optional):
                 Additional de-serialization context.
-                Strictly required for SerializationPolicy.PACKAGED.
 
         Returns:
             dict[str, Any]: The decoded state data.
 
         """
         from modularml.core.data.sample_collection import SampleCollection
-        from modularml.core.io.serializer import serializer
         from modularml.core.splitting.splitter_record import SplitterRecord
         from modularml.core.transforms.scaler_record import ScalerRecord
 
@@ -398,13 +390,13 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         #     ├── splitter_001.sc.mml
         #     └── splitter_002.sc.mml
         state: dict[str, Any] = {}
-        parent_dir = Path(parent_dir)
+        load_dir = Path(load_dir)
 
         # Extract file mapping
-        file_mapping: dict[str, Any] = self._read_json(parent_dir / "artifact.json")["files"]
+        file_mapping: dict[str, Any] = self._read_json(load_dir / "artifact.json")["files"]
 
         # Decode the SampleCollection
-        file_coll: Path = parent_dir / file_mapping["sample_collection"]
+        file_coll: Path = load_dir / file_mapping["sample_collection"]
         coll: SampleCollection = SampleCollection.load(file_coll)
         state["sample_collection"] = coll
 
@@ -412,17 +404,17 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         state["table_hash"] = hash_pyarrow_table(coll.table)
 
         # Decode splits (configs only)
-        file_split_cfgs = parent_dir / file_mapping["split_configs"]
+        file_split_cfgs = load_dir / file_mapping["split_configs"]
         split_cfgs: dict[str, dict[str, Any]] = self._read_json(file_split_cfgs)
         state["split_cfgs"] = split_cfgs
 
         # Decode splitter records
-        files_split_recs: list[Path] = [(parent_dir / "splitter_records" / x) for x in file_mapping["splitter_records"]]
+        files_split_recs: list[Path] = [(load_dir / "splitter_records" / x) for x in file_mapping["splitter_records"]]
         split_rec_cfgs: list[dict[str, Any]] = [self._read_json(x) for x in files_split_recs]
         split_recs: list[SplitterRecord] = []
         for rec_cfg in split_rec_cfgs:
-            # Instantiate splitter via serializer
-            splitter_obj = serializer.load(parent_dir / rec_cfg["splitter_ref"])
+            # Instantiate splitter via LoadContext
+            splitter_obj = ctx.load_from_mml(mml_file=load_dir / rec_cfg["splitter_ref"])
 
             # Create record
             split_recs.append(
@@ -434,12 +426,16 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         state["splitter_records"] = split_recs
 
         # Decode scaler records
-        files_scaler_recs: list[Path] = [(parent_dir / "scaler_records" / x) for x in file_mapping["scaler_records"]]
+        files_scaler_recs: list[Path] = [(load_dir / "scaler_records" / x) for x in file_mapping["scaler_records"]]
         scaler_rec_cfgs: list[dict[str, Any]] = [self._read_json(x) for x in files_scaler_recs]
         scaler_recs: list[SplitterRecord] = []
         for rec_cfg in scaler_rec_cfgs:
-            # Instantiate splitter via serializer
-            scaler_obj = serializer.load(parent_dir / rec_cfg["scaler_ref"])
+            # Instantiate scaler via LoadContext
+            scaler_obj = ctx.load_from_mml(mml_file=load_dir / rec_cfg["scaler_ref"])
+
+            # Need to remove scaler config, as we from_config
+            # will fail if scaler is not in SCALER_REGISTRY
+            _ = rec_cfg.pop("scaler_config", None)
 
             # Create record
             s_rec = ScalerRecord.from_config(rec_cfg)
