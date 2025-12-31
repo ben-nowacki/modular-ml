@@ -72,4 +72,9 @@ def default_packaged_code_loader(
         msg = f"Failed to execute bundled code: {src_path}"
         raise PackagedCodeError(msg) from exc
 
+    for obj in ns.values():
+        if isinstance(obj, type):
+            obj.__mml_source_ref__ = source_ref
+            obj.__mml_source_text__ = source
+
     return ns
