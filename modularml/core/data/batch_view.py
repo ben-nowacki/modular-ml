@@ -1,4 +1,7 @@
+from dataclasses import dataclass
+
 import numpy as np
+from numpy.typing import NDArray
 
 from modularml.core.data.batch import Batch, SampleData, SampleShapes
 from modularml.core.data.featureset import FeatureSet
@@ -7,10 +10,11 @@ from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_
 from modularml.utils.data.conversion import to_numpy
 from modularml.utils.data.data_format import DataFormat, format_is_tensorlike
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
-from modularml.utils.representation.summary import format_summary_box
+from modularml.utils.representation.summary import Summarizable
 
 
-class BatchView:
+@dataclass(frozen=True)
+class BatchView(Summarizable):
     """
     A multi-role, zero-copy grouped view over a parent FeatureSet.
 
@@ -19,26 +23,39 @@ class BatchView:
         row indices into the parent FeatureSet.
     """
 
-    def __init__(
-        self,
-        source: FeatureSet,
-        role_indices: dict[str, np.ndarray],
-        role_indice_weights: dict[str, np.ndarray] | None = None,
-    ):
+    source: FeatureSet
+    role_indices: dict[str, NDArray[np.int64]]
+    role_indice_weights: dict[str, NDArray[np.float32]] | None = None
+
+    def __post_init__(self):
         # Validate source
-        if not isinstance(source, FeatureSet):
-            msg = f"`source` must be of type FeatureSet. Received: {type(source)}"
+        if not isinstance(self.source, FeatureSet):
+            msg = f"`source` must be of type FeatureSet. Received: {type(self.source)}"
             raise TypeError(msg)
-        self.source = source
 
         # Validate indices
-        if not isinstance(role_indices, dict):
+        if not isinstance(self.role_indices, dict):
             raise TypeError("role_indices must be a dict[str, np.ndarray]")
-        self.role_indices = role_indices
-        self.role_indice_weights = role_indice_weights
-        # Ensure np arrays
-        for r, idx in self.role_indices.items():
-            self.role_indices[r] = np.asarray(idx, dtype=int)
+        np_idxs = {}
+        for r, idxs in self.role_indices.items():
+            np_idxs[r] = np.asarray(idxs, dtype=np.int64)
+        # Override frozen attributes
+        object.__setattr__(self, "role_indices", np_idxs)
+
+        # Validate weights
+        if self.role_indice_weights is not None:
+            idx_keys = set(self.role_indices.keys())
+            weight_keys = set(self.role_indice_weights.keys())
+            if idx_keys != weight_keys:
+                msg = f"Indices and weights do not have the same role keys: {idx_keys} != {weight_keys}"
+                raise ValueError(msg)
+
+            np_weights = {}
+            for k, wghts in self.role_indice_weights.items():
+                np_weights[k] = np.asarray(wghts, dtype=np.float32)
+
+            # Override frozen attributes
+            object.__setattr__(self, "role_indice_weights", np_weights)
 
     # ==========================================
     # Properties
@@ -269,15 +286,9 @@ class BatchView:
     def __str__(self):
         return self.__repr__()
 
-    def summary(self, max_width: int = 88) -> str:
-        rows = [
+    def _summary_rows(self) -> list[tuple]:
+        return [
             ("source", self.source.label),
             ("n_samples", self.n_samples),
             ("roles", [(r, "") for r in self.roles]),
         ]
-
-        return format_summary_box(
-            title=self.__class__.__name__,
-            rows=rows,
-            max_width=max_width,
-        )
