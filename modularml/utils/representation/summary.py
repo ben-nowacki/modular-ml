@@ -122,3 +122,30 @@ def format_summary_box(
     bottom = "└" + "─" * (content_width + 2) + "┘"
 
     return f"{top}\n{body}\n{bottom}"
+
+
+def safe_cast_to_summary_rows(obj: object) -> str | list[tuple[str, str]]:
+    """
+    Normalize an object for SummaryRow usage.
+
+    Uses _format_summary_rows if object has that attribute, otherwise
+    uses repr and safely casts any multi-line repr strings.
+    """
+    if hasattr(obj, "_summary_rows"):
+        return obj._summary_rows()
+
+    s = repr(obj)
+    if "\n" not in s:
+        return s
+    lines = s.splitlines()
+    return [(str(i), line) for i, line in enumerate(lines)]
+
+
+class Summarizable:
+    def _summary_rows(self) -> list[SummaryRow]: ...
+    def summary(self, max_width: int = 88) -> str:
+        return format_summary_box(
+            title=self.__class__.__name__,
+            rows=self._summary_rows(),
+            max_width=max_width,
+        )
