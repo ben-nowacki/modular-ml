@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
-from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.references.data_reference import DataReference
 from modularml.core.splitting.splitter_record import SplitterRecord
 from modularml.utils.data.data_format import DataFormat
@@ -480,11 +479,7 @@ class SplitMixin:
 
             # Record this splitter configuration
             # Splitter is cloned to prevent user from modifying state outside of ModularML
-            cloned_splitter: BaseSplitter = clone_via_serialization(
-                obj=splitter,
-                policy=SerializationPolicy.BUILTIN,
-                builtin_key=splitter.__class__.__qualname__,
-            )
+            cloned_splitter: BaseSplitter = clone_via_serialization(obj=splitter)
             rec = SplitterRecord(
                 splitter=cloned_splitter,
                 applied_to=DataReference(

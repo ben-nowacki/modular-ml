@@ -1,5 +1,5 @@
 # Import registry first
-from modularml.core.transforms.scaler_registry import SCALER_REGISTRY
+from modularml.core.transforms.registry import SCALER_REGISTRY
 
 # Import all scaler modules
 from .absolute import Absolute
