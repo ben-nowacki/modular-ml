@@ -22,7 +22,7 @@ def clone_via_serialization(obj: Any):
         )
         clone = serializer.load(
             path=save_path,
-            provided_class=obj.__class__,
+            provided_class=type(obj),
             allow_packaged_code=True,
         )
 

@@ -6,28 +6,29 @@ from modularml.core.io.serialization_policy import SerializationPolicy, normaliz
 
 
 @dataclass(frozen=True)
-class ClassSpec:
+class SymbolSpec:
     """
-    Serializable specification describing how to identify and resolve a class.
+    Serializable specification describing how to identify and resolve a Python symbol (class or function).
 
-    It defines how a class is identified at save time and how it should be
-    resolved at load time, such that:
-    - A runtime class can be converted into a ClassSpec
-    - A ClassSpec can be resolved back into a runtime class (when possible)
+    It defines how a class/function is identified at save time and how it
+    should be resolved at load time, such that:
+    - A runtime class/fnc can be converted into a SymbolSpec
+    - A SymbolSpec can be resolved back into a runtime class/fnc
 
     It *does not* describe behaviour, configuration, or state.
     """
 
     policy: SerializationPolicy
 
-    # Symbolic identity (always present unless policy == STATE_ONLY)
+    # Symbolic identity (always present unless STATE_ONLY)
     module: str | None = None
     qualname: str | None = None
 
     # Optional logical identifier (registry / display / diagnostics)
     key: str | None = None
 
-    # Optional fallback source reference (if policy == PACKAGED)
+    # Optional fallback source reference (PACKAGED only)
+    # Format: "code/<file>.py:<qualname>"
     source_ref: str | None = None
 
     def validate(self) -> None:
@@ -35,7 +36,7 @@ class ClassSpec:
 
         if self.policy is SerializationPolicy.STATE_ONLY:
             if any([self.key, self.module, self.qualname, self.source_ref]):
-                raise ValueError("STATE_ONLY ClassSpec must not define class identity fields.")
+                raise ValueError("STATE_ONLY SymbolSpec must not define class identity fields.")
 
         elif self.policy is SerializationPolicy.BUILTIN:
             if not self.key:

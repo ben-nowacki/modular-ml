@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from modularml.core.io.protocols import Configurable, Stateful
@@ -239,3 +240,56 @@ class Scaler(Configurable, Stateful):
             msg = f"{self.scaler_name} does not support inverse_transform."
             raise NotImplementedError(msg)
         return self._scaler.inverse_transform(data)
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this Scaler to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the Scaler is saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            builtin_key="Scaler",
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> Scaler:
+        """
+        Load a Scaler from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved Scaler.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+
+        Returns:
+            Scaler: The reloaded sampler.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)

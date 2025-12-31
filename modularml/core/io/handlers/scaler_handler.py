@@ -5,10 +5,10 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from modularml.core.io.class_registry import class_registry
-from modularml.core.io.class_spec import ClassSpec
 from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.io.packaged_code_loaders.default_loader import default_packaged_code_loader
+from modularml.core.io.symbol_registry import symbol_registry
+from modularml.core.io.symbol_spec import SymbolSpec
 from modularml.core.transforms.registry import SCALER_REGISTRY
 from modularml.core.transforms.scaler import Scaler
 
@@ -92,7 +92,7 @@ class ScalerHandler(TypeHandler[Scaler]):
             config["impl_kind"] = "registry"
             config["impl_name"] = obj.scaler_name
         else:
-            impl_spec = ctx.package_class(obj._scaler.__class__)
+            impl_spec = ctx.package_symbol(obj._scaler.__class__)
 
             config["impl_kind"] = "packaged"
             config["impl_class"] = asdict(impl_spec)
@@ -177,8 +177,8 @@ class ScalerHandler(TypeHandler[Scaler]):
                 msg = "LoadContext must be provided to handler when using PACKAGED deserialization."
                 raise RuntimeError(msg)
 
-            impl_spec = ClassSpec(**config["impl_class"])
-            impl_cls = class_registry.resolve_class(
+            impl_spec = SymbolSpec(**config["impl_class"])
+            impl_cls = symbol_registry.resolve_symbol(
                 impl_spec,
                 allow_packaged_code=ctx.allow_packaged_code,
                 packaged_code_loader=lambda source_ref: default_packaged_code_loader(

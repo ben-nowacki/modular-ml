@@ -1,4 +1,4 @@
-from modularml.core.io.class_registry import class_registry
+from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.conventions import SerializationKind, kind_registry
 from modularml.utils.registries import CaseInsensitiveRegistry
 
@@ -8,7 +8,7 @@ from .scaler import Scaler
 
 
 def register_classes():
-    class_registry.register_builtin(
+    symbol_registry.register_builtin(
         key="Scaler",
         cls=Scaler,
     )

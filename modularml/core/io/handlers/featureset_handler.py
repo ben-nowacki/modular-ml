@@ -180,14 +180,14 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
             # Save scaler artifact
             scaler_obj = rec.scaler_obj
             if scaler_obj is not None:
-                cls_spec = ctx.make_class_spec(
-                    cls=scaler_cfg_files.__class__,
+                symbol_spec = ctx.make_symbol_spec(
+                    symbol=type(scaler_obj),
                     policy=SerializationPolicy.BUILTIN,
                     builtin_key="Scaler",
                 )
                 save_path = ctx.emit_mml(
                     obj=scaler_obj,
-                    cls_spec=cls_spec,
+                    symbol_spec=symbol_spec,
                     out_path=dir_scaler_art / scaler_name,
                     overwrite=True,
                 )
@@ -217,14 +217,14 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
 
             # Save splitter artifact
             if rec.splitter is not None:
-                cls_spec = ctx.make_class_spec(
-                    cls=rec.splitter.__class__,
+                symbol_spec = ctx.make_symbol_spec(
+                    symbol=rec.splitter.__class__,
                     policy=SerializationPolicy.BUILTIN,
                     builtin_key="BaseSplitter",
                 )
                 save_path = ctx.emit_mml(
                     obj=rec.splitter,
-                    cls_spec=cls_spec,
+                    symbol_spec=symbol_spec,
                     out_path=dir_splitter_art / splitter_name,
                     overwrite=True,
                 )
@@ -310,7 +310,8 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
 
         # Reapply scalers (clear those on featureset)
         fs_obj._scaler_recs = []
-        for rec in state["scaler_records"]:
+        records: list[ScalerRecord] = state["scaler_records"]
+        for rec in records:
             fs_obj.fit_transform(
                 scaler=rec.scaler_obj,
                 domain=rec.domain,

@@ -18,8 +18,8 @@ class ArtifactHeader:
             Version of object being serialized.
         kind (str):
             Kind code (e.g., "fs", "mg") used for naming conventions.
-        class_spec (dict[str, Any]):
-            Serialized ClassSpec data.
+        symbol_spec (dict[str, Any]):
+            Serialized SymbolSpec data.
 
     """
 
@@ -27,7 +27,7 @@ class ArtifactHeader:
     schema_version: str
     object_version: str
     kind: str
-    class_spec: dict[str, Any]
+    symbol_spec: dict[str, Any]
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -35,7 +35,7 @@ class ArtifactHeader:
             "schema_version": self.schema_version,
             "object_version": self.object_version,
             "kind": self.kind,
-            "class_spec": self.class_spec,
+            "symbol_spec": self.symbol_spec,
         }
 
     @classmethod
@@ -45,7 +45,7 @@ class ArtifactHeader:
             schema_version=json["schema_version"],
             object_version=json["object_version"],
             kind=json["kind"],
-            class_spec=json["class_spec"],
+            symbol_spec=json["symbol_spec"],
         )
 
 

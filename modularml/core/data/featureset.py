@@ -1047,7 +1047,7 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         from modularml.core.io.serialization_policy import SerializationPolicy
         from modularml.core.io.serializer import serializer
 
-        serializer.save(
+        return serializer.save(
             self,
             filepath,
             policy=SerializationPolicy.BUILTIN,
