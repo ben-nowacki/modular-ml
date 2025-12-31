@@ -7,7 +7,12 @@ import numpy as np
 import pyarrow as pa
 
 from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
-from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+)
 from modularml.core.splitting.split_mixin import SplitMixin
 from modularml.utils.representation.summary import Summarizable
 
@@ -16,7 +21,7 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_collection import SampleCollection
 
 
-@dataclass(frozen=True)
+@dataclass
 class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable):
     """
     Immutable row+column projection of a FeatureSet.
@@ -62,6 +67,18 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable):
 
     __hash__ = None
 
+    def __setattr__(self, name, value):
+        # Overrriding __setattr__ to make all attributes frozen except label
+        frozen_attrs = ["source", "indices", "columns"]
+
+        # Check if attr is frozen and if it's already set (to allow init)
+        if name in frozen_attrs and name in self.__dict__:
+            msg = f"Cannot reassign frozen attribute '{name}'"
+            raise AttributeError(msg)
+
+        # Use default __setattr__ behavior
+        super().__setattr__(name, value)
+
     def _summary_rows(self) -> list[tuple]:
         return [
             ("label", self.label),
@@ -70,9 +87,18 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable):
             (
                 "columns",
                 [
-                    (DOMAIN_FEATURES, str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True))),
-                    (DOMAIN_TARGETS, str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True))),
-                    (DOMAIN_TAGS, str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True))),
+                    (
+                        DOMAIN_FEATURES,
+                        str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TARGETS,
+                        str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TAGS,
+                        str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
                 ],
             ),
         ]
