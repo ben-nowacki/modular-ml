@@ -218,10 +218,8 @@ class Batcher:
             if k in strata_data:
                 msg = f"DataReference.to_string() already exists in `strata_data`: {k}"
                 raise ValueError(msg)
-            ref_data: np.ndarray = view._get_domain(
-                domain=domain,
-                keys=key,
-                rep=rep,
+            ref_data: np.ndarray = view.get_data(
+                columns=f"{domain}.{key}.{rep}",
                 fmt=DataFormat.NUMPY,
             )
             strata_data[k] = ref_data
@@ -349,10 +347,8 @@ class Batcher:
             if k in group_data:
                 msg = f"DataReference.to_string() already exists in `group_data`: {k}"
                 raise ValueError(msg)
-            ref_data: np.ndarray = view._get_domain(
-                domain=domain,
-                keys=key,
-                rep=rep,
+            ref_data: np.ndarray = view.get_data(
+                columns=f"{domain}.{key}.{rep}",
                 fmt=DataFormat.NUMPY,
             )
             group_data[k] = ref_data

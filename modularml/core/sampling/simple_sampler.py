@@ -1,9 +1,12 @@
-from typing import Any
+from __future__ import annotations
 
-from modularml.core.data.featureset import FeatureSet
+from typing import TYPE_CHECKING, Any
+
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.sampling.base_sampler import BaseSampler, Samples
+
+if TYPE_CHECKING:
+    from modularml.core.data.featureset import FeatureSet
 
 
 class SimpleSampler(BaseSampler):
@@ -18,6 +21,7 @@ class SimpleSampler(BaseSampler):
         strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
+        show_progress: bool = True,
     ):
         """
         Initialize a sampler that splits a FeatureSet or view into batches.
@@ -68,6 +72,9 @@ class SimpleSampler(BaseSampler):
                 Drop the final incomplete batch.
             seed (int, optional):
                 Random seed for reproducible shuffling.
+            show_progress (bool, optional):
+                Whether to show a progress bar during the batch building process.
+                Defaults to True.
 
         Raises:
             ValueError:
@@ -85,6 +92,7 @@ class SimpleSampler(BaseSampler):
             strict_stratification=strict_stratification,
             drop_last=drop_last,
             seed=seed,
+            show_progress=show_progress,
         )
 
     def build_samples(self) -> Samples:
@@ -102,28 +110,46 @@ class SimpleSampler(BaseSampler):
     def __repr__(self):
         return f"SimpleSampler(n_batches={len(self.batches)}, batch_size={self.batcher.batch_size})"
 
-    # ============================================
-    # Serialization
-    # ============================================
-    def get_state(self) -> dict[str, Any]:
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
         """
-        Serialize this Sampler into a fully reconstructable Python dictionary.
+        Return configuration required to reconstruct this sampler.
 
-        Notes:
-            This serializes only the sampler config and source name/id.
-            The source data is not saved.
+        Description:
+            This *does not* restore the source, only the sampler configurtion.
+
+        Returns:
+            dict[str, Any]: Sampler configuration.
 
         """
-        state = super().get_state()
-        state[MML_STATE_TARGET] = f"{self.__class__.__module__}.{self.__class__.__qualname__}"
-        return state
+        cfg = super().get_config()
+        cfg.update({"sampler_name": "SimpleSampler"})
+        return cfg
 
-    def set_state(self, state: dict[str, Any]):
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> SimpleSampler:
         """
-        Restore this Sampler configuration in-place from serialized state.
+        Construct a sampler from configuration.
 
-        This fully restores the Sampler configuration.
-        If a source was previously bound, an attempt will be made to re-bind it.
-        For this to work, the source must exist in the active ExperimentContext.
+        Args:
+            config (dict[str, Any]): Sampler configuration.
+
+        Returns:
+            SimpleSampler: Unfitted sampler instance.
+
         """
-        super().set_state(state)
+        if ("sampler_name" not in config) or (config["sampler_name"] != "SimpleSampler"):
+            raise ValueError("Invalid config for SimpleSampler.")
+
+        return cls(
+            batch_size=config["batch_size"],
+            shuffle=config["shuffle"],
+            group_by=config["group_by"],
+            stratify_by=config["stratify_by"],
+            strict_stratification=config["strict_stratification"],
+            drop_last=config["drop_last"],
+            seed=config["seed"],
+            show_progress=config["show_progress"],
+        )

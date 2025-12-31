@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.schema_constants import MML_STATE_TARGET
 from modularml.core.references.data_reference import DataReference
 from modularml.core.sampling.base_sampler import BaseSampler, Samples
 from modularml.utils.data.data_format import DataFormat
@@ -53,6 +52,7 @@ class NSampler(BaseSampler):
         strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
+        show_progress: bool = True,
     ):
         """
         Initialize an N-way similarity-based sampler.
@@ -112,6 +112,10 @@ class NSampler(BaseSampler):
             seed (int | None):
                 RNG seed.
 
+            show_progress (bool, optional):
+                Whether to show a progress bar during the batch building process.
+                Defaults to True.
+
         """
         self.condition_mapping = {role: dict(conds) for role, conds in condition_mapping.items()}
         if "anchor" in self.condition_mapping:
@@ -130,6 +134,7 @@ class NSampler(BaseSampler):
             strict_stratification=strict_stratification,
             drop_last=drop_last,
             seed=seed,
+            show_progress=show_progress,
         )
 
     def build_samples(self) -> Samples:
@@ -187,9 +192,14 @@ class NSampler(BaseSampler):
         # Build role-specific matchings
         # Each role key contains a tuple of: anchor indices, role indices, and role scores
         # All returned indices are absolute indicies from the parent source
+        if self._progress is not None:
+            self._progress.set_total(len(self.source) * len(role_specs))
         role_results: dict[str, tuple[np.ndarray]] = {
             role: self._generate_role_matches(view=self.source, specs=specs) for role, specs in role_specs.items()
         }
+        if self._progress is not None:
+            self._progress.set_total(self._progress.completed)
+
         # Each role may return a different array of anchor indices
         # We need to get the intersection and ensure proper alignment
         role_idxs, role_weights = self._standardize_role_idxs(d=role_results)
@@ -526,13 +536,10 @@ class NSampler(BaseSampler):
                 raise ValueError(msg)
 
             # Gather actual data in the column defined by `ref`
-            col = view._get_domain(
-                domain=ref.domain,
-                keys=ref.key,
-                rep=ref.rep,
+            col: np.ndarray = view.get_data(
+                columns=f"{ref.domain}.{ref.key}.{ref.rep}",
                 fmt=DataFormat.NUMPY,
             )
-            col = np.asarray(col)
 
             # Currenlty only support conditions over 1-dimensional data
             col = np.squeeze(col)  # remove singleton dimensions
@@ -711,48 +718,64 @@ class NSampler(BaseSampler):
                 role_abs_idxs.append(abs_indices[p_rel_idx])
                 role_scores.append(score)
 
+            # Update progress bar
+            if self._progress is not None:
+                self._progress.tick()
+
         return anchor_abs_idxs, role_abs_idxs, role_scores
 
-    # ============================================
-    # Serialization
-    # ============================================
-    def get_state(self) -> dict[str, Any]:
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
         """
-        Serialize this Sampler into a fully reconstructable Python dictionary.
+        Return configuration required to reconstruct this sampler.
 
-        Notes:
-            This serializes only the sampler config and source name/id.
-            The source data is not saved.
+        Description:
+            This *does not* restore the source, only the sampler configurtion.
+
+        Returns:
+            dict[str, Any]: Sampler configuration.
 
         """
-        state = super().get_state()
-        state[MML_STATE_TARGET] = f"{self.__class__.__module__}.{self.__class__.__qualname__}"
-        state["condition_mapping"] = {
-            k: {k1: v1.get_config() for k1, v1 in v.items()} for k, v in self.condition_mapping.items()
-        }
-        state["max_samples_per_anchor"] = self.max_samples_per_anchor
-        state["choose_best_only"] = self.choose_best_only
+        cfg = super().get_config()
+        cfg.update(
+            {
+                "sampler_name": "NSampler",
+                "condition_mapping": self.condition_mapping,
+                "max_samples_per_anchor": self.max_samples_per_anchor,
+                "choose_best_only": self.choose_best_only,
+            },
+        )
+        return cfg
 
-        return state
-
-    def set_state(self, state: dict[str, Any]):
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> NSampler:
         """
-        Restore this Sampler configuration in-place from serialized state.
+        Construct a sampler from configuration.
 
-        This fully restores the Sampler configuration.
-        If a source was previously bound, an attempt will be made to re-bind it.
-        For this to work, the source must exist in the active ExperimentContext.
+        Args:
+            config (dict[str, Any]): Sampler configuration.
+
+        Returns:
+            NSampler: Unfitted sampler instance.
+
         """
-        from modularml.core.sampling.similiarity_condition import SimilarityCondition
+        if ("sampler_name" not in config) or (config["sampler_name"] != "NSampler"):
+            raise ValueError("Invalid config for NSampler.")
 
-        # Restore condition mapping
-        self.condition_mapping = {
-            k: {k1: SimilarityCondition.from_config(v1) for k1, v1 in v.items()}
-            for k, v in state["condition_mapping"].items()
-        }
-
-        # Restore other attributes
-        self.max_samples_per_anchor = int(state["max_samples_per_anchor"])
-        self.choose_best_only = bool(state["choose_best_only"])
-
-        super().set_state(state)
+        return cls(
+            condition_mapping=config["condition_mapping"],
+            batch_size=config["batch_size"],
+            shuffle=config["shuffle"],
+            max_samples_per_anchor=config["max_samples_per_anchor"],
+            choose_best_only=config["choose_best_only"],
+            group_by=config["group_by"],
+            group_by_role=config["group_by_role"],
+            stratify_by=config["stratify_by"],
+            stratify_by_role=config["stratify_by_role"],
+            strict_stratification=config["strict_stratification"],
+            drop_last=config["drop_last"],
+            seed=config["seed"],
+            show_progress=config["show_progress"],
+        )

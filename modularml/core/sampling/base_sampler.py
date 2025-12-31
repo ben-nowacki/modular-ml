@@ -2,30 +2,32 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from modularml.core.data.batch_view import BatchView
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.schema_constants import MML_STATE_TARGET
+from modularml.core.io.protocols import Configurable, Stateful
 from modularml.core.sampling.batcher import Batcher
+from modularml.utils.data.comparators import deep_equal
 from modularml.utils.data.formatting import ensure_list
-from modularml.utils.serialization.serializable_mixin import SerializableMixin, register_serializable
+from modularml.utils.environment.environment import running_in_notebook
+from modularml.utils.representation.progress_bars import LazyProgress
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from modularml.core.data.batch_view import BatchView
 
-
-@dataclass
+@dataclass(frozen=True)
 class Samples:
     role_indices: dict[str, NDArray[np.int_]]
     role_weights: dict[str, NDArray[np.float32]] | None = None
 
 
-class BaseSampler(ABC, SerializableMixin):
+class BaseSampler(Configurable, Stateful, ABC):
     """
     Base class for all samplers.
 
@@ -47,10 +49,12 @@ class BaseSampler(ABC, SerializableMixin):
         strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
+        show_progress: bool = True,
     ):
         self.source: FeatureSetView | None = None
         self.seed = seed
         self.rng = np.random.default_rng(self.seed)
+        self.show_progress = show_progress
 
         if stratify_by and group_by:
             msg = "Both `group_by` and `stratify_by` cannot be applied at the same."
@@ -70,8 +74,26 @@ class BaseSampler(ABC, SerializableMixin):
 
         self._batches: list[BatchView] | None = None
 
+        # Optional progress bar
+        self._progress: LazyProgress | None = None
+        self._show_progress = show_progress
+
         if source is not None:
             self.bind_source(source)
+
+    def __eq__(self, other):
+        if not isinstance(other, BaseSampler):
+            msg = f"Equality can only be compared between two samplers. Received: {type(other)}."
+            raise TypeError(msg)
+
+        # Check config first
+        if self.get_config() != other.get_config():
+            return False
+
+        # Then check state
+        return deep_equal(self.get_state(), other.get_state())
+
+    __hash__ = None
 
     # =====================================================
     # Properties
@@ -83,7 +105,7 @@ class BaseSampler(ABC, SerializableMixin):
     @property
     def batches(self) -> list[BatchView]:
         """All batches for this sampler."""
-        if self.is_bound:
+        if self.is_bound and self._batches is None:
             self._batches = self.build_batches()
         if self._batches is None:
             raise RuntimeError("Sampler has no bound source. Call bind_source().")
@@ -114,7 +136,21 @@ class BaseSampler(ABC, SerializableMixin):
 
         A BatchView is a grouping of row indices into roles.
         """
-        samples: Samples = self.build_samples()
+        self._progress = LazyProgress(
+            total=len(self.source) if self.source is not None else None,
+            description=f"Sampling ({type(self).__name__})",
+            enabled=self._show_progress,
+            persist=running_in_notebook(),
+        )
+
+        try:
+            samples: Samples = self.build_samples()
+        finally:
+            # Ensure cleanup even if never started
+            if self._progress is not None:
+                self._progress.close()
+                self._progress = None
+
         return self.batcher.batch(
             view=self.source,
             role_indices=samples.role_indices,
@@ -129,91 +165,175 @@ class BaseSampler(ABC, SerializableMixin):
         """Construct and return Samples."""
         raise NotImplementedError
 
-    # ============================================
-    # Serialization
-    # ============================================
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this sampler.
+
+        Description:
+            This *does not* restore the source, only the sampler configurtion.
+
+        Returns:
+            dict[str, Any]: Sampler configuration.
+
+        """
+        return {
+            "batch_size": self.batcher.batch_size,
+            "shuffle": self.batcher.shuffle,
+            "group_by": self.batcher.group_by,
+            "group_by_role": self.batcher.group_by_role,
+            "stratify_by": self.batcher.stratify_by,
+            "stratify_by_role": self.batcher.stratify_by_role,
+            "strict_stratification": self.batcher.strict_stratification,
+            "drop_last": self.batcher.drop_last,
+            "seed": self.batcher.seed,
+            "show_progress": self.show_progress,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> BaseSampler:
+        """
+        Construct a sampler from configuration.
+
+        Args:
+            config (dict[str, Any]): Sampler configuration.
+
+        Returns:
+            BaseSampler: Unfitted sampler instance.
+
+        """
+        from modularml.core.sampling.registry import SAMPLER_REGISTRY
+
+        if "sampler_name" not in config:
+            msg = "Sampler config must store 'sampler_name' if using BaseSampler to instantiate."
+            raise KeyError(msg)
+
+        sampler_cls = SAMPLER_REGISTRY[str(config["sampler_name"])]
+        return sampler_cls.from_config(config)
+
+    # ================================================
+    # Stateful
+    # ================================================
     def get_state(self) -> dict[str, Any]:
         """
-        Serialize this Sampler into a fully reconstructable Python dictionary.
+        Return runtime state (i.e. rng and source)  of the splitter.
 
-        Notes:
-            This serializes only the sampler config and source name/id.
-            The source data is not saved.
+        Returns:
+            dict[str, Any]: Splitter state.
 
         """
-        state: dict[str, Any] = {
-            MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
-            "seed": self.seed,
-            "batcher": self.batcher.get_config(),
-        }
+        # Construct reference of source -> later re-linked via ExperimentContext
+        source_cfg: dict[str, Any] | None = None
         if self.source is not None:
-            state["source"] = {
-                "label": self.source.source.label,
-                "node_id": self.source.source.node_id,
-                "indices": self.source.indices.tolist(),
-                "columns": list(self.source.columns),
-                "label_view": self.source.label,
-            }
-        else:
-            state["source"] = None
+            source_cfg = self.source.get_config()
+
+        state = {
+            "source_config": source_cfg,
+            "batch_configs": None,
+        }
+        if self._batches is not None:
+            bv_configs = []
+            for b in self._batches:
+                b_cfg = {
+                    "role_indices": b.role_indices,
+                    "role_indice_weights": b.role_indice_weights,
+                }
+                bv_configs.append(b_cfg)
+
+            state["batch_configs"] = bv_configs
 
         return state
 
-    def set_state(self, state: dict[str, Any]):
+    def set_state(self, state: dict[str, Any]) -> None:
         """
-        Restore this Sampler configuration in-place from serialized state.
+        Restore runtime state of the splitter.
 
-        This fully restores the Sampler configuration.
-        If a source was previously bound, an attempt will be made to re-bind it.
-        For this to work, the source must exist in the active ExperimentContext.
+        Args:
+            state (dict[str, Any]):
+                State produced by get_state().
+
         """
-        # Restore rng
-        self.seed = state.get("seed")
-        self.rng = np.random.default_rng(self.seed)
+        # If state has source, rebuild view
+        if state.get("source_config") is None:
+            # Can't set anything without a source
+            # Sample is in a config-only runtime state
+            return
 
-        # Restore batcher
-        self.batcher = Batcher.from_config(state["batcher"])
+        # Rebuild source
+        view = FeatureSetView.from_config(state["source_config"])
 
-        # Reset runtime fields
-        self.source = None
-        self._batches = None
-
-        # Attempt to rebind source if present
-        src = state.get("source")
-        if src is not None:
-            from modularml.core.data.featureset_view import FeatureSetView
-            from modularml.core.experiment.experiment_context import ExperimentContext
-
-            fs = ExperimentContext.get_node(node_id=src["node_id"])
-            if fs is None:
-                msg = (
-                    f"Cannot restore sampler source '{src['label']}' (node_id={src['node_id']}). FeatureSet not found."
+        # If state has batches saved, we can manually set source and batches
+        batch_configs = state.get("batch_configs")
+        if batch_configs is not None:
+            # Construct batch views from psuedo-config
+            batches = []
+            for b_cfg in batch_configs:
+                bv = BatchView(
+                    source=view.source,
+                    role_indices=b_cfg["role_indices"],
+                    role_indice_weights=b_cfg["role_indice_weights"],
                 )
-                raise RuntimeError(msg)
+                batches.append(bv)
+            self._batches = batches
 
-            view = FeatureSetView(
-                source=fs,
-                indices=np.asarray(src["indices"], dtype=int),
-                columns=src["columns"],
-                label=src["label_view"],
-            )
+            # Manually set source to avoid rebuilding batches
+            self.source = view
 
-            self.bind_source(view)
+        # Otherwise, we should call bind_sources
+        else:
+            self.bind_source(source=view)
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this Sampler to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the Sampler is saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            builtin_key="BaseSampler",
+            overwrite=overwrite,
+        )
 
     @classmethod
-    def from_state(cls, state: dict[str, Any]) -> BaseSampler:
-        """Dynamically reconstruct a sampler (including subclasses) from state."""
-        from modularml.utils.environment.environment import import_from_path
+    def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> BaseSampler:
+        """
+        Load a Sampler from file.
 
-        sampler_cls = import_from_path(state[MML_STATE_TARGET])
+        Args:
+            filepath (Path):
+                File location of a previously saved Sampler.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
 
-        # Allocate without calling __init__
-        obj: BaseSampler = sampler_cls.__new__(sampler_cls)
+        Returns:
+            BaseSampler: The reloaded sampler.
 
-        # Restore internal state
-        obj.set_state(state)
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
 
-        return obj
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
 
-
-register_serializable(BaseSampler, kind="sm")
+        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)
