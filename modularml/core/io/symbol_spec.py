@@ -20,31 +20,38 @@ class SymbolSpec:
 
     policy: SerializationPolicy
 
-    # Symbolic identity (always present unless STATE_ONLY)
-    module: str | None = None
-    qualname: str | None = None
-
-    # Optional logical identifier (registry / display / diagnostics)
+    # BUILTIN
+    #  - key into symbol_registry._builtin_registry
     key: str | None = None
 
-    # Optional fallback source reference (PACKAGED only)
-    # Format: "code/<file>.py:<qualname>"
+    # REGISTERED
+    #  - Fully-qualified import path of registry object and registry key
+    #  - e.g. "modularml.core.models.MODEL_REGISTRY"
+    registry_path: str | None = None
+    registry_key: str | None = None
+
+    # PACKAGED
+    #  - Format: "code/<file>.py:<qualname>"
     source_ref: str | None = None
+
+    # Fallback import metadata (optional)
+    module: str | None = None
+    qualname: str | None = None
 
     def validate(self) -> None:
         object.__setattr__(self, "policy", normalize_policy(self.policy))
 
-        if self.policy is SerializationPolicy.STATE_ONLY:
+        if self.policy is SerializationPolicy.BUILTIN:
+            if not self.key:
+                raise ValueError("BUILTIN requires key")
+
+        elif self.policy is SerializationPolicy.STATE_ONLY:
             if any([self.key, self.module, self.qualname, self.source_ref]):
                 raise ValueError("STATE_ONLY SymbolSpec must not define class identity fields.")
 
-        elif self.policy is SerializationPolicy.BUILTIN:
-            if not self.key:
-                raise ValueError("BUILTIN policy requires a registry key.")
-
         elif self.policy is SerializationPolicy.REGISTERED:
-            if not (self.module and self.qualname):
-                raise ValueError("REGISTERED policy requires module and qualname.")
+            if not (self.registry_path and self.registry_key):
+                raise ValueError("REGISTERED requires registry_path and registry_key")
 
         elif self.policy is SerializationPolicy.PACKAGED:
             if not self.source_ref:
@@ -53,19 +60,3 @@ class SymbolSpec:
         else:
             msg = f"Unsupported policy: {self.policy}"
             raise TypeError(msg)
-
-    # ================================================
-    # Convenience methods/properties
-    # ================================================
-    @property
-    def import_path(self) -> str | None:
-        """
-        Fully qualified import path if available.
-
-        Returns:
-            str | None: Dotted import path (module.qualname) or None.
-
-        """
-        if self.module and self.qualname:
-            return f"{self.module}.{self.qualname}"
-        return None

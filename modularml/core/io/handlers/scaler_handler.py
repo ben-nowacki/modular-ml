@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.io.packaged_code_loaders.default_loader import default_packaged_code_loader
+from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.symbol_spec import SymbolSpec
-from modularml.core.transforms.registry import SCALER_REGISTRY
 from modularml.core.transforms.scaler import Scaler
 
 if TYPE_CHECKING:
@@ -87,15 +87,21 @@ class ScalerHandler(TypeHandler[Scaler]):
         # JSON-safe config from Scaler class
         config = obj.get_config()
 
-        # If using custom scaler (and policy==Package), we need to update the config
-        if obj.scaler_name in SCALER_REGISTRY:
-            config["impl_kind"] = "registry"
-            config["impl_name"] = obj.scaler_name
-        else:
-            impl_spec = ctx.package_symbol(obj._scaler.__class__)
+        # Infer policy of underlying scaler
+        policy = SerializationPolicy.PACKAGED
+        if symbol_registry.obj_is_a_builtin_class(obj._scaler):
+            policy = SerializationPolicy.BUILTIN
+        elif symbol_registry.obj_in_a_builtin_registry(
+            obj_or_cls=obj._scaler,
+            registry_name="scaler_registry",
+        ):
+            policy = SerializationPolicy.REGISTERED
 
-            config["impl_kind"] = "packaged"
-            config["impl_class"] = asdict(impl_spec)
+        # Create spec (internally packages code if needed)
+        sym_spec = ctx.make_symbol_spec(symbol=obj._scaler, policy=policy)
+
+        # Store spec for later reload instructions
+        config["_scaler"] = asdict(sym_spec)
 
         # Save config to file
         with (Path(save_dir) / self.config_rel_path).open("w", encoding="utf-8") as f:
@@ -158,45 +164,22 @@ class ScalerHandler(TypeHandler[Scaler]):
         config: dict[str, Any] = self.decode_config(load_dir=load_dir, ctx=ctx)
         state: dict[str, Any] = self.decode_state(load_dir=load_dir, ctx=ctx)
 
-        # ================================================
-        # Instantiate Scaler from config
-        # ================================================
-        scaler_obj = None
-        impl_kind = config["impl_kind"]
+        # Reload internal _scaler instance
+        _scaler_cls = symbol_registry.resolve_symbol(
+            spec=SymbolSpec(**config["_scaler"]),
+            allow_packaged_code=ctx.allow_packaged_code,
+            packaged_code_loader=lambda source_ref: default_packaged_code_loader(
+                artifact_path=ctx.artifact_path,
+                source_ref=source_ref,
+                allow_packaged=ctx.allow_packaged_code,
+            ),
+        )
+        _scaler_obj = _scaler_cls(**config.get("scaler_kwargs", {}))
 
-        # Case 1: registry-backed scaler
-        if impl_kind == "registry":
-            impl_name = config["impl_name"]
-            impl_cls = SCALER_REGISTRY[impl_name]
-            impl = impl_cls(**config.get("scaler_kwargs", {}))
-            scaler_obj = cls(impl)
+        # Create Scaler with internal _scaler
+        scaler_obj = cls(scaler=_scaler_obj, scaler_kwargs=config.get("scaler_kwargs", {}))
 
-        # Case 2: packaged custom scaler
-        elif impl_kind == "packaged":
-            if ctx is None:
-                msg = "LoadContext must be provided to handler when using PACKAGED deserialization."
-                raise RuntimeError(msg)
-
-            impl_spec = SymbolSpec(**config["impl_class"])
-            impl_cls = symbol_registry.resolve_symbol(
-                impl_spec,
-                allow_packaged_code=ctx.allow_packaged_code,
-                packaged_code_loader=lambda source_ref: default_packaged_code_loader(
-                    artifact_path=ctx.artifact_path,
-                    source_ref=source_ref,
-                    allow_packaged=ctx.allow_packaged_code,
-                ),
-            )
-            impl = impl_cls(**config.get("scaler_kwargs", {}))
-            scaler_obj = cls(impl)
-
-        else:
-            msg = f"Unknown impl_kind: {impl_kind}"
-            raise ValueError(msg)
-
-        # ================================================
         # Set Scaler state
-        # ================================================
         if not hasattr(scaler_obj, "set_state"):
             msg = "Scaler must implement a `set_state` method."
             raise NotImplementedError(msg)

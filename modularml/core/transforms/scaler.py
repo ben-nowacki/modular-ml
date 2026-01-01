@@ -34,25 +34,24 @@ class Scaler(Configurable, Stateful):
 
         """
         # Ensure all items in registry are imported
-        import modularml.preprocessing  # noqa: F401
-        from modularml.core.transforms.registry import SCALER_REGISTRY
+        from modularml.preprocessing import scaler_registry
 
         # Case 1: scaler given by name
         if isinstance(scaler, str):
-            if scaler not in SCALER_REGISTRY:
+            if scaler not in scaler_registry:
                 msg = (
                     f"Scaler '{scaler}' not recognized. Run `Scaler.get_supported_scalers()` to see supported scalers."
                 )
                 raise ValueError(msg)
             self.scaler_name = scaler
             self.scaler_kwargs = scaler_kwargs or {}
-            self._scaler = SCALER_REGISTRY[scaler](**self.scaler_kwargs)
+            self._scaler = scaler_registry[scaler](**self.scaler_kwargs)
             self._is_fit = False
 
         # Case 2: scaler given as instance
         else:
             cls_name = scaler.__class__.__name__
-            self.scaler_name = SCALER_REGISTRY.get_original_key(cls_name) or cls_name
+            self.scaler_name = scaler_registry.get_original_key(cls_name) or cls_name
             self.scaler_kwargs = scaler_kwargs or getattr(scaler, "get_params", dict)()
             self._scaler = scaler
             self._is_fit = False
@@ -149,10 +148,9 @@ class Scaler(Configurable, Stateful):
 
         """
         # Ensure all scalers are registered
-        import modularml.preprocessing  # noqa: F401
-        from modularml.core.transforms.registry import SCALER_REGISTRY
+        from modularml.preprocessing import scaler_registry
 
-        return SCALER_REGISTRY
+        return scaler_registry
 
     def clone_unfitted(self) -> Scaler:
         """Create a fresh, unfitted Scaler with the same config."""

@@ -72,7 +72,7 @@ class SaveContext:
     # =================================================
     # Symbol packaging and spec creation
     # =================================================
-    def package_symbol(self, symbol: object) -> SymbolSpec:
+    def _package_symbol(self, symbol: object) -> SymbolSpec:
         """
         Ensure `symbol` (class or function) is packaged into this artifact and return its SymbolSpec.
 
@@ -81,6 +81,8 @@ class SaveContext:
         - Source code is always copied into artifact/code/
         - Previously packaged symbols are re-packaged by source text
         """
+        symbol = symbol if isinstance(symbol, type) else symbol.__class__
+
         # Normalize symbol identity
         if not hasattr(symbol, "__qualname__") or not hasattr(symbol, "__module__"):
             msg = f"Unsupported symbol type: {type(symbol)}"
@@ -158,7 +160,6 @@ class SaveContext:
         symbol: object,
         *,
         policy: SerializationPolicy,
-        builtin_key: str | None = None,
     ) -> SymbolSpec:
         """
         Construct or retrieve a SymbolSpec for a given symbol (function or class).
@@ -178,27 +179,20 @@ class SaveContext:
         policy = normalize_policy(policy)
 
         if policy is SerializationPolicy.PACKAGED:
-            spec = self.package_symbol(symbol=symbol)
+            spec = self._package_symbol(symbol=symbol)
 
         elif policy is SerializationPolicy.BUILTIN:
-            if not builtin_key:
-                raise ValueError("BUILTIN policy requires builtin_key")
-
             spec = SymbolSpec(
                 policy=SerializationPolicy.BUILTIN,
-                module=None,
-                qualname=None,
-                key=builtin_key,
-                source_ref=None,
+                key=symbol_registry.key_for(symbol),
             )
 
         elif policy is SerializationPolicy.REGISTERED:
+            r_path, r_key = symbol_registry.registered_location_for(symbol)
             spec = SymbolSpec(
                 policy=SerializationPolicy.REGISTERED,
-                module=symbol.__module__,
-                qualname=symbol.__qualname__,
-                key=None,
-                source_ref=None,
+                registry_path=r_path,
+                registry_key=r_key,
             )
 
         elif policy is SerializationPolicy.STATE_ONLY:
@@ -509,7 +503,6 @@ class Serializer:
             symbol_spec = ctx.make_symbol_spec(
                 symbol=type(obj),
                 policy=policy,
-                builtin_key=builtin_key,
             )
             ctx.write_artifact(
                 obj=obj,
@@ -545,8 +538,6 @@ class Serializer:
             Any: Reconstructed object.
 
         """
-        import modularml.preprocessing  # noqa: F401
-
         path: Path = Path(path)
         if not path.exists():
             raise FileNotFoundError(path)
