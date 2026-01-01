@@ -623,6 +623,9 @@ class SampleCollection:
         # .to_numpy() returns an object-array, we need to convert to proper shape and dtype
         data = pa_arr.to_numpy(zero_copy_only=False)
         np_arr = stack_nested_numpy(data, shape)
+        # Drop trailing singleton dimensions (e.g., (N,1) to (N,))
+        while np_arr.ndim > 1 and np_arr.shape[-1] == 1:
+            np_arr = np_arr.squeeze(-1)
         return convert_to_format(np_arr, fmt=fmt)
 
     # ================================================
