@@ -1,7 +1,7 @@
 from typing import Any
 
-from modularml.models.base import BaseModel
-from modularml.utils.backend import Backend, infer_backend
+from modularml.core.models.base_model import BaseModel
+from modularml.utils.nn.backend import Backend, infer_backend
 
 from .scikit_wrapper import ScikitModelWrapper
 from .tensorflow_wrapper import TensorflowModelWrapper
@@ -45,25 +45,25 @@ def wrap_model(model: Any) -> BaseModel:
     backend = infer_backend(model)
 
     if backend == Backend.TORCH:
-        import torch  # noqa: PLC0415
+        import torch
 
-        if issubclass(model, torch.nn.Module) or isinstance(model, torch.nn.Module):
-            return TorchModelWrapper(model)
+        if issubclass(model.__class__, torch.nn.Module) or isinstance(model, torch.nn.Module):
+            return TorchModelWrapper(model=model)
         msg = "Received PyTorch backend but model is not a subclass or instance of `torch.nn.Module`."
         raise ValueError(msg)
 
     if backend == Backend.TENSORFLOW:
-        import tensorflow as tf  # noqa: PLC0415
+        import tensorflow as tf
 
-        if issubclass(model, tf.keras.Model) or isinstance(model, tf.keras.Model):
+        if issubclass(model.__class__, tf.keras.Model) or isinstance(model, tf.keras.Model):
             return TensorflowModelWrapper(model)
         msg = "Received Tensorflow backend but model is not a subclass or instance of `tf.keras.Model`."
         raise ValueError(msg)
 
     if backend == Backend.SCIKIT:
-        from sklearn.base import BaseEstimator  # noqa: PLC0415
+        from sklearn.base import BaseEstimator
 
-        if issubclass(model, BaseEstimator) or isinstance(model, BaseEstimator):
+        if issubclass(model.__class__, BaseEstimator) or isinstance(model, BaseEstimator):
             return ScikitModelWrapper(model)
         msg = "Received Scikit backend but model is not a subclass or instance of `sklearn.base.BaseEstimator`."
         raise ValueError(msg)
