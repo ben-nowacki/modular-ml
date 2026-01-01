@@ -19,6 +19,9 @@ class Backend(str, Enum):
     SCIKIT = "scikit"
     NONE = "none"
 
+    def __repr__(self) -> str:
+        return self.value
+
 
 def normalize_backend(value: str | Backend):
     if isinstance(value, Backend):

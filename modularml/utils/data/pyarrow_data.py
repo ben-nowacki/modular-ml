@@ -1,5 +1,6 @@
 import ast
 import fnmatch
+import hashlib
 import warnings
 from collections import defaultdict
 from typing import Literal
@@ -21,7 +22,7 @@ from modularml.core.data.schema_constants import (
     REP_TRANSFORMED,
 )
 from modularml.utils.data.formatting import ensure_list
-from modularml.utils.data.shape_utils import get_shape, shape_to_tuple
+from modularml.utils.data.shape_utils import ensure_tuple_shape, get_shape
 
 
 def resolve_column_selectors(
@@ -216,7 +217,12 @@ def get_shape_of_pyarrow_array(arr: pa.Array, *, include_nrows: bool = True) -> 
         if not arr[i].is_valid:
             continue
         s = get_shape(arr[i].as_py())
-        s = shape_to_tuple(s.get("__shape__") if isinstance(s, dict) else s)
+        s = ensure_tuple_shape(
+            shape=s.get("__shape__") if isinstance(s, dict) else s,
+            min_len=1,
+            max_len=None,
+            allow_null_shape=False,
+        )
         if detected is None:
             detected = s
         elif detected != s:
@@ -545,3 +551,14 @@ def build_sample_schema_table(
     table = table.replace_schema_metadata(all_metadata)
 
     return table
+
+
+def hash_pyarrow_table(table: pa.Table) -> str:
+    t = table.combine_chunks()
+    h = hashlib.sha256()
+
+    for b in t.to_batches():
+        for c in b.columns:
+            h.update(c.to_pylist().__repr__().encode())
+
+    return h.hexdigest()

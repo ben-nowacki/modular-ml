@@ -1,4 +1,4 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
@@ -157,6 +157,75 @@ def get_shape(x) -> ShapeLike:
     raise TypeError(msg)
 
 
-def shape_to_tuple(value: Iterable[int] | Sequence[int]) -> tuple[int, ...]:
-    """Utility to normalize sequences (e.g., shapes) into integer tuples."""
-    return tuple(int(x) for x in value)
+def ensure_tuple_shape(
+    shape: Iterable,
+    *,
+    min_len: int = 1,
+    max_len: int | None = None,
+    allow_null_shape: bool = False,
+) -> tuple[int, ...] | None:
+    """
+    Formats the given shape iterable into a tuple of integers.
+
+    Description:
+        The iterable (eg: `[101, 5]`) is cast to a tuple of integers.
+        If the tuple has fewer elements than `min_len`, singleton dimensions
+        are inserted at the beginning.
+        If the tuple has more elements than `max_len`, removal of singleton
+        dimensions is attempted.
+        If the length of the tuple is still more than `max_len`, an error
+        is raised.
+
+    Args:
+        shape (Iterable):
+            Shape values.
+        min_len (int):
+            The minimum number of elements allowed in the returned tuple.
+            Defaults to 1.
+        max_len (int):
+            The maximum number of elements allowed in the returned tuple.
+            If None, no max is enforced. Defaults to None.
+        allow_null_shape (bool):
+            Whether the input and output shape can be None.
+            Defaults to False.
+
+    """
+    if shape is None:
+        if allow_null_shape:
+            return None
+        raise ValueError("Shape cannot be None.")
+
+    # Convert to tuple[int]
+    try:
+        shape_tuple = tuple(int(x) for x in shape)
+    except Exception as exc:
+        msg = f"Shape must be an iterable of integers. Received: {shape}"
+        raise TypeError(msg) from exc
+
+    # Validate non-negative dimensions
+    if any(d < 0 for d in shape_tuple):
+        msg = f"Shape dimensions must be non-negative. Received: {shape_tuple}"
+        raise ValueError(msg)
+
+    # Pad with leading singleton dimensions if too short
+    if len(shape_tuple) < min_len:
+        shape_tuple = (1,) * (min_len - len(shape_tuple)) + shape_tuple
+
+    # Reduce singleton dimensions if too long
+    if max_len is not None and len(shape_tuple) > max_len:
+        # Remove singleton dims from the left first (least informative)
+        reduced = list(shape_tuple)
+        i = 0
+        while len(reduced) > max_len and i < len(reduced):
+            if reduced[i] == 1:
+                reduced.pop(i)
+            else:
+                i += 1
+
+        if len(reduced) > max_len:
+            msg = f"Cannot reduce shape {shape_tuple} to max_len={max_len} without removing non-singleton dimensions."
+            raise ValueError(msg)
+
+        shape_tuple = tuple(reduced)
+
+    return shape_tuple
