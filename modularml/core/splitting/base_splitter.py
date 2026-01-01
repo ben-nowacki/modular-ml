@@ -148,12 +148,12 @@ class BaseSplitter(Configurable, Stateful, ABC):
             BaseSplitter: Unfitted splitter instance.
 
         """
-        from modularml.core.splitting.registry import SPLITTER_REGISTRY
+        from modularml.splitters import splitter_registry
 
         if "splitter_name" not in config:
             msg = "Splitter config must store 'splitter_name' if using BaseSplitter to instantiate."
             raise KeyError(msg)
-        splitter_cls = SPLITTER_REGISTRY.get(config["splitter_name"])
+        splitter_cls: BaseSplitter = splitter_registry.get(config["splitter_name"])
         return splitter_cls.from_config(config)
 
     # ================================================
@@ -206,7 +206,6 @@ class BaseSplitter(Configurable, Stateful, ABC):
             self,
             filepath,
             policy=SerializationPolicy.BUILTIN,
-            builtin_key="BaseSplitter",
             overwrite=overwrite,
         )
 

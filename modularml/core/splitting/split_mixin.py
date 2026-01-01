@@ -546,7 +546,7 @@ class SplitMixin:
             ```
 
         """
-        from modularml.core.splitting.random_splitter import RandomSplitter
+        from modularml.splitters.random_splitter import RandomSplitter
 
         splitter = RandomSplitter(ratios, group_by=group_by, seed=seed)
         return self.split(
@@ -616,7 +616,7 @@ class SplitMixin:
             ```
 
         """
-        from modularml.core.splitting.condition_splitter import ConditionSplitter
+        from modularml.splitters.condition_splitter import ConditionSplitter
 
         splitter = ConditionSplitter(**conditions)
         return self.split(

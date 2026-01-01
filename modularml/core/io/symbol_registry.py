@@ -194,9 +194,10 @@ class SymbolRegistry:
 
     def key_for(self, obj_or_cls: Any) -> str:
         """Returns the registered key for an object or class."""
-        if not self.obj_is_a_builtin_class(obj_or_cls=obj_or_cls):
-            raise ValueError("Object/class is not registered. It has no key.")
         cls = obj_or_cls if isinstance(obj_or_cls, type) else obj_or_cls.__class__
+        if not self.obj_is_a_builtin_class(obj_or_cls=obj_or_cls):
+            msg = f"Class '{cls.__qualname__}' is not registered. It has no key."
+            raise ValueError(msg)
         return self._make_runtime_key(cls=cls)
 
     def registered_location_for(self, symbol: object) -> tuple[str, str]:

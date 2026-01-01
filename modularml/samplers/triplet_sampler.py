@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from modularml.core.sampling.n_sampler import NSampler
+from modularml.samplers.n_sampler import NSampler
 
 if TYPE_CHECKING:
     from modularml.core.data.featureset import FeatureSet

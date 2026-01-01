@@ -1,5 +1,4 @@
-# Import registry first
-from modularml.core.transforms.registry import SCALER_REGISTRY
+from modularml.utils.registries import CaseInsensitiveRegistry
 
 # Import all scaler modules
 from .absolute import Absolute
@@ -19,6 +18,7 @@ from sklearn.preprocessing import (
     PowerTransformer,
 )
 
+
 __all__ = [  # noqa: RUF022
     # classes
     "Absolute",
@@ -34,24 +34,36 @@ __all__ = [  # noqa: RUF022
     "Normalizer",
     "QuantileTransformer",
     "PowerTransformer",
-    # registry
-    "SCALER_REGISTRY",
 ]
 
+# Create registry
+scaler_registry = CaseInsensitiveRegistry()
+
+
+def scaler_naming_fn(x):
+    return x.__qualname__
+
+
 # Register sklearn scalers
-SCALER_REGISTRY.update(
-    {
-        "StandardScaler": StandardScaler,
-        "MinMaxScaler": MinMaxScaler,
-        "MaxAbsScaler": MaxAbsScaler,
-        "RobustScaler": RobustScaler,
-        "Normalizer": Normalizer,
-        "QuantileTransformer": QuantileTransformer,
-        "PowerTransformer": PowerTransformer,
-        "PerSampleMinMaxScaler": PerSampleMinMaxScaler,
-        "PerSampleZeroStart": PerSampleZeroStart,
-        "Negate": Negate,
-        "Absolute": Absolute,
-        "SegmentedScaler": SegmentedScaler,
-    },
-)
+sklearn_scalers: list[type] = [
+    StandardScaler,
+    MinMaxScaler,
+    MaxAbsScaler,
+    RobustScaler,
+    Normalizer,
+    QuantileTransformer,
+    PowerTransformer,
+]
+for t in sklearn_scalers:
+    scaler_registry.register(scaler_naming_fn(t), t)
+
+# Register modularml scalers
+mml_scalers: list[type] = [
+    Absolute,
+    Negate,
+    PerSampleMinMaxScaler,
+    PerSampleZeroStart,
+    SegmentedScaler,
+]
+for t in mml_scalers:
+    scaler_registry.register(scaler_naming_fn(t), t)

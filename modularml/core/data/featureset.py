@@ -25,6 +25,7 @@ from modularml.core.splitting.split_mixin import SplitMixin, SplitterRecord
 from modularml.core.topology.graph_node import GraphNode
 from modularml.core.transforms.scaler import Scaler
 from modularml.core.transforms.scaler_record import ScalerRecord
+from modularml.utils.data.comparators import deep_equal
 from modularml.utils.data.conversion import flatten_to_2d, to_numpy, unflatten_from_2d
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list
@@ -294,8 +295,10 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         # Compare scaler configs
         if len(self._scaler_recs) != len(other._scaler_recs):
             return False
-        for i in range(len(self._scaler_recs)):
-            if self._scaler_recs[i].get_config() != other._scaler_recs[i].get_config():
+        s_scaler_recs = sorted(self._scaler_recs, key=lambda x: x.order)
+        o_scaler_recs = sorted(other._scaler_recs, key=lambda x: x.order)
+        for i in range(len(s_scaler_recs)):
+            if not deep_equal(s_scaler_recs[i].get_config(), o_scaler_recs[i].get_config()):
                 return False
 
         return True
@@ -528,7 +531,6 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
             include_domain_prefix=True,
             include_rep_suffix=True,
         )
-
         # Scaler requires 2D array
         # If we need to reshape, check `merged_axes`
         #   - If None, throw error that shapes are >2D, print shapes and state valid
@@ -651,7 +653,6 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         # Unpack transformed data back to original shapes
         x_trans = unflatten_from_2d(flat=x_trans_flat, meta=x_all_meta) if x_all_meta else x_trans_flat
 
-        # Store this data back into collection table
         for k_idx, k in enumerate(keys):
             # x_trans has shape like (n_samples, n_f, f_shape) where n_f is number of keys
             # We need to select data belonging to each key -> shape = (n_samples, f_shape)
@@ -1051,7 +1052,6 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
             self,
             filepath,
             policy=SerializationPolicy.BUILTIN,
-            builtin_key="FeatureSet",
             overwrite=overwrite,
         )
 

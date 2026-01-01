@@ -81,7 +81,9 @@ class SaveContext:
         - Source code is always copied into artifact/code/
         - Previously packaged symbols are re-packaged by source text
         """
-        symbol = symbol if isinstance(symbol, type) else symbol.__class__
+        # Resolve instances to its class (functions should be unchanged)
+        if not (inspect.isclass(symbol) or inspect.isfunction(symbol)):
+            symbol = symbol.__class__
 
         # Normalize symbol identity
         if not hasattr(symbol, "__qualname__") or not hasattr(symbol, "__module__"):
@@ -146,7 +148,6 @@ class SaveContext:
             policy=SerializationPolicy.PACKAGED,
             module=None,  # packaged code is not imported by module path
             qualname=qualname,
-            key=None,
             source_ref=source_ref,
         )
         spec.validate()
@@ -459,7 +460,6 @@ class Serializer:
         save_path: str,
         *,
         policy: SerializationPolicy,
-        builtin_key: str | None = None,
         overwrite: bool = False,
     ) -> str:
         """

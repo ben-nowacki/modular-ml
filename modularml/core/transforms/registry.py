@@ -2,7 +2,7 @@ from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.conventions import SerializationKind, kind_registry
 
 from .scaler import Scaler
-from modularml.preprocessing import scaler_naming_fn, scaler_registry
+from modularml.scalers import scaler_naming_fn, scaler_registry
 
 
 def register_builtin():
@@ -12,7 +12,7 @@ def register_builtin():
     )
 
     symbol_registry.register_builtin_registry(
-        import_path="modularml.preprocessing.scaler_registry",
+        import_path="modularml.scalers.scaler_registry",
         registry=scaler_registry,
         naming_fn=scaler_naming_fn,
     )

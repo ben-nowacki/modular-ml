@@ -1,30 +1,20 @@
 from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.conventions import SerializationKind, kind_registry
-from modularml.utils.registries import CaseInsensitiveRegistry
-
-SPLITTER_REGISTRY = CaseInsensitiveRegistry()
-
 from .base_splitter import BaseSplitter
-from .condition_splitter import ConditionSplitter
-from .random_splitter import RandomSplitter
+
+from modularml.splitters import splitter_registry, splitter_naming_fn
 
 
-# Register splitters (after imports)
-SPLITTER_REGISTRY.update({"RandomSplitter": RandomSplitter, "ConditionSplitter": ConditionSplitter})
-
-
-def register_classes():
-    symbol_registry.register_builtin(
+def register_builtin():
+    symbol_registry.register_builtin_class(
         key="BaseSplitter",
         cls=BaseSplitter,
     )
-    symbol_registry.register_builtin(
-        key="RandomSplitter",
-        cls=RandomSplitter,
-    )
-    symbol_registry.register_builtin(
-        key="ConditionSplitter",
-        cls=ConditionSplitter,
+
+    symbol_registry.register_builtin_registry(
+        import_path="modularml.splitters.splitter_registry",
+        registry=splitter_registry,
+        naming_fn=splitter_naming_fn,
     )
 
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.io.packaged_code_loaders.default_loader import default_packaged_code_loader
+from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.symbol_spec import SymbolSpec
 from modularml.core.sampling.similiarity_condition import SimilarityCondition
@@ -81,19 +82,12 @@ class SimilarityConditionHandler(TypeHandler[SimilarityCondition]):
             raise NotImplementedError("SimilarityCondition must implement a `get_config` method.")
 
         config = obj.get_config()
-        metric = config.pop("metric")
-
-        # Metric handling
-        if metric is None:
-            config["metric_kind"] = "none"
-
-        else:
-            # Package callable definition
-            impl_spec = ctx.package_symbol(metric)
-
-            config["metric_kind"] = "packaged"
-            config["metric_class"] = asdict(impl_spec)
-            config["metric_kwargs"] = getattr(metric, "get_config", dict)()
+        if config["metric"] is not None:
+            # Create spec for metric function (internally packages code if needed)
+            sym_spec = ctx.make_symbol_spec(symbol=config["metric"], policy=SerializationPolicy.PACKAGED)
+            config["metric"] = asdict(sym_spec)
+            # If metric is a class, assume it define init kwargs in get_config
+            config["metric_kwargs"] = getattr(config["metric"], "get_config", dict)()
 
         # Save config to file
         path = self._write_json(config, Path(save_dir) / self.config_rel_path)
@@ -153,14 +147,11 @@ class SimilarityConditionHandler(TypeHandler[SimilarityCondition]):
         """
         config = self.decode_config(load_dir=load_dir, ctx=ctx)
 
-        # Some conditions use custom metrics
-        # We may need to load packaged code
-        metric_kind = config.pop("metric_kind")
-        metric = None
-        if metric_kind == "packaged":
-            impl_spec = SymbolSpec(**config.pop("metric_class"))
+        # Reload metric (if defined)
+        metric = config.pop("metric")
+        if metric is not None:
             metric = symbol_registry.resolve_symbol(
-                spec=impl_spec,
+                spec=SymbolSpec(**metric),
                 allow_packaged_code=ctx.allow_packaged_code,
                 packaged_code_loader=lambda source_ref: default_packaged_code_loader(
                     artifact_path=ctx.artifact_path,
@@ -172,10 +163,6 @@ class SimilarityConditionHandler(TypeHandler[SimilarityCondition]):
             metric_kwargs = config.pop("metric_kwargs", {})
             if inspect.isclass(metric):
                 metric = metric(**metric_kwargs)
-
-        elif metric_kind != "none":
-            msg = f"Unknown metric_kind: {metric_kind}"
-            raise ValueError(msg)
 
         # Restore condition with metric (if defined)
         obj = cls(metric=metric, **config)
@@ -189,7 +176,7 @@ class SimilarityConditionHandler(TypeHandler[SimilarityCondition]):
         self,
         load_dir: Path,
         *,
-        ctx: LoadContext,
+        ctx: LoadContext,  # noqa: ARG002
     ) -> dict[str, Any] | None:
         """
         Decodes config from a json file.

@@ -34,7 +34,7 @@ class Scaler(Configurable, Stateful):
 
         """
         # Ensure all items in registry are imported
-        from modularml.preprocessing import scaler_registry
+        from modularml.scalers import scaler_registry
 
         # Case 1: scaler given by name
         if isinstance(scaler, str):
@@ -148,7 +148,7 @@ class Scaler(Configurable, Stateful):
 
         """
         # Ensure all scalers are registered
-        from modularml.preprocessing import scaler_registry
+        from modularml.scalers import scaler_registry
 
         return scaler_registry
 
@@ -265,7 +265,6 @@ class Scaler(Configurable, Stateful):
             self,
             filepath,
             policy=SerializationPolicy.BUILTIN,
-            builtin_key="Scaler",
             overwrite=overwrite,
         )
 

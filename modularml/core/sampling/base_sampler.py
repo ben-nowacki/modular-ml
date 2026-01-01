@@ -204,13 +204,13 @@ class BaseSampler(Configurable, Stateful, ABC):
             BaseSampler: Unfitted sampler instance.
 
         """
-        from modularml.core.sampling.registry import SAMPLER_REGISTRY
+        from modularml.samplers import sampler_registry
 
         if "sampler_name" not in config:
             msg = "Sampler config must store 'sampler_name' if using BaseSampler to instantiate."
             raise KeyError(msg)
 
-        sampler_cls = SAMPLER_REGISTRY[str(config["sampler_name"])]
+        sampler_cls: BaseSampler = sampler_registry[str(config["sampler_name"])]
         return sampler_cls.from_config(config)
 
     # ================================================
@@ -311,7 +311,6 @@ class BaseSampler(Configurable, Stateful, ABC):
             self,
             filepath,
             policy=SerializationPolicy.BUILTIN,
-            builtin_key="BaseSampler",
             overwrite=overwrite,
         )
 

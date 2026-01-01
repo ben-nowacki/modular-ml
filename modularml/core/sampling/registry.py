@@ -1,53 +1,26 @@
 from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.io.conventions import SerializationKind, kind_registry
-from modularml.utils.registries import CaseInsensitiveRegistry
-
-SAMPLER_REGISTRY = CaseInsensitiveRegistry()
-
 from .similiarity_condition import SimilarityCondition
 from .base_sampler import BaseSampler
-from .simple_sampler import SimpleSampler
-from .paired_sampler import PairedSampler
-from .triplet_sampler import TripletSampler
-from .n_sampler import NSampler
+
+from modularml.samplers import sampler_naming_fn, sampler_registry
 
 
-# Register samplers (after imports)
-SAMPLER_REGISTRY.update(
-    {
-        "SimpleSampler": SimpleSampler,
-        "PairedSampler": PairedSampler,
-        "TripletSampler": TripletSampler,
-        "NSampler": NSampler,
-    },
-)
-
-
-def register_classes():
-    symbol_registry.register_builtin(
+def register_builtin():
+    symbol_registry.register_builtin_class(
         key="SimilarityCondition",
         cls=SimilarityCondition,
     )
 
-    symbol_registry.register_builtin(
+    symbol_registry.register_builtin_class(
         key="BaseSampler",
         cls=BaseSampler,
     )
-    symbol_registry.register_builtin(
-        key="SimpleSampler",
-        cls=SimpleSampler,
-    )
-    symbol_registry.register_builtin(
-        key="PairedSampler",
-        cls=PairedSampler,
-    )
-    symbol_registry.register_builtin(
-        key="TripletSampler",
-        cls=TripletSampler,
-    )
-    symbol_registry.register_builtin(
-        key="NSampler",
-        cls=NSampler,
+
+    symbol_registry.register_builtin_registry(
+        import_path="modularml.samplers.sampler_registry",
+        registry=sampler_registry,
+        naming_fn=sampler_naming_fn,
     )
 
 

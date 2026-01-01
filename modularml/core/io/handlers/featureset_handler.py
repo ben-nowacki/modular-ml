@@ -10,6 +10,7 @@ from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_TAGS, DOMAIN_TARGETS, REP_TRANSFORMED
 from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.io.serialization_policy import SerializationPolicy
+from modularml.core.io.symbol_registry import symbol_registry
 from modularml.core.references.data_reference import DataReference
 from modularml.utils.data.pyarrow_data import hash_pyarrow_table
 
@@ -183,7 +184,6 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
                 symbol_spec = ctx.make_symbol_spec(
                     symbol=type(scaler_obj),
                     policy=SerializationPolicy.BUILTIN,
-                    builtin_key="Scaler",
                 )
                 save_path = ctx.emit_mml(
                     obj=scaler_obj,
@@ -217,10 +217,14 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
 
             # Save splitter artifact
             if rec.splitter is not None:
+                policy = (
+                    SerializationPolicy.BUILTIN
+                    if symbol_registry.obj_is_a_builtin_class(rec.splitter)
+                    else SerializationPolicy.REGISTERED
+                )
                 symbol_spec = ctx.make_symbol_spec(
                     symbol=rec.splitter.__class__,
-                    policy=SerializationPolicy.BUILTIN,
-                    builtin_key="BaseSplitter",
+                    policy=policy,
                 )
                 save_path = ctx.emit_mml(
                     obj=rec.splitter,
@@ -317,7 +321,6 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
                 domain=rec.domain,
                 keys=rec.keys,
                 fit_to_split=rec.fit_split,
-                merged_axes=rec.merged_axes,
             )
 
         return fs_obj
