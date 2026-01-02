@@ -5,6 +5,8 @@ from .core.sampling import registry as sampler_registry
 from .core.data import registry as data_registry
 from .core.models import registry as model_registry
 
+from .core.training import registry as training_registry
+
 
 def register_all():
     # Registers all splitters
@@ -26,3 +28,7 @@ def register_all():
     # Register base models
     model_registry.register_builtin()
     model_registry.register_kinds()
+
+    # Register training module classes
+    training_registry.register_builtin()
+    training_registry.register_kinds()
