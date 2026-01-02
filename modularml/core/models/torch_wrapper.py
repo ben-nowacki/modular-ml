@@ -76,7 +76,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
             # Infer only if user didn't provide kwargs
             if model_kwargs is None:
                 try:
-                    model_kwargs = self._infer_init_args()
+                    model_kwargs = self._infer_init_args(model)
                 except RuntimeError:
                     msg = (
                         "Failed to infer `model_kwargs` from the wrapped model instance. "
@@ -297,17 +297,17 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
 
         return kwargs
 
-    def _infer_init_args(self) -> dict[str, Any]:
+    def _infer_init_args(self, model: Any) -> dict[str, Any]:
         """Attempts to infer the init args from a model instance."""
-        if self.model_kwargs:
+        if hasattr(self, "model_kwargs") and self.model_kwargs is not None:
             raise ValueError("`model_kwargs` are already defined")
 
-        if self.model is None:
+        if model is None:
             raise ValueError("Cannot infer kwargs for an uninstantiated model.")
 
         # Try to extract init parameters from signature
         model_kwargs = infer_kwargs_from_init(
-            obj=self.model,
+            obj=model,
             strict=True,
         )
         return model_kwargs

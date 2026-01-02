@@ -391,12 +391,14 @@ class Optimizer(Configurable, Stateful):
             return None
 
         if self._backend == Backend.TORCH:
-            # Pure-Python nested dict of tensors
             return {"state_dict": self.instance.state_dict()}
 
         if self._backend == Backend.TENSORFLOW:
-            # Store weights as numpy arrays; config is already in kwargs
-            return {"weights": [w.numpy() for w in self.instance.weights]}
+            try:
+                return {"weights": self.instance.get_weights()}
+            except AttributeError:
+                # Optimizer not yet initialized with variables
+                return {"weights": None}
 
         return None
 
