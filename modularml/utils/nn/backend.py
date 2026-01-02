@@ -54,44 +54,65 @@ def backend_requires_optimizer(backend: Backend) -> bool:
     return backend in [Backend.TORCH, Backend.TENSORFLOW]
 
 
-def infer_backend(obj: Any) -> Backend:
+def infer_backend(obj_or_cls: Any) -> Backend:
     """
-    Infers the model backend associated with a given object.
+    Infers the backend associated with a given object or class.
 
     Supports inference from:
     - Data objects (e.g., torch.Tensor, tf.Tensor)
-    - Model instances (e.g., torch.nn.Module, tf.keras.Model, sklearn.BaseEstimator)
-    - Model classes (e.g., torch.nn.Module subclasses)
+    - Model instances and classes
+    - Optimizer instances and classes
 
     Args:
-        obj (Any): The object to inspect.
+        obj_or_cls (Any): The object/class to inspect.
 
     Returns:
-        Backend: The inferred backend enum value. Returns Backend.NONE if no known backend is detected.
+        Backend: The inferred backend enum value.
 
     """
+
+    def _safe_issubclass(obj_or_cls, bases):
+        try:
+            return isinstance(obj_or_cls, type) and issubclass(obj_or_cls, bases)
+        except TypeError:
+            return False
+
+    # ================================================
+    # PyTorch
+    # ================================================
     try:
         import torch
 
-        if isinstance(obj, torch.Tensor | torch.nn.Module) or (
-            isinstance(obj, type) and issubclass(obj, torch.nn.Module)
+        if isinstance(obj_or_cls, (torch.Tensor, torch.nn.Module, torch.optim.Optimizer)) or (
+            isinstance(obj_or_cls, type) and _safe_issubclass(obj_or_cls, (torch.nn.Module, torch.optim.Optimizer))
         ):
             return Backend.TORCH
     except ImportError:
         pass
 
+    # ================================================
+    # Tensorflow
+    # ================================================
     try:
         import tensorflow as tf
 
-        if isinstance(obj, tf.Tensor | tf.keras.Model) or (isinstance(obj, type) and issubclass(obj, tf.keras.Model)):
+        if isinstance(obj_or_cls, (tf.Tensor, tf.keras.Model, tf.keras.optimizers.Optimizer)) or (
+            isinstance(obj_or_cls, type)
+            and _safe_issubclass(obj_or_cls, (tf.keras.Model, tf.keras.optimizers.Optimizer))
+        ):
             return Backend.TENSORFLOW
     except ImportError:
         pass
 
+    # ================================================
+    # Sklearn / Numpy
+    # ================================================
     try:
         from sklearn.base import BaseEstimator
 
-        if isinstance(obj, BaseEstimator) or (isinstance(obj, type) and issubclass(obj, BaseEstimator)):
+        if isinstance(obj_or_cls, BaseEstimator) or (
+            isinstance(obj_or_cls, type) and _safe_issubclass(obj_or_cls, BaseEstimator)
+        ):
             return Backend.SCIKIT
     except ImportError:
         pass

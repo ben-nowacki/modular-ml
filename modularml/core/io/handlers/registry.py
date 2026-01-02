@@ -18,6 +18,9 @@ from modularml.core.io.handlers.sampler_handler import SamplerHandler
 from modularml.core.models.base_model import BaseModel
 from modularml.core.io.handlers.model_handler import ModelHandler
 
+from modularml.core.training.optimizer import Optimizer
+from modularml.core.io.handlers.optimizer_handler import OptimizerHandler
+
 
 handler_registry = HandlerRegistry()
 handler_registry.register(cls=Scaler, handler=ScalerHandler())
@@ -26,3 +29,4 @@ handler_registry.register(cls=FeatureSet, handler=FeatureSetHandler())
 handler_registry.register(cls=SimilarityCondition, handler=SimilarityConditionHandler())
 handler_registry.register(cls=BaseSampler, handler=SamplerHandler())
 handler_registry.register(cls=BaseModel, handler=ModelHandler())
+handler_registry.register(cls=Optimizer, handler=OptimizerHandler())

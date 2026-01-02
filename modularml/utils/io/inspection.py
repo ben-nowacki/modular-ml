@@ -1,6 +1,9 @@
+import inspect
 import json
 import pathlib
+import warnings
 import zipfile
+from typing import Any
 
 from modularml.core.io.artifacts import Artifact
 from modularml.core.io.conventions import MML_FILE_EXTENSION
@@ -118,3 +121,98 @@ def _inspect_mml_zip(
 
     collect(config)
     return sources
+
+
+def infer_kwargs_from_init(
+    obj: Any,
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
+    """
+    Infer constructor keyword arguments from an existing object instance.
+
+    Description:
+        Inspects the `__init__` signature of the object's class and attempts to
+        reconstruct a dictionary of keyword arguments by reading attributes on
+        the instance with matching names.
+
+        For each parameter in `obj.__class__.__init__`, excluding `self`, this
+        function checks whether:
+          - the parameter has a default value, OR
+          - the instance has an attribute with the same name
+
+        Parameters that are required (no default) but cannot be recovered from
+        instance attributes are treated as reconstruction failures.
+
+    Behavior:
+        - If all required (non-default) parameters can be inferred, the inferred
+          keyword dictionary is returned.
+        - If one or more required parameters cannot be inferred:
+            * a warning is emitted by default
+            * a ValueError is raised if `strict=True`
+
+    Notes:
+        - This function reflects the *current state* of the object, not necessarily
+          the original arguments passed at construction time.
+        - Only parameters whose names exactly match instance attribute names can
+          be inferred.
+        - Positional-only parameters, `*args`, and `**kwargs` cannot be reliably
+          reconstructed and are ignored for strictness checks.
+        - Default-valued parameters are allowed to be missing.
+
+    Limitations:
+        - Cannot recover arguments that are transformed, renamed, or discarded
+          inside `__init__`.
+        - Cannot distinguish between default values and explicitly provided values.
+        - Properties or dynamically computed attributes may give misleading results.
+
+    Args:
+        obj (Any):
+            The object instance from which to infer constructor keyword arguments.
+        strict (bool, optional):
+            If True, raise a ValueError when required constructor arguments cannot
+            be inferred. If False, emit a warning instead. Defaults to False.
+
+    Returns:
+        dict[str, Any]:
+            A dictionary mapping inferred constructor parameter names to their
+            current attribute values on the object.
+
+    Raises:
+        ValueError:
+            If `strict=True` and one or more required constructor parameters
+            cannot be inferred.
+
+    """
+    kwargs: dict[str, Any] = {}
+    missing_required: list[str] = []
+
+    sig = inspect.signature(obj.__class__.__init__)
+
+    for name, param in sig.parameters.items():
+        if name == "self":
+            continue
+
+        # Skip *args / **kwargs — cannot reconstruct meaningfully
+        if param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+
+        if hasattr(obj, name):
+            kwargs[name] = getattr(obj, name)
+        elif param.default is inspect.Parameter.empty:
+            missing_required.append(name)
+
+    if missing_required:
+        msg = (
+            f"Cannot fully infer constructor arguments for "
+            f"{obj.__class__.__qualname__}. "
+            f"Missing required parameters: {missing_required}"
+        )
+        if strict:
+            raise ValueError(msg)
+        warnings.warn(msg, RuntimeWarning, stacklevel=2)
+
+    return kwargs
