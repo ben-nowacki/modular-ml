@@ -21,6 +21,9 @@ from modularml.core.io.handlers.model_handler import ModelHandler
 from modularml.core.training.optimizer import Optimizer
 from modularml.core.io.handlers.optimizer_handler import OptimizerHandler
 
+from modularml.core.training.loss import Loss
+from modularml.core.io.handlers.loss_handler import LossHandler
+
 
 handler_registry = HandlerRegistry()
 handler_registry.register(cls=Scaler, handler=ScalerHandler())
@@ -30,3 +33,4 @@ handler_registry.register(cls=SimilarityCondition, handler=SimilarityConditionHa
 handler_registry.register(cls=BaseSampler, handler=SamplerHandler())
 handler_registry.register(cls=BaseModel, handler=ModelHandler())
 handler_registry.register(cls=Optimizer, handler=OptimizerHandler())
+handler_registry.register(cls=Loss, handler=LossHandler())

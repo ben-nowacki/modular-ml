@@ -332,6 +332,7 @@ class LoadContext:
         self.serializer = serializer
         self.allow_packaged_code = allow_packaged_code
         self.overwrite_collision = overwrite_collision
+        self.file_mapping: dict[str, str | None] | None = None
 
     def load_from_dir(
         self,
@@ -380,6 +381,7 @@ class LoadContext:
             artifact_path=dir_load,
             handler=handler_registry.resolve(cls=cls),
         )
+        self.file_mapping = artifact.files
 
         # Reconstruct object (handler class handles this logic)
         handler = handler_registry.resolve(cls)

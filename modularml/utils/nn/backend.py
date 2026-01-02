@@ -96,9 +96,9 @@ def infer_backend(obj_or_cls: Any) -> Backend:
     try:
         import tensorflow as tf
 
-        if isinstance(obj_or_cls, (tf.Tensor, tf.keras.Model, tf.keras.optimizers.Optimizer)) or (
+        if isinstance(obj_or_cls, (tf.Tensor, tf.keras.Model, tf.keras.losses.Loss, tf.keras.optimizers.Optimizer)) or (
             isinstance(obj_or_cls, type)
-            and _safe_issubclass(obj_or_cls, (tf.keras.Model, tf.keras.optimizers.Optimizer))
+            and _safe_issubclass(obj_or_cls, (tf.keras.Model, tf.keras.losses.Loss, tf.keras.optimizers.Optimizer))
         ):
             return Backend.TENSORFLOW
     except ImportError:
