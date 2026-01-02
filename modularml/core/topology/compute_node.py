@@ -1,11 +1,15 @@
-from abc import abstractmethod
-from typing import Any
+from __future__ import annotations
 
-from modularml.core.data.batch import Batch, SampleData
-from modularml.core.data.schema_constants import MML_STATE_TARGET
-from modularml.core.references.reference_like import ReferenceLike
+from abc import abstractmethod
+from typing import TYPE_CHECKING, Any
+
 from modularml.core.topology.graph_node import GraphNode
-from modularml.core.topology.node_shapes import NodeShapes
+
+if TYPE_CHECKING:
+    from modularml.core.data.batch import Batch
+    from modularml.core.data.sample_data import RoleData
+    from modularml.core.references.reference_like import ReferenceLike
+    from modularml.core.topology.node_shapes import NodeShapes
 
 
 class ComputeNode(GraphNode):
@@ -24,23 +28,35 @@ class ComputeNode(GraphNode):
 
     def __init__(
         self,
-        label,
+        label: str,
         upstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
         downstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
+        *,
+        node_id: str | None = None,
+        register: bool = True,
     ):
         """
         Initialize a ComputeNode.
 
         Args:
-            label (str): Unique identifier for this node.
-            upstream_refs (ReferenceLike | list[ReferenceLike] | None): References of upstream connections.
-            downstream_refs (ReferenceLike | list[ReferenceLike] | None): References of downstream connections.
+            label (str):
+                Unique identifier for this node.
+            upstream_refs (ReferenceLike | list[ReferenceLike] | None):
+                References of upstream connections.
+            downstream_refs (ReferenceLike | list[ReferenceLike] | None):
+                References of downstream connections.
+            node_id (str, optional):
+                Used only for de-serialization.
+            register (bool, optional):
+                Used only for de-serialization.
 
         """
         super().__init__(
-            label,
+            label=label,
             upstream_refs=upstream_refs,
             downstream_refs=downstream_refs,
+            node_id=node_id,
+            register=register,
         )
 
     # ================================================
@@ -115,7 +131,7 @@ class ComputeNode(GraphNode):
         raise NotImplementedError
 
     @abstractmethod
-    def get_input_data(self, batch: Batch) -> dict[str, SampleData] | list[dict[str, SampleData]]:
+    def get_input_data(self, batch: Batch) -> RoleData | list[RoleData]:
         """
         Retrieve and construct this node's input batch from all upstream batches.
 
@@ -207,33 +223,12 @@ class ComputeNode(GraphNode):
         return self.node_shapes.output_shapes
 
     # ================================================
-    # Serialization
+    # Configurable
     # ================================================
-    def get_state(self) -> dict[str, Any]:
-        """
-        Serialize GraphNode topology and identity.
+    def get_config(self) -> dict[str, Any]:
+        cfg = super().get_config()
+        return cfg
 
-        Includes:
-            - ExperimentNode state (node_id, label)
-            - upstream_refs
-            - downstream_refs
-        """
-        state = super().get_state()
-        state.update(
-            {
-                MML_STATE_TARGET: f"{self.__class__.__module__}.{self.__class__.__qualname__}",
-            },
-        )
-        return state
-
-    def set_state(self, state: dict[str, Any]) -> None:
-        """
-        Restore GraphNode identity and topology.
-
-        Notes:
-            - Parent (ExperimentNode) must be restored first
-            - Reference existence is validated after restoration
-
-        """
-        # Restore node_id + label
-        super().set_state(state)
+    @classmethod
+    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> ComputeNode:
+        return cls(register=register, **config)

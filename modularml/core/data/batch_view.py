@@ -3,9 +3,10 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from modularml.core.data.batch import Batch, SampleData, SampleShapes
+from modularml.core.data.batch import Batch, SampleShapes
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
+from modularml.core.data.sample_data import RoleData, SampleData
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.utils.data.conversion import to_numpy
 from modularml.utils.data.data_format import DataFormat, format_is_tensorlike
@@ -201,7 +202,7 @@ class BatchView(Summarizable):
         )
 
         # Construct tensors for each role
-        role_data: dict[str, SampleData] = {}
+        role_data: RoleData = {}
         shapes: SampleShapes | None = None
         role_sample_weights: dict[str, np.ndarray] = {}
         for role in self.role_indices:

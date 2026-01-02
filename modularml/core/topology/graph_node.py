@@ -1,13 +1,17 @@
+from __future__ import annotations
+
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.experiment_node import ExperimentNode
-from modularml.core.references.reference_like import ReferenceLike
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import GraphNodeInputError, GraphNodeOutputError
+
+if TYPE_CHECKING:
+    from modularml.core.references.reference_like import ReferenceLike
 
 
 class GraphNode(ABC, ExperimentNode):
@@ -498,5 +502,5 @@ class GraphNode(ABC, ExperimentNode):
         return cfg
 
     @classmethod
-    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> ExperimentNode:
+    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> GraphNode:
         return cls(register=register, **config)
