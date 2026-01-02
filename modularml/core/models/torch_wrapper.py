@@ -8,6 +8,7 @@ import torch
 
 from modularml.core.models.base_model import BaseModel
 from modularml.utils.data.shape_utils import ensure_tuple_shape
+from modularml.utils.io.inspection import infer_kwargs_from_init
 from modularml.utils.nn.backend import Backend
 
 if TYPE_CHECKING:
@@ -74,14 +75,20 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
             model_class = type(model)
             # Infer only if user didn't provide kwargs
             if model_kwargs is None:
-                warnings.warn(
-                    "Wrapping an instantiated model without `model_kwargs`. "
-                    "Inferring instantiation arguments is very unreliable and will "
-                    "likely fail during reconstruction/serialization.",
-                    category=UserWarning,
-                    stacklevel=2,
-                )
-                model_kwargs = self._infer_init_args()
+                try:
+                    model_kwargs = self._infer_init_args()
+                except RuntimeError:
+                    msg = (
+                        "Failed to infer `model_kwargs` from the wrapped model instance. "
+                        "This model cannot be serialized because its constructor arguments "
+                        "could not be fully reconstructed from the current object state.\n\n"
+                        "Resolution:\n"
+                        "  - Explicitly provide `model_kwargs` when constructing this wrapper, or\n"
+                        "  - Modify the model so all required `__init__` parameters are stored as "
+                        "instance attributes with the same names.\n\n"
+                        f"Model class: {self.model.__class__.__qualname__}"
+                    )
+                    warnings.warn(msg, category=RuntimeWarning, stacklevel=2)
 
         # Pass all init args directly to BaseModel
         # This allows for automatic implementation of get_config/from_config
@@ -299,17 +306,10 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
             raise ValueError("Cannot infer kwargs for an uninstantiated model.")
 
         # Try to extract init parameters from signature
-        # This will only be able to grab attribtues with identical names to the
-        # keywords arguments in __init__
-        model_kwargs = {}
-        sig = inspect.signature(self.model.__class__.__init__)
-        for name in sig.parameters:
-            if name == "self":
-                continue
-            # getattr will reflect current module settings
-            if hasattr(self.model, name):
-                model_kwargs[name] = getattr(self.model, name)
-
+        model_kwargs = infer_kwargs_from_init(
+            obj=self.model,
+            strict=True,
+        )
         return model_kwargs
 
     # ================================================
