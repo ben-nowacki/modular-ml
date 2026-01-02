@@ -166,7 +166,12 @@ class ExperimentContext:
     # Registration
     # =====================================================
     @classmethod
-    def register_experiment_node(cls, node: ExperimentNode):
+    def register_experiment_node(
+        cls,
+        node: ExperimentNode,
+        *,
+        check_label_collision: bool = True,
+    ):
         from modularml.core.experiment.experiment_node import ExperimentNode
 
         if not isinstance(node, ExperimentNode):
@@ -180,6 +185,7 @@ class ExperimentContext:
         node_id = node.node_id
         label = node.label
 
+        # Check node_id collision
         if node_id in cls._nodes_by_id:
             if reg_policy is RegistrationPolicy.ERROR:
                 msg = f"ExperimentNode with ID '{node_id}' is already registered."
@@ -191,7 +197,7 @@ class ExperimentContext:
                 return
 
         # Check label collision
-        if label in cls._node_label_to_id:
+        if check_label_collision and (label in cls._node_label_to_id):
             if reg_policy is RegistrationPolicy.ERROR:
                 msg = f"ExperimentNode label '{label}' already exists."
                 raise ValueError(msg)
@@ -219,6 +225,63 @@ class ExperimentContext:
     def clear_registries(cls):
         cls._nodes_by_id.clear()
         cls._node_label_to_id.clear()
+
+    @classmethod
+    def remove_node(
+        cls,
+        *,
+        node_id: str | None = None,
+        label: str | None = None,
+        error_if_missing: bool = True,
+    ):
+        """
+        Remove an ExperimentNode from the registry.
+
+        Exactly one of `node_id` or `label` must be provided.
+
+        Args:
+            node_id (str | None):
+                Internal node UUID to remove.
+            label (str | None):
+                Node label to remove.
+            error_if_missing (bool):
+                Whether to raise if the node does not exist.
+
+        Returns:
+            ExperimentNode | None:
+                The removed node if found, otherwise None.
+
+        Raises:
+            ValueError:
+                If neither or both of `node_id` / `label` are provided.
+            KeyError:
+                If the node does not exist and `error_if_missing=True`.
+
+        """
+        if (node_id is None) == (label is None):
+            raise ValueError("Must provide exactly one of `node_id` or `label`.")
+
+        # Resolve node_id if label was given
+        if label is not None:
+            node_id = cls._node_label_to_id.get(label)
+            if node_id is None:
+                if error_if_missing:
+                    msg = f"No ExperimentNode with label '{label}'."
+                    raise KeyError(msg)
+                return None
+
+        # Remove node
+        node = cls._nodes_by_id.pop(node_id, None)
+        if node is None:
+            if error_if_missing:
+                msg = f"No ExperimentNode with id '{node_id}'."
+                raise KeyError(msg)
+            return None
+
+        # Remove label mapping
+        cls._node_label_to_id.pop(node.label, None)
+
+        return node
 
     # =====================================================
     # Node Lookup

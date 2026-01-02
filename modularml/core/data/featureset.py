@@ -63,11 +63,7 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         schema: SampleSchema | None = None,
         **kwargs,
     ):
-        super().__init__(
-            label=label,
-            **kwargs,
-        )
-
+        super().__init__(label=label, **kwargs)
         # Create SampleCollection attribute
         self.collection: SampleCollection = SampleCollection(table=table, schema=schema)
 
@@ -969,10 +965,10 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         return config
 
     @classmethod
-    def from_config(cls, config: dict) -> FeatureSet:
-        """Instantiates a FeatureSet with the schema specified in config."""
+    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> FeatureSet:
+        """Instantiates a empty FeatureSet."""
         empty_table = pa.table({})
-        return cls(table=empty_table, **config)
+        return cls(table=empty_table, register=register, **config)
 
     # ================================================
     # Stateful
@@ -1056,7 +1052,13 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         )
 
     @classmethod
-    def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> FeatureSet:
+    def load(
+        cls,
+        filepath: Path,
+        *,
+        allow_packaged_code: bool = False,
+        overwrite: bool = True,
+    ) -> FeatureSet:
         """
         Load a FeatureSet from file.
 
@@ -1065,6 +1067,11 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
                 File location of a previously saved FeatureSet.
             allow_packaged_code : bool
                 Whether bundled code execution is allowed.
+            overwrite (bool):
+                Whether to replace any colliding node registrations in ExperimentContext
+                If False, a new node_id is assigned to the reloaded FeatureSet. Otherwise,
+                the existing FeatureSet is removed from the ExperimentContext registry.
+                Defaults to True.
 
         Returns:
             FeatureSet: The reloaded FeatureSet.
@@ -1076,4 +1083,8 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         if Path(filepath).suffix == "":
             filepath = _enforce_file_suffix(path=filepath, cls=cls)
 
-        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)
+        return serializer.load(
+            filepath,
+            allow_packaged_code=allow_packaged_code,
+            overwrite=overwrite,
+        )

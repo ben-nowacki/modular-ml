@@ -316,7 +316,7 @@ class DataReference(Configurable):
         config = self.__dict__.copy()
 
         # Ensure node_id and node label references are accurate at time of state save
-        if self.node_id is not None:
+        if self.node_id is not None and ExperimentContext.has_node(node_id=self.node_id):
             config["node"] = ExperimentContext.get_node(node_id=self.node_id).label
 
         return config

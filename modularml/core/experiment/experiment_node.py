@@ -9,7 +9,11 @@ from modularml.core.io.protocols import Configurable
 from modularml.utils.representation.summary import Summarizable
 
 
-class ExperimentNode(Configurable, Summarizable):
+def generate_node_id() -> str:
+    return str(uuid.uuid4())
+
+
+class ExperimentNode(Summarizable, Configurable):
     """
     Base class for all nodes within an Experiment.
 
@@ -27,12 +31,15 @@ class ExperimentNode(Configurable, Summarizable):
         Initialize a ExperimentNode with a name and register.
 
         Args:
-            label (str): Unique identifier for this node.
-            node_id (str, optional): Used only for from_state serialization.
-            register (bool, optional): Used only for from_state serialization.
+            label (str):
+                Unique identifier for this node.
+            node_id (str, optional):
+                Used only for de-serialization.
+            register (bool, optional):
+                Used only for de-serialization.
 
         """
-        self._node_id: str = node_id or str(uuid.uuid4())
+        self._node_id: str = node_id or generate_node_id()
         self._label: str = label
 
         # Register to context
@@ -86,9 +93,5 @@ class ExperimentNode(Configurable, Summarizable):
         }
 
     @classmethod
-    def from_config(cls, config: dict):
-        return cls(
-            label=config["label"],
-            node_id=config["node_id"],
-            register=False,
-        )
+    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> ExperimentNode:
+        return cls(register=register, **config)

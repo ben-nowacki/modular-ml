@@ -8,6 +8,8 @@ import numpy as np
 
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_TAGS, DOMAIN_TARGETS, REP_TRANSFORMED
+from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_node import generate_node_id
 from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.io.symbol_registry import symbol_registry
@@ -277,8 +279,8 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
 
         config: dict[str, Any] = self.decode_config(load_dir=load_dir, ctx=ctx)
 
-        # Instantiate FeatureSet from config
-        fs_obj = cls.from_config(config=config)
+        # Instantiate new FeatureSet from config, we cannot register until performing collision checks
+        fs_obj = cls.from_config(config=config, register=False)
 
         # Extract state
         state: dict[str, Any] = self.decode_state(load_dir=load_dir, ctx=ctx)
@@ -299,10 +301,44 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         # Set state
         fs_obj.set_state(state=state)
 
-        # Scalers don't always have a serializable state
-        # To ensure future use of a de-serialized scaler with proper learned state,
-        # we need to re-fit scalers in the order they were originally applied.
-        # Remove any residual transformed representations (we fully rebuild from raw rep)
+        # Collision checking
+        if ExperimentContext.has_node(node_id=fs_obj.node_id):
+            # If same node_id exists, perform the following checks:
+            # 1. same label + same state -> reuse existing
+            # 2. different label or different state -> override or fork
+
+            # Override = replace existing node_id reference in ExperimentContext with new object
+            # Fork = generate new node_id for reloaded object and register
+            existing = ExperimentContext.get_node(node_id=fs_obj.node_id)
+
+            # Case 1
+            if isinstance(existing, FeatureSet) and existing == fs_obj:
+                # Early-return existing node
+                return existing
+
+            # Case 2
+            if ctx.overwrite_collision:
+                # Remove existing from ExperimentContext
+                _ = ExperimentContext.remove_node(
+                    node_id=existing.node_id,
+                    error_if_missing=True,
+                )
+            else:
+                # Update node_id of new node
+                fs_obj._node_id = generate_node_id()
+
+        # Register new node (we allow same labels)
+        ExperimentContext.register_experiment_node(
+            node=fs_obj,
+            check_label_collision=False,
+        )
+
+        # While the transformed data and splits are identical after set_state,
+        # some scaler states can't be fully serialized. This means that reusing the
+        # de-serialized scaler (e.g., using `undo_transform`) could cause instability.
+        # To avoid this, we reapply the scalers in the same order (ie re-fit them)
+
+        # 1. Remove any residual transformed representations (we fully rebuild from raw rep)
         for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
             for k in fs_obj.collection._get_domain_keys(
                 domain=domain,
@@ -312,7 +348,7 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
                 if REP_TRANSFORMED in fs_obj.collection._get_rep_keys(domain=domain, key=k):
                     fs_obj.collection.delete_rep(domain=domain, key=k, rep=REP_TRANSFORMED)
 
-        # Reapply scalers (clear those on featureset)
+        # 2. Reapply scalers (clear those on featureset)
         fs_obj._scaler_recs = []
         records: list[ScalerRecord] = state["scaler_records"]
         for rec in records:

@@ -27,22 +27,30 @@ class GraphNode(ABC, ExperimentNode):
         label: str,
         upstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
         downstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
-        **kwargs,
+        *,
+        node_id: str | None = None,
+        register: bool = True,
     ):
         """
         Initialize a GraphNode with optional upstream and downstream connections.
 
         Args:
-            label (str): Unique identifier for this node.
-            upstream_refs (ReferenceLike | list[ReferenceLike] | None): References of upstream connections.
-            downstream_refs (ReferenceLike | list[ReferenceLike] | None): References of downstream connections.
-            kwargs: Extra arguments to pass to super().
+            label (str):
+                Unique identifier for this node.
+            upstream_refs (ReferenceLike | list[ReferenceLike] | None):
+                References of upstream connections.
+            downstream_refs (ReferenceLike | list[ReferenceLike] | None):
+                References of downstream connections.
+            node_id (str, optional):
+                Used only for de-serialization.
+            register (bool, optional):
+                Used only for de-serialization.
 
         Raises:
             TypeError: If `upstream_refs` or `downstream_refs` are not valid types.
 
         """
-        super().__init__(label=label, **kwargs)
+        super().__init__(label=label, node_id=node_id, register=register)
 
         # Normalize inputs as lists
         self._upstream_refs: list[ReferenceLike] = ensure_list(upstream_refs)
@@ -480,15 +488,15 @@ class GraphNode(ABC, ExperimentNode):
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        config = super().get_config()
-        config.update(
+        cfg = super().get_config()
+        cfg.update(
             {
                 "upstream_refs": self._upstream_refs,
                 "downstream_refs": self._downstream_refs,
             },
         )
-        return config
+        return cfg
 
     @classmethod
-    def from_config(cls, config: dict):
-        return cls(**config)
+    def from_config(cls, config: dict[str, Any], *, register: bool = True) -> ExperimentNode:
+        return cls(register=register, **config)

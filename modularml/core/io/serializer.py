@@ -309,12 +309,14 @@ class LoadContext:
     Attributes:
         artifact_path (Path):
             Root directory of the artifact being loaded.
-        allow_packaged_code (bool):
-            Whether executing bundled code is permitted.
-        packaged_code_loader (Callable):
-            Loader used to execute bundled code for PACKAGED classes.
         serializer (Any):
             Owning serializer instance (for advanced resolution if needed).
+
+        allow_packaged_code (bool):
+            Whether executing bundled code is permitted.
+        overwrite_collision (bool):
+            Whether to overwrite collision (ie. same `node_id`) or generate a new node_id.
+            Defaults to False (ie. register with new node_id)
 
     """
 
@@ -324,10 +326,12 @@ class LoadContext:
         serializer: Serializer,
         *,
         allow_packaged_code: bool,
+        overwrite_collision: bool = False,
     ):
         self.artifact_path = artifact_path
         self.serializer = serializer
         self.allow_packaged_code = allow_packaged_code
+        self.overwrite_collision = overwrite_collision
 
     def load_from_dir(
         self,
@@ -524,15 +528,25 @@ class Serializer:
         *,
         allow_packaged_code: bool = False,
         provided_class: type | None = None,
+        overwrite: bool = False,
     ) -> Any:
         """
         Load an artifact from disk and reconstruct the serialized object.
 
         Args:
-            path (str): Artifact directory.
-            allow_packaged_code (bool): Whether bundled code execution is allowed.
-            packaged_code_loader (Any): Callable used for PACKAGED fallback loading.
-            provided_class (type | None): Required when policy == STATE_ONLY.
+            path (str):
+                Artifact directory.
+            allow_packaged_code (bool):
+                Whether bundled code execution is allowed.
+            packaged_code_loader (Any):
+                Callable used for PACKAGED fallback loading.
+            provided_class (type | None):
+                Required when policy == STATE_ONLY.
+            overwrite (bool):
+                Whether to replace any colliding node registrations in ExperimentContext
+                If False, a new node_id is assigned to the reloaded object. Otherwise,
+                the existing node is removed from the ExperimentContext registry.
+                Defaults to False.
 
         Returns:
             Any: Reconstructed object.
@@ -551,6 +565,7 @@ class Serializer:
                 artifact_path=tmp_path,
                 serializer=self,
                 allow_packaged_code=allow_packaged_code,
+                overwrite_collision=overwrite,
             )
 
             return ctx.load_from_dir(
