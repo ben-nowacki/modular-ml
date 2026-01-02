@@ -280,7 +280,7 @@ class Scaler(Configurable, Stateful):
                 Whether bundled code execution is allowed.
 
         Returns:
-            Scaler: The reloaded sampler.
+            Scaler: The reloaded scaler.
 
         """
         from modularml.core.io.serializer import _enforce_file_suffix, serializer
