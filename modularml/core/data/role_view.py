@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from modularml.utils.representation.summary import format_summary_box
+from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
     from modularml.core.data.batch import Batch
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from modularml.core.data.sample_shapes import SampleShapes
 
 
-class RoleView:
+class RoleView(Summarizable):
     """Lightweight, read-only view over a single role in a Batch."""
 
     __slots__ = ("_batch", "_role")
@@ -60,16 +60,10 @@ class RoleView:
     def __repr__(self) -> str:
         return f"RoleView(role='{self._role}', batch_size={self._batch.batch_size})"
 
-    def summary(self, max_width: int = 88) -> str:
-        rows = [
+    def _summary_rows(self) -> list[tuple]:
+        return [
             ("role", self.role),
             ("batch_size", self._batch.batch_size),
             ("domains", [(k, "") for k in self.data.data]),
             ("shapes", [(k, str(v)) for k, v in self.shapes.shapes.items()]),
         ]
-
-        return format_summary_box(
-            title=self.__class__.__name__,
-            rows=rows,
-            max_width=max_width,
-        )

@@ -6,13 +6,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from modularml.core.data.role_view import RoleView
-from modularml.core.data.sample_data import SampleData
+from modularml.core.data.sample_data import RoleData
 from modularml.core.data.sample_shapes import SampleShapes
-from modularml.utils.representation.summary import format_summary_box
+from modularml.utils.representation.summary import Summarizable
 
 
 @dataclass(frozen=True)
-class Batch:
+class Batch(Summarizable):
     """
     Immutable, role-structured tensor container produced from a single BatchView.
 
@@ -23,7 +23,7 @@ class Batch:
     batch_size: int
 
     # Core role-based storage
-    role_data: Mapping[str, SampleData]
+    role_data: RoleData
     shapes: SampleShapes
     role_weights: Mapping[str, NDArray[np.float32]]
 
@@ -85,19 +85,13 @@ class Batch:
     # ================================================
     # Representation
     # ================================================
-    def summary(self, max_width: int = 88) -> str:
-        rows = [
+    def _summary_rows(self) -> list[tuple]:
+        return [
             ("batch_size", self.batch_size),
             ("roles", [(role, "") for role in self.roles]),
             ("shapes", [(k, str(v)) for k, v in self.shapes.shapes.items()]),
             ("uuid", self.uuid),
         ]
-
-        return format_summary_box(
-            title=self.__class__.__name__,
-            rows=rows,
-            max_width=max_width,
-        )
 
     def __repr__(self) -> str:
         return f"Batch(batch_size={self.batch_size}, roles={self.roles}, uuid='{self.uuid}')"

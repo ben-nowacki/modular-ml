@@ -1,12 +1,18 @@
-from typing import Any
+from __future__ import annotations
+
+from collections.abc import Iterator, Mapping
+from typing import TYPE_CHECKING, Any
 
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.utils.data.conversion import convert_to_format
 from modularml.utils.data.data_format import get_data_format_for_backend
-from modularml.utils.nn.backend import Backend
+from modularml.utils.representation.summary import Summarizable
+
+if TYPE_CHECKING:
+    from modularml.utils.nn.backend import Backend
 
 
-class SampleData:
+class SampleData(Summarizable):
     """
     Tensor-like data container for a single role across all schema domains.
 
@@ -62,6 +68,9 @@ class SampleData:
             if tags is not None:
                 self.data[DOMAIN_TAGS] = tags
 
+    # ================================================
+    # Data access
+    # ================================================
     @property
     def sample_uuids(self):
         """Tensor-like data stored under DOMAIN_SAMPLE_ID."""
@@ -82,46 +91,9 @@ class SampleData:
         """Tensor-like data stored under DOMAIN_TAGS."""
         return self.data.get(DOMAIN_TAGS)
 
-    def __repr__(self) -> str:
-        return f"SampleData(features={self.features.shape}, targets={self.targets.shape}, tags={self.tags.shape})"
-
-    def __str__(self):
-        return self.__repr__()
-
-    def summary(self, *, include_none: bool = False) -> str:
-        """
-        Return a human-readable multi-line summary of the SampleData contents.
-
-        Description:
-            Shows the available schema domains (features, targets, tags), the
-            tensor shapes for each, and any missing domains if `include_none=True`.
-
-        Returns:
-            str: Formatted summary block.
-
-        """
-        rows = []
-
-        for key, val in self.data.items():
-            if val is not None or include_none:
-                # Get shape if tensor-like
-                try:
-                    shape = tuple(val.shape)
-                except Exception:  # noqa: BLE001
-                    shape = "N/A"
-                rows.append(f"{key:<12}: {shape}")
-
-        # If empty, add placeholder
-        if not rows:
-            rows.append("(no data)")
-
-        width = max(len(r) for r in rows)
-        title = f"{self.__class__.__name__}"
-        border = "─" * width
-
-        body = "\n".join(rows)
-        return f"┌─ {title} {'─' * (width - len(title) - 3)}┐\n{body}\n└{border}┘"
-
+    # ================================================
+    # Backend casting
+    # ================================================
     def to_backend(self, backend: Backend):
         """
         Casts the data to a DataFormat compatible with specified backend.
@@ -139,3 +111,129 @@ class SampleData:
             data=self.data[DOMAIN_TARGETS],
             fmt=get_data_format_for_backend(backend=backend),
         )
+
+    # ================================================
+    # Representation
+    # ================================================
+    def _summary_rows(self) -> list[tuple]:
+        rows: list[tuple] = []
+
+        for domain, val in self.data.items():
+            if val is None:
+                shape = None
+            else:
+                try:
+                    shape = str(tuple(val.shape))
+                except Exception:  # noqa: BLE001
+                    shape = "N/A"
+
+            rows.append((domain, shape))
+
+        return rows
+
+    def __repr__(self) -> str:
+        f = self.features.shape if self.features is not None else None
+        t = self.targets.shape if self.targets is not None else None
+        g = self.tags.shape if self.tags is not None else None
+        return f"SampleData(features={f}, targets={t}, tags={g})"
+
+
+class RoleData(Mapping[str, SampleData], Summarizable):
+    """
+    Immutable, role-keyed container for SampleData objects.
+
+    Description:
+        RoleData is a lightweight convenience wrapper around
+        `dict[str, SampleData]` that provides:
+
+        - attribute-style role access
+        - role introspection
+        - readable summaries
+        - a stable return type for model forward passes
+
+        It contains no graph, batch, or sampler semantics.
+    """
+
+    __slots__ = ("_data",)
+
+    def __init__(self, data: Mapping[str, SampleData]):
+        if not data:
+            raise ValueError("RoleData must contain at least one role.")
+
+        for role, sd in data.items():
+            if not isinstance(role, str):
+                msg = f"Role keys must be str, got {type(role)}"
+                raise TypeError(msg)
+            if not isinstance(sd, SampleData):
+                msg = f"Role '{role}' must map to SampleData, got {type(sd)}"
+                raise TypeError(msg)
+
+        self._data = dict(data)
+
+    # ================================================
+    # Mapping interface
+    # ================================================
+    def __getitem__(self, role: str) -> SampleData:
+        return self._data[role]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    # ================================================
+    # Role access
+    # ================================================
+    @property
+    def roles(self) -> list[str]:
+        """List of available role names."""
+        return list(self._data.keys())
+
+    def get_role(self, role: str, default: Any = None) -> SampleData | Any:
+        return self._data.get(role, default)
+
+    # ================================================
+    # Attribute access
+    # ================================================
+    def __getattr__(self, name: str) -> SampleData:
+        # Called only if attribute not found normally
+        if name in self._data:
+            return self._data[name]
+        msg = f"{self.__class__.__name__} has no role '{name}'. Available roles: {self.roles}"
+        raise AttributeError(msg)
+
+    # ================================================
+    # Utilities
+    # ================================================
+    def to_dict(self) -> dict[str, SampleData]:
+        """Explicitly unwrap to a plain dict."""
+        return dict(self._data)
+
+    def to_backend(self, backend) -> RoleData:
+        """
+        Cast all SampleData objects to a backend-compatible format.
+
+        Returns:
+            RoleData: New RoleData with converted SampleData.
+
+        """
+        return RoleData({role: sd.to_backend(backend) or sd for role, sd in self._data.items()})
+
+    # ================================================
+    # Representation
+    # ================================================
+    def _summary_rows(self) -> list[tuple]:
+        rows: list[tuple] = []
+
+        # Avialable roles
+        rows.append(("roles", [(r, "") for r in self.roles]))
+
+        # One row per role with SampleData summary
+        for role, sample_data in self._data.items():
+            rows.append((role, sample_data._summary_rows()))
+
+        return rows
+
+    def __repr__(self) -> str:
+        return f"RoleData(roles={self.roles})"
