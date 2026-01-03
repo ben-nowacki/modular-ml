@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
+import pandas as pd
 import pyarrow as pa
 
 from modularml.core.data.sample_collection import SampleCollection
@@ -11,12 +13,12 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TAGS,
     DOMAIN_TARGETS,
 )
+from modularml.utils.data.conversion import convert_dict_to_format, convert_to_format
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
 
 if TYPE_CHECKING:
-    import numpy as np
-    import pandas as pd
+    from numpy.typing import NDArray
 
     from modularml.core.data.featureset import FeatureSet
 
@@ -43,7 +45,8 @@ class SampleCollectionMixin:
         """Must resolve the source SampleCollection, list of columns, and row indices of the caller."""
         raise NotImplementedError
 
-    def _resolve_collection(self) -> SampleCollection:
+    def _resolve_collection(self) -> tuple[SampleCollection, np.ndarray | None]:
+        """Returns SampleColection and mask over callers columns and indices."""
         collection, columns, indices = self._resolve_caller_attributes()
         if columns is not None and DOMAIN_SAMPLE_ID not in columns:
             columns.append(DOMAIN_SAMPLE_ID)
@@ -51,9 +54,94 @@ class SampleCollectionMixin:
         # Column filtering
         sub_table = collection.table if columns is None else collection.table.select(columns)
 
-        # Row filtering
-        sub_table = sub_table if indices is None else sub_table.take(pa.array(indices))
-        return SampleCollection(table=sub_table)
+        if indices is None:
+            return SampleCollection(table=sub_table), None
+
+        # Row filtering over only valid (non-negative indices)
+        indices = np.asarray(indices)
+        mask = indices >= 0
+        valid_indices = indices[mask]
+        sub_table = sub_table.take(pa.array(valid_indices))
+
+        # Return collection of valid indices, and mask (zeros = areas to pad)
+        return SampleCollection(table=sub_table), mask
+
+    def _pad_output(
+        self,
+        data: dict[str, np.ndarray],
+        mask: np.ndarray,
+        *,
+        fill_value: Any | None = None,
+    ) -> dict[str, np.ndarray]:
+        """
+        Insert padded elements where mask == False.
+
+        Args:
+            data (dict[str, np.ndarray]):
+                Mapping of column name -> array with leading dimension = n_samples.
+            mask (np.ndarray):
+                Boolean or 0/1 mask of length n_samples indicating valid rows.
+            fill_value (Any):
+                Value used to fill padded rows. Must be compatible with array dtype.
+                If None, infers fill value based on numpy dtype of the data.
+
+        Returns:
+            dict[str, np.ndarray]:
+                Padded arrays with the same shapes/dtypes as inputs.
+
+        """
+
+        def _default_fill_value(dtype: np.dtype):
+            """Return a dtype-appropriate default fill value."""
+            kind = dtype.kind
+
+            if kind == "f":  # float
+                return 0.0
+            if kind in ("i", "u"):  # int / uint
+                return 0
+            if kind == "b":  # bool
+                return False
+            if kind in ("U", "S"):  # unicode / bytes
+                return ""
+            if kind == "O":  # object (e.g. strings, mixed metadata)
+                return None
+
+            msg = f"No default fill value defined for dtype {dtype}"
+            raise TypeError(msg)
+
+        mask = np.asarray(mask, dtype=bool)
+        if len(mask) != self.n_samples:
+            msg = f"Mask must have length equal to number of samples. {len(mask)} != {self.n_samples}"
+            raise ValueError(msg)
+
+        def _pad_array(arr: np.ndarray) -> np.ndarray:
+            if arr is None:
+                return None
+            if arr.shape[0] != self.n_samples:
+                msg = f"Data must have leading dimension equal to number of samples. {arr.shape[0]} != {self.n_samples}"
+                raise ValueError(msg)
+
+            # Get shape of samples
+            sample_shape = arr.shape[1:]
+            out_shape = (len(mask), *sample_shape)
+
+            # Resolve fill value
+            fv = fill_value if fill_value is not None else _default_fill_value(arr.dtype)
+
+            # Allocate padded output using fill_value
+            try:
+                out = np.full(out_shape, fv, dtype=arr.dtype)
+            except (TypeError, ValueError):
+                # Fallback for incompatible fill_value (e.g. string into numeric)
+                out = np.empty(out_shape, dtype=arr.dtype)
+                out[:] = fv
+
+            # Insert real data
+            out[mask] = arr
+
+            return out
+
+        return {k: _pad_array(v) for k, v in data.items()}
 
     # ================================================
     # Basic properties
@@ -61,11 +149,19 @@ class SampleCollectionMixin:
     @property
     def n_samples(self) -> int:
         """Total number of samples (rows)."""
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.n_samples
 
     def __len__(self) -> int:
         return self.n_samples
+
+    @property
+    def sample_mask(self) -> NDArray[np.int8] | None:
+        """Mask over samples: 1=valid sample, 0=padded sample."""
+        _, _, indices = self._resolve_caller_attributes()
+        if indices is None:
+            return None
+        return (np.asarray(indices) >= 0).astype(np.int8)
 
     # ================================================
     # Key accessors
@@ -89,7 +185,7 @@ class SampleCollectionMixin:
             List of all feature column names.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_feature_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -114,7 +210,7 @@ class SampleCollectionMixin:
             List of all target column names.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_target_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -139,7 +235,7 @@ class SampleCollectionMixin:
             List of all tag column names.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_tag_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -161,7 +257,7 @@ class SampleCollectionMixin:
                 All unique columns in the SampleCollection.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_all_keys(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -192,7 +288,7 @@ class SampleCollectionMixin:
                 Mapping of feature column representation names to their shapes.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_feature_shapes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -220,7 +316,7 @@ class SampleCollectionMixin:
                 Mapping of target column representation names to their shapes.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_target_shapes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -248,7 +344,7 @@ class SampleCollectionMixin:
                 Mapping of tag column representation names to their shapes.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_tag_shapes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -274,7 +370,7 @@ class SampleCollectionMixin:
                 Mapping of feature column names to their data-types.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_feature_dtypes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -300,7 +396,7 @@ class SampleCollectionMixin:
                 Mapping of targets column names to their data-types.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_target_dtypes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -326,7 +422,7 @@ class SampleCollectionMixin:
                 Mapping of tag column names to their data-types.
 
         """
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
         return collection.get_tag_dtypes(
             include_rep_suffix=include_rep_suffix,
             include_domain_prefix=include_domain_prefix,
@@ -405,7 +501,7 @@ class SampleCollectionMixin:
             Data from the specified columns, in the request DataFormat.
 
         """
-        collection = self._resolve_collection()
+        collection, mask = self._resolve_collection()
 
         # Extract real columns from collection
         all_cols: list[str] = collection.get_all_keys(
@@ -430,13 +526,20 @@ class SampleCollectionMixin:
             if d in selected:
                 sel_cols.extend(sorted(selected[d]))
 
-        # Delegate actual data extraction
-        return collection.get_columns(
+        # Grab data from valid indices
+        data = collection.get_columns(
             columns=sel_cols,
-            fmt=fmt,
+            fmt=DataFormat.DICT_NUMPY,
             include_domain_prefix=include_domain_prefix,
             include_rep_suffix=include_rep_suffix,
         )
+
+        # Pad invalid indices, if needed
+        if mask is not None:
+            data = self._pad_output(data=data, mask=mask)
+
+        # Convert data to requested format
+        return convert_dict_to_format(data=data, fmt=fmt, mode="stack", axis=1)
 
     def get_features(
         self,
@@ -615,9 +718,9 @@ class SampleCollectionMixin:
             include_rep_suffix=include_rep_suffix,
         )
 
-    # ==========================================================
+    # ================================================
     # UUID access
-    # ==========================================================
+    # ================================================
     def get_sample_uuids(self, fmt: DataFormat = DataFormat.NUMPY):
         """
         Retrieve sample UUIDs in this collection.
@@ -629,16 +732,30 @@ class SampleCollectionMixin:
 
         Returns:
             Sample UUIDs in the requested format.
+            Padded data is given a sample UUID of "N/A".
 
         """
-        collection = self._resolve_collection()
-        return collection.get_sample_uuids(fmt=fmt)
+        collection, mask = self._resolve_collection()
 
-    # ==========================================================
+        data = collection.get_sample_uuids(fmt=DataFormat.NUMPY)
+
+        # Pad invalid indices, if needed
+        if mask is not None:
+            d_data = self._pad_output(
+                data={"sample_id": data},
+                mask=mask,
+                fill_value="N/A",
+            )
+            data = d_data["sample_id"]
+
+        # Convert data to requested format
+        return convert_to_format(data=data, fmt=fmt)
+
+    # ================================================
     # Export
-    # ==========================================================
+    # ================================================
     def to_arrow(self) -> pa.Table:
-        collection = self._resolve_collection()
+        collection, _ = self._resolve_collection()
 
         # Sort columns (not necessary but nicer for manual inspection)
         sorted_cols = collection.get_all_keys(
@@ -647,11 +764,38 @@ class SampleCollectionMixin:
         )
         return collection.table.select(sorted_cols)
 
-    def to_pandas(self) -> pd.DataFrame:
-        return self.to_arrow().to_pandas()
+    def to_pandas(
+        self,
+        *,
+        include_padded: bool = False,
+        include_mask: bool = True,
+    ) -> pd.DataFrame:
+        # Case 1: no padding requested or no mask exists
+        if not include_padded or self.sample_mask is None:
+            df = self.to_arrow().to_pandas()
+            if include_mask and self.sample_mask is not None:
+                df["__mask__"] = 1
+            return df
+
+        # Case 2: include padded rows
+        # get_data performs padded automatically if mask is not None
+        data = self.get_data(fmt=DataFormat.DICT_NUMPY)
+
+        # Flatten into DataFrame
+        df = {}
+        for k, v in data.items():
+            # Each column may be multi-dim -> store as list
+            df[k] = list(v)
+
+        out = pd.DataFrame(df)
+        if include_mask:
+            out["__mask__"] = self.sample_mask.astype(int)
+
+        return out
 
     def to_sample_collection(self) -> SampleCollection:
-        return self._resolve_collection()
+        coll, _ = self._resolve_collection()
+        return coll
 
     def to_featureset(self, label: str) -> FeatureSet:
         from modularml.core.data.featureset import FeatureSet

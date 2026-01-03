@@ -19,6 +19,8 @@ from modularml.core.splitting.split_mixin import SplitMixin
 from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.sample_collection import SampleCollection
 
@@ -32,7 +34,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
     """
 
     source: FeatureSet
-    indices: np.ndarray
+    indices: NDArray[np.int64]
     columns: list[str]
     label: str | None = None
 
@@ -41,7 +43,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         cls,
         fs: FeatureSet,
         *,
-        rows: np.ndarray | None = None,
+        rows: NDArray[np.int64] | None = None,
         columns: list[str] | None = None,
     ) -> FeatureSetView:
         if rows is None:
@@ -51,7 +53,7 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
                 include_domain_prefix=True,
                 include_rep_suffix=True,
             )
-        return cls(source=fs, indices=np.asarray(rows, dtype=int), columns=columns)
+        return cls(source=fs, indices=np.asarray(rows, dtype=np.int64), columns=columns)
 
     # ================================================
     # Properties & Dunders
@@ -81,29 +83,10 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
         # Use default __setattr__ behavior
         super().__setattr__(name, value)
 
-    def _summary_rows(self) -> list[tuple]:
-        return [
-            ("label", self.label),
-            ("source", self.source.label),
-            ("n_samples", self.n_samples),
-            (
-                "columns",
-                [
-                    (
-                        DOMAIN_FEATURES,
-                        str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True)),
-                    ),
-                    (
-                        DOMAIN_TARGETS,
-                        str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True)),
-                    ),
-                    (
-                        DOMAIN_TAGS,
-                        str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True)),
-                    ),
-                ],
-            ),
-        ]
+    @property
+    def valid_indices(self) -> np.ndarray:
+        """Indices >= 0 (used for data lookup)."""
+        return self.indices[self.indices >= 0]
 
     # ================================================
     # SampleCollectionMixin
@@ -111,7 +94,11 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
     def _resolve_caller_attributes(
         self,
     ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None]:
-        return (self.source.collection, self.columns, self.indices)
+        return (
+            self.source.collection,
+            self.columns,
+            self.indices,
+        )
 
     # ================================================
     # Comparators
@@ -218,3 +205,30 @@ class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurab
             columns=config["columns"],
             label=config["label"],
         )
+
+    # ================================================
+    # Representation
+    # ================================================
+    def _summary_rows(self) -> list[tuple]:
+        return [
+            ("label", self.label),
+            ("source", self.source.label),
+            ("n_samples", self.n_samples),
+            (
+                "columns",
+                [
+                    (
+                        DOMAIN_FEATURES,
+                        str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TARGETS,
+                        str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TAGS,
+                        str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                ],
+            ),
+        ]

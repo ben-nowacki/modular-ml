@@ -134,7 +134,7 @@ class TripletSampler(NSampler):
                 "positive": pos_conditions,
                 "negative": neg_conditions,
             },
-            source=source,
+            sources=source,
             batch_size=batch_size,
             shuffle=shuffle,
             max_samples_per_anchor=max_samples_per_anchor,
@@ -150,7 +150,7 @@ class TripletSampler(NSampler):
         )
 
     def __repr__(self):
-        return f"TripletSampler(n_batches={len(self.batches)}, batch_size={self.batcher.batch_size})"
+        return f"TripletSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
 
     # ================================================
     # Configurable

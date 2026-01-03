@@ -6,8 +6,7 @@ from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
     from modularml.core.data.batch import Batch
-    from modularml.core.data.sample_data import SampleData
-    from modularml.core.data.sample_shapes import SampleShapes
+    from modularml.core.data.sample_data import SampleData, SampleShapes
 
 
 class RoleView(Summarizable):

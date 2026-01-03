@@ -3,10 +3,10 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from modularml.core.data.batch import Batch, SampleShapes
+from modularml.core.data.batch import Batch
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.sample_data import RoleData, SampleData
+from modularml.core.data.sample_data import RoleData, SampleData, SampleShapes
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.utils.data.conversion import to_numpy
 from modularml.utils.data.data_format import DataFormat, format_is_tensorlike
@@ -72,9 +72,26 @@ class BatchView(Summarizable):
         first_role = next(iter(self.role_indices))
         return len(self.role_indices[first_role])
 
+    @property
+    def role_masks(self) -> dict[str, NDArray[np.int8]]:
+        """
+        Binary mask per role.
+
+        1 = valid sample
+        0 = padded / missing sample (index < 0)
+        """
+        return {r: self.get_role_mask(r) for r in self.roles}
+
     # ==========================================
     # Data Accessors
     # ==========================================
+    def get_role_mask(self, role: str) -> NDArray[np.int8]:
+        fsv = self.get_role_view(role=role)
+        mask = fsv.sample_mask.astype(np.int8)
+        if mask is None:
+            return np.ones(len(fsv), dtype=np.int8)
+        return mask
+
     def get_role_view(self, role: str) -> FeatureSetView:
         """
         Construct a FeatureSetView for a specific role.
@@ -214,6 +231,7 @@ class BatchView(Summarizable):
             )
 
             # Extract feature/target/tag values in chosen format
+            # These are padded automically
             features = fsv.get_features(
                 fmt=fmt,
                 rep=None,
@@ -277,6 +295,7 @@ class BatchView(Summarizable):
         return Batch(
             batch_size=self.n_samples,
             role_data=role_data,
+            role_masks=self.role_masks,
             shapes=shapes,
             role_weights=role_sample_weights,
         )

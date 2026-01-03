@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.sampling.base_sampler import BaseSampler, Samples
-
-if TYPE_CHECKING:
-    from modularml.core.data.featureset import FeatureSet
 
 
 class SimpleSampler(BaseSampler):
@@ -82,7 +80,7 @@ class SimpleSampler(BaseSampler):
 
         """
         super().__init__(
-            source=source,
+            sources=source,
             batch_size=batch_size,
             shuffle=shuffle,
             group_by=group_by,
@@ -95,20 +93,49 @@ class SimpleSampler(BaseSampler):
             show_progress=show_progress,
         )
 
-    def build_samples(self) -> Samples:
-        if self.source is None:
+    def bind_sources(self, source: FeatureSet | FeatureSetView):
+        """Instantiates batches via `build_sampled_view()`."""
+        if isinstance(source, FeatureSet):
+            view = source.to_view()
+        elif isinstance(source, FeatureSetView):
+            view = source
+        else:
+            raise TypeError("Sampler source must be a FeatureSet or FeatureSetView.")
+
+        self.sources: dict[str, FeatureSetView] = {view.source.label: view}
+        self._sampled = self.build_sampled_view()
+
+    def build_samples(self) -> dict[tuple[str, str], Samples]:
+        """
+        Construct samples using grouping or stratification logic.
+
+        Returns:
+            dict[tuple[str, str], Samples]:
+                Mapping of stream labels to Samples objects with attributes
+                representing a batch of sample indices and weights.
+                The dict key must be a 2-tuple of (stream label, source FeatureSet label).
+
+        """
+        if self.sources is None:
             raise RuntimeError("`bind_source` must be called before sampling can occur.")
-        if not isinstance(self.source, FeatureSetView):
-            msg = f"`source` must be of type FeatureSetView. Received: {type(self.source)}"
+        src_lbl = next(iter(self.sources.keys()))
+        src = self.sources[src_lbl]
+        if not isinstance(src, FeatureSetView):
+            msg = f"`source` must be of type FeatureSetView. Received: {type(src)}"
             raise TypeError(msg)
 
-        return Samples(
-            role_indices={"default": self.source.indices},
-            role_weights=None,
-        )
+        # dict key is 2-tuple of stream_label, source_label
+        # For single-stream samplers like this one, we use the source label
+        # as the stream label
+        return {
+            (src_lbl, src_lbl): Samples(
+                role_indices={"default": src.indices},
+                role_weights=None,
+            ),
+        }
 
     def __repr__(self):
-        return f"SimpleSampler(n_batches={len(self.batches)}, batch_size={self.batcher.batch_size})"
+        return f"SimpleSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
 
     # ================================================
     # Configurable

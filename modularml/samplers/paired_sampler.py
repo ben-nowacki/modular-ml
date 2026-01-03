@@ -128,7 +128,7 @@ class PairedSampler(NSampler):
         """
         super().__init__(
             condition_mapping={"pair": conditions},
-            source=source,
+            sources=source,
             batch_size=batch_size,
             shuffle=shuffle,
             max_samples_per_anchor=max_pairs_per_anchor,
@@ -144,7 +144,7 @@ class PairedSampler(NSampler):
         )
 
     def __repr__(self):
-        return f"PairedSampler(n_batches={len(self.batches)}, batch_size={self.batcher.batch_size})"
+        return f"PairedSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
 
     # ================================================
     # Configurable

@@ -3,8 +3,7 @@ import uuid
 import numpy as np
 
 from modularml.core.data.batch import Batch
-from modularml.core.data.sample_data import SampleData
-from modularml.core.data.sample_shapes import SampleShapes
+from modularml.core.data.sample_data import SampleData, SampleShapes
 from modularml.utils.data.formatting import ensure_list
 
 

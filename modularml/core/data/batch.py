@@ -6,8 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from modularml.core.data.role_view import RoleView
-from modularml.core.data.sample_data import RoleData
-from modularml.core.data.sample_shapes import SampleShapes
+from modularml.core.data.sample_data import RoleData, SampleShapes
 from modularml.utils.representation.summary import Summarizable
 
 
@@ -26,6 +25,7 @@ class Batch(Summarizable):
     role_data: RoleData
     shapes: SampleShapes
     role_weights: Mapping[str, NDArray[np.float32]]
+    role_masks: dict[str, NDArray[np.int8]]
 
     # Tracking
     uuid: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -45,9 +45,13 @@ class Batch(Summarizable):
         for role in roles:
             data = self.role_data[role]
             weights = self.role_weights[role]
+            mask = self.role_masks[role]
 
             if weights.shape != (self.batch_size,):
                 msg = f"role_weights['{role}'] has shape {weights.shape}, expected ({self.batch_size},)"
+                raise ValueError(msg)
+            if mask.shape != (self.batch_size,):
+                msg = f"role_masks['{role}'] has shape {mask.shape}, expected ({self.batch_size},)"
                 raise ValueError(msg)
 
             # Validate batch dimension consistency

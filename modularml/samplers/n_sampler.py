@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.references.data_reference import DataReference
 from modularml.core.sampling.base_sampler import BaseSampler, Samples
@@ -14,7 +15,6 @@ from modularml.utils.data.data_format import DataFormat
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from modularml.core.data.featureset import FeatureSet
     from modularml.core.sampling.similiarity_condition import SimilarityCondition
 
 
@@ -124,7 +124,7 @@ class NSampler(BaseSampler):
         self.choose_best_only = choose_best_only
 
         super().__init__(
-            source=source,
+            sources=source,
             batch_size=batch_size,
             shuffle=shuffle,
             group_by=group_by,
@@ -137,7 +137,19 @@ class NSampler(BaseSampler):
             show_progress=show_progress,
         )
 
-    def build_samples(self) -> Samples:
+    def bind_sources(self, source: FeatureSet | FeatureSetView):
+        """Instantiates batches via `build_sampled_view()`."""
+        if isinstance(source, FeatureSet):
+            view = source.to_view()
+        elif isinstance(source, FeatureSetView):
+            view = source
+        else:
+            raise TypeError("Sampler source must be a FeatureSet or FeatureSetView.")
+
+        self.sources: dict[str, FeatureSetView] = {view.source.label: view}
+        self._sampled = self.build_sampled_view()
+
+    def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
         Construct N-way samples using similarity-based matching logic.
 
@@ -159,9 +171,10 @@ class NSampler(BaseSampler):
                 - role-specific sample weights
 
         Returns:
-            Samples
-                A Samples object with attributes representing an
-                N-way batch of aligned sample indices and weights.
+            dict[tuple[str, str], Samples]:
+                Mapping of stream labels to Samples objects with attributes
+                representing an N-way batch of aligned sample indices and weights.
+                The dict key must be a 2-tuple of (stream label, source FeatureSet label).
 
         Raises:
             RuntimeError:
@@ -174,18 +187,20 @@ class NSampler(BaseSampler):
                 anchor samples.
 
         """
-        if self.source is None:
+        if self.sources is None:
             raise RuntimeError("`bind_source` must be called before sampling can occur.")
-        if not isinstance(self.source, FeatureSetView):
-            msg = f"`source` must be of type FeatureSetView. Received: {type(self.source)}"
+        src_lbl = next(iter(self.sources.keys()))
+        src = self.sources[src_lbl]
+        if not isinstance(src, FeatureSetView):
+            msg = f"`source` must be of type FeatureSetView. Received: {type(src)}"
             raise TypeError(msg)
-        if len(self.source) < 2:
-            msg = f"NSampler requires at least 2 samples; got {len(self.source)}."
+        if len(src) < 2:
+            msg = f"NSampler requires at least 2 samples; got {len(src)}."
             raise ValueError(msg)
 
         # Precompute specs per role
         role_specs: dict[str, list[dict[str, Any]]] = {
-            role: self._resolve_columns_for_role(view=self.source, conds=role_conds)
+            role: self._resolve_columns_for_role(view=src, conds=role_conds)
             for role, role_conds in self.condition_mapping.items()
         }
 
@@ -193,9 +208,9 @@ class NSampler(BaseSampler):
         # Each role key contains a tuple of: anchor indices, role indices, and role scores
         # All returned indices are absolute indicies from the parent source
         if self._progress is not None:
-            self._progress.set_total(len(self.source) * len(role_specs))
+            self._progress.set_total(len(src) * len(role_specs))
         role_results: dict[str, tuple[np.ndarray]] = {
-            role: self._generate_role_matches(view=self.source, specs=specs) for role, specs in role_specs.items()
+            role: self._generate_role_matches(view=src, specs=specs) for role, specs in role_specs.items()
         }
         if self._progress is not None:
             self._progress.set_total(self._progress.completed)
@@ -204,10 +219,18 @@ class NSampler(BaseSampler):
         # We need to get the intersection and ensure proper alignment
         role_idxs, role_weights = self._standardize_role_idxs(d=role_results)
 
-        return Samples(
-            role_indices=role_idxs,
-            role_weights=role_weights,
-        )
+        # dict key is 2-tuple of stream_label, source_label
+        # For single-stream samplers like this one, we use the source label
+        # as the stream label
+        return {
+            (src_lbl, src_lbl): Samples(
+                role_indices=role_idxs,
+                role_weights=role_weights,
+            ),
+        }
+
+    def __repr__(self):
+        return f"NSampler(n_batches={self.num_batches}, batch_size={self.batcher.batch_size})"
 
     # =====================================================
     # Helpers
