@@ -36,6 +36,8 @@ class NSampler(BaseSampler):
     across all roles, aligns indexing, and produces N-way batches.
     """
 
+    STREAM_NAME = "default"
+
     def __init__(
         self,
         condition_mapping: dict[str, dict[str, SimilarityCondition]],
@@ -220,10 +222,9 @@ class NSampler(BaseSampler):
         role_idxs, role_weights = self._standardize_role_idxs(d=role_results)
 
         # dict key is 2-tuple of stream_label, source_label
-        # For single-stream samplers like this one, we use the source label
-        # as the stream label
+        # For single-stream samplers like this one, we use a default label
         return {
-            (src_lbl, src_lbl): Samples(
+            (self.STREAM_NAME, src_lbl): Samples(
                 role_indices=role_idxs,
                 role_weights=role_weights,
             ),

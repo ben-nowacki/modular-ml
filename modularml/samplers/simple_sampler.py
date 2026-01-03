@@ -8,6 +8,8 @@ from modularml.core.sampling.base_sampler import BaseSampler, Samples
 
 
 class SimpleSampler(BaseSampler):
+    STREAM_NAME = "default"
+
     def __init__(
         self,
         source: FeatureSet | FeatureSetView | None = None,
@@ -125,10 +127,9 @@ class SimpleSampler(BaseSampler):
             raise TypeError(msg)
 
         # dict key is 2-tuple of stream_label, source_label
-        # For single-stream samplers like this one, we use the source label
-        # as the stream label
+        # For single-stream samplers like this one, we use a default label
         return {
-            (src_lbl, src_lbl): Samples(
+            (self.STREAM_NAME, src_lbl): Samples(
                 role_indices={"default": src.indices},
                 role_weights=None,
             ),
