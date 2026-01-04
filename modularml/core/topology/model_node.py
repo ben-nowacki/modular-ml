@@ -312,6 +312,7 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
                 targets=d.targets,
                 tags=d.tags,
                 sample_uuids=d.sample_uuids,
+                kind="output",
             )
 
         if isinstance(x, SampleData):
@@ -319,8 +320,8 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
 
         if isinstance(x, Batch):
             role_data = x.role_data
-        elif isinstance(x, dict):
-            role_data = RoleData(data=x)
+        elif isinstance(x, RoleData):
+            role_data = x
         else:
             msg = f"Input must be of type SampleData or RoleData or Batch. Received: {type(x)}"
             raise TypeError(msg)

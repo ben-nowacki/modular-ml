@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
 from modularml.utils.data.conversion import convert_to_format
@@ -52,7 +52,10 @@ class SampleData(Summarizable):
         features: Any = None,
         targets: Any = None,
         tags: Any = None,
+        kind: Literal["input", "output"] = "input",
     ):
+        self._kind = kind
+
         if data is not None:
             # Use provided dictionary directly
             self.data = dict(data)
@@ -92,6 +95,12 @@ class SampleData(Summarizable):
         """Tensor-like data stored under DOMAIN_TAGS."""
         return self.data.get(DOMAIN_TAGS)
 
+    @property
+    def outputs(self):
+        if self._kind != "output":
+            raise AttributeError("`outputs` is only defined for SampleData produced by a model.")
+        return self.features
+
     # ================================================
     # Backend casting
     # ================================================
@@ -116,19 +125,30 @@ class SampleData(Summarizable):
     # ================================================
     # Representation
     # ================================================
+    @property
+    def _primary_domain_name(self) -> str:
+        return "outputs" if self._kind == "output" else "features"
+
     def _summary_rows(self) -> list[tuple]:
         rows: list[tuple] = []
 
-        for domain, val in self.data.items():
-            if val is None:
-                shape = None
-            else:
+        def _add_domain_row(
+            row_label: str,
+            domain_data: Any,
+        ):
+            if domain_data is not None:
                 try:
-                    shape = str(tuple(val.shape))
+                    shape = str(tuple(domain_data.shape))
                 except Exception:  # noqa: BLE001
                     shape = "N/A"
 
-            rows.append((domain, shape))
+            rows.append((row_label, shape))
+
+        for domain_name, domain_data in self.data.items():
+            row_label = domain_name
+            if domain_name == "features":
+                row_label = self._primary_domain_name
+            _add_domain_row(row_label=row_label, domain_data=domain_data)
 
         return rows
 
@@ -136,7 +156,7 @@ class SampleData(Summarizable):
         f = self.features.shape if self.features is not None else None
         t = self.targets.shape if self.targets is not None else None
         g = self.tags.shape if self.tags is not None else None
-        return f"SampleData(features={f}, targets={t}, tags={g})"
+        return f"SampleData({self._primary_domain_name}={f}, targets={t}, tags={g})"
 
 
 class RoleData(Mapping[str, SampleData], Summarizable):

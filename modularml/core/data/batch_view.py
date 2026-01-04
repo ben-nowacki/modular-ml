@@ -258,6 +258,7 @@ class BatchView(Summarizable):
                 features=features,
                 targets=targets,
                 tags=tags,
+                kind="input",
             )
 
             # Ensure shapes are as expected (batch_size is first dim)

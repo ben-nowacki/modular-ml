@@ -1,13 +1,83 @@
+from __future__ import annotations
+
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-import numpy as np
-from numpy.typing import NDArray
-
-from modularml.core.data.role_view import RoleView
-from modularml.core.data.sample_data import RoleData, SampleShapes
+from modularml.core.data.sample_data import SampleShapes
 from modularml.utils.representation.summary import Summarizable
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    import numpy as np
+    from numpy.typing import NDArray
+
+    from modularml.core.data.batch import Batch
+    from modularml.core.data.sample_data import RoleData, SampleData, SampleShapes
+
+
+class RoleView(Summarizable):
+    """Lightweight, read-only view over a single role in a Batch."""
+
+    __slots__ = ("_batch", "_role")
+
+    def __init__(self, batch: Batch, role: str):
+        self._batch = batch
+        self._role = role
+
+    # ================================================
+    # Core accessors
+    # ================================================
+    @property
+    def role_name(self) -> str:
+        return self._role
+
+    @property
+    def data(self) -> SampleData:
+        return self._batch.role_data[self._role]
+
+    @property
+    def shapes(self) -> SampleShapes:
+        return self._batch.shapes
+
+    @property
+    def weights(self) -> NDArray[np.float32]:
+        return self._batch.role_weights[self._role]
+
+    @property
+    def mask(self) -> NDArray[np.int8]:
+        return self._batch.role_masks[self._role]
+
+    # ================================================
+    # Convenience passthroughs
+    # ================================================
+    @property
+    def sample_uuids(self):
+        return self.data.sample_uuids
+
+    @property
+    def features(self):
+        return self.data.features
+
+    @property
+    def targets(self):
+        return self.data.targets
+
+    @property
+    def tags(self):
+        return self.data.tags
+
+    def __repr__(self) -> str:
+        return f"RoleView(role='{self._role}', batch_size={self._batch.batch_size})"
+
+    def _summary_rows(self) -> list[tuple]:
+        return [
+            ("role", self.role),
+            ("batch_size", self._batch.batch_size),
+            ("domains", [(k, "") for k in self.data.data]),
+            ("shapes", [(k, str(v)) for k, v in self.shapes.shapes.items()]),
+        ]
 
 
 @dataclass(frozen=True)
