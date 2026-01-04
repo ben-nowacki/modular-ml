@@ -20,7 +20,8 @@ from modularml.core.data.schema_constants import (
     REP_TRANSFORMED,
 )
 from modularml.core.io.protocols import Configurable, Stateful
-from modularml.core.references.featureset_reference import FeatureSetReference
+from modularml.core.references.experiment_reference import ResolutionError
+from modularml.core.references.featureset_reference import FeatureSetColumnReference, FeatureSetReference
 from modularml.core.splitting.split_mixin import SplitMixin, SplitterRecord
 from modularml.core.topology.graph_node import GraphNode
 from modularml.core.transforms.scaler import Scaler
@@ -950,10 +951,98 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         )
 
         return FeatureSetReference(
-            node=self.label,
+            node_id=self.node_id,
+            node_label=self.label,
             features=tuple(selected[DOMAIN_FEATURES]),
             targets=tuple(selected[DOMAIN_TARGETS]),
             tags=tuple(selected[DOMAIN_TAGS]),
+        )
+
+    def column_reference(
+        self,
+        column: str | None = None,
+        *,
+        feature: str | None = None,
+        target: str | None = None,
+        tag: str | None = None,
+        rep: str | None = None,
+    ) -> FeatureSetColumnReference:
+        """
+        Create a reference to a single column in this FeatureSet.
+
+        Args:
+            column (str | None):
+                Fully-qualified column name to reference
+                (e.g. "features.voltage.raw").
+
+            feature (str | None):
+                Feature-domain selector. Domain prefix may be omitted.
+
+            target (str | None):
+                Target-domain selector. Domain prefix may be omitted.
+
+            tag (str | None):
+                Tag-domain selector. Domain prefix may be omitted.
+
+            rep (str | None):
+                Default representation suffix applied when a selector omits a
+                representation.
+
+        Returns:
+            FeatureSetColumnReference
+
+        """
+        # Early return if column=sample_id
+        if column == DOMAIN_SAMPLE_ID:
+            return FeatureSetColumnReference(
+                node_id=self.node_id,
+                node_label=self.label,
+                domain=DOMAIN_SAMPLE_ID,
+                key=None,
+                rep=None,
+            )
+
+        # Argument validation
+        if column is not None and not isinstance(column, str):
+            raise TypeError("`column` must be a string. Received: type(column)")
+        if feature is not None and not isinstance(feature, str):
+            raise TypeError("`feature` must be a string. Received: type(feature)")
+        if target is not None and not isinstance(target, str):
+            raise TypeError("`target` must be a string. Received: type(target)")
+        if tag is not None and not isinstance(tag, str):
+            raise TypeError("`tag` must be a string. Received: type(tag)")
+        if rep is not None and not isinstance(rep, str):
+            raise TypeError("`rep` must be a string. Received: type(rep)")
+
+        # Get all available keys
+        all_cols = self.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
+        )
+        all_cols.remove(DOMAIN_SAMPLE_ID)
+
+        # Perform column selection (organized by domain)
+        selected: dict[str, set[str]] = resolve_column_selectors(
+            all_columns=all_cols,
+            columns=[column],
+            features=[feature],
+            targets=[target],
+            tags=[tag],
+            rep=rep,
+            include_all_if_empty=False,
+        )
+        flat_selected: set[str] = set().union(*selected.values())
+        if len(flat_selected) != 1:
+            msg = f"Cannot construct a column reference to more than one column. Received: {flat_selected}"
+            raise ResolutionError(msg)
+
+        domain, key, rep = next(iter(flat_selected)).split(".", maxsplit=2)
+        return FeatureSetColumnReference(
+            node_id=self.node_id,
+            node_label=self.label,
+            domain=domain,
+            key=key,
+            rep=rep,
         )
 
     # ================================================

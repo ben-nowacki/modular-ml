@@ -3,8 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import INVALID_LABEL_CHARACTERS
-from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.io.protocols import Configurable
 from modularml.utils.representation.summary import Summarizable
 
@@ -44,7 +44,8 @@ class ExperimentNode(Summarizable, Configurable):
 
         # Register to context
         if register:
-            ExperimentContext.register_experiment_node(self)
+            ctx = ExperimentContext.get_active()
+            ctx.register_experiment_node(self)
 
     def _validate_label(self, label: str):
         if any(ch in label for ch in INVALID_LABEL_CHARACTERS):

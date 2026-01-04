@@ -4,8 +4,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.batch_view import BatchView
-from modularml.core.references.data_reference import DataReference
+from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.formatting import ensure_list
 
@@ -193,13 +194,16 @@ class Batcher:
 
         """
         # self.stratify_by contains a list of strings, each string can be any column in FeatureSet
-        # DataReference infers the node, domain, key, and variant given a user-defined strings
+        # FeatureSetColumnReference infers the node, domain, key, and variant given a user-defined strings
         # E.g, "voltages" -> ("MyFS", "features", "voltages", "raw")
-        strata_refs: list[DataReference] = [
-            DataReference.from_string(
-                x,
-                known_attrs={"node": view.source.label, "node_id": view.source.node_id},
-                required_attrs=["node", "domain", "key", "rep"],
+        strata_refs: list[FeatureSetColumnReference] = [
+            FeatureSetColumnReference.from_string(
+                val=x,
+                known_attrs={
+                    "node_label": view.source.label,
+                    "node_id": view.source.node_id,
+                },
+                experiment=ExperimentContext.get_active(),
             )
             for x in self.stratify_by
         ]
@@ -208,18 +212,13 @@ class Batcher:
         # The np data for each key uses relative indices (role_indices defines absolute indices)
         strata_data: dict[str, np.ndarray] = {}
         for ref in strata_refs:
-            node, domain, key, rep = ref.node, ref.domain, ref.key, ref.rep
-            if not node == view.source.label:
-                raise ValueError(
-                    "Error with parsing stratify_by terms. Inferred DataReference does not refer to `view.source.node`.",
-                )
             # Get source data
             k = ref.to_string()
             if k in strata_data:
-                msg = f"DataReference.to_string() already exists in `strata_data`: {k}"
+                msg = f"ColumnReference.to_string() already exists in `strata_data`: {k}"
                 raise ValueError(msg)
             ref_data: np.ndarray = view.get_data(
-                columns=f"{domain}.{key}.{rep}",
+                columns=f"{ref.domain}.{ref.key}.{ref.rep}",
                 fmt=DataFormat.NUMPY,
             )
             strata_data[k] = ref_data
@@ -322,13 +321,16 @@ class Batcher:
 
         """
         # self.group_by contains a list of strings, each string can be any column in FeatureSet
-        # DataReference infers the node, domain, key, and variant given a user-defined strings
+        # FeatureSetColumnReference infers the node, domain, key, and variant given a user-defined strings
         # E.g, "voltages" -> ("MyFS", "features", "voltages", "raw")
-        group_refs: list[DataReference] = [
-            DataReference.from_string(
-                x,
-                known_attrs={"node": view.source.label, "node_id": view.source.node_id},
-                required_attrs=["node", "domain", "key", "rep"],
+        group_refs: list[FeatureSetColumnReference] = [
+            FeatureSetColumnReference.from_string(
+                val=x,
+                known_attrs={
+                    "node_label": view.source.label,
+                    "node_id": view.source.node_id,
+                },
+                experiment=ExperimentContext.get_active(),
             )
             for x in self.group_by
         ]
@@ -336,19 +338,13 @@ class Batcher:
         # Collect data for each defined group_by key
         group_data: dict[str, np.ndarray] = {}
         for ref in group_refs:
-            node, domain, key, rep = ref.node, ref.domain, ref.key, ref.rep
-            if not node == view.source.label:
-                raise ValueError(
-                    "Error with parsing group_by terms. Inferred DataReference does not refer to `view.source.node`.",
-                )
-
             # Get source data
             k = ref.to_string()
             if k in group_data:
-                msg = f"DataReference.to_string() already exists in `group_data`: {k}"
+                msg = f"ColumnReference.to_string() already exists in `group_data`: {k}"
                 raise ValueError(msg)
             ref_data: np.ndarray = view.get_data(
-                columns=f"{domain}.{key}.{rep}",
+                columns=f"{ref.domain}.{ref.key}.{ref.rep}",
                 fmt=DataFormat.NUMPY,
             )
             group_data[k] = ref_data

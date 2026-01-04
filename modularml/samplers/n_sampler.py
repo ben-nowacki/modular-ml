@@ -6,9 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.references.data_reference import DataReference
+from modularml.core.references.featureset_reference import FeatureSetColumnReference
 from modularml.core.sampling.base_sampler import BaseSampler, Samples
 from modularml.utils.data.data_format import DataFormat
 
@@ -547,18 +548,14 @@ class NSampler(BaseSampler):
         specs: list[dict[str, Any]] = []
         for key_str, cond in conds.items():
             # Infer node/domain/key/rep from string
-            ref = DataReference.from_string(
-                key_str,
-                known_attrs={"node": view.source.label, "node_id": view.source.node_id},
-                required_attrs=["node", "domain", "key", "rep"],
+            ref = FeatureSetColumnReference.from_string(
+                val=key_str,
+                known_attrs={
+                    "node_label": view.source.label,
+                    "node_id": view.source.node_id,
+                },
+                experiment=ExperimentContext.get_active(),
             )
-            if ref.node != view.source.label:
-                msg = (
-                    "Error resolving condition column. "
-                    f"Inferred DataReference '{ref}' does not refer to source '{view.source.label}'."
-                )
-                raise ValueError(msg)
-
             # Gather actual data in the column defined by `ref`
             col: np.ndarray = view.get_data(
                 columns=f"{ref.domain}.{ref.key}.{ref.rep}",

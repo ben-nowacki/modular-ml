@@ -1,178 +1,441 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any
+import warnings
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, get_args
 
-from modularml.core.data.sample_shapes import SampleShapes
-from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_TAGS, DOMAIN_TARGETS
-from modularml.core.experiment.experiment_context import ExperimentContext
-from modularml.core.io.protocols import Configurable
-from modularml.utils.data.data_format import DataFormat
+from modularml.context.resolution_context import ResolutionContext
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+    REP_RAW,
+    T_ALL_DOMAINS,
+    T_ALL_REPS,
+)
+from modularml.core.references.experiment_reference import ExperimentNodeReference, ExperimentReference, ResolutionError
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
-from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
+    from modularml.context.experiment_context import ExperimentContext
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.featureset_view import FeatureSetView
-    from modularml.core.references.data_reference import DataReference
 
 
 @dataclass(frozen=True)
-class FeatureSetReference(Configurable, Summarizable):
-    """Declarative reference to one or more columns of a FeatureSet."""
+class FeatureSetReference(ExperimentReference):
+    """Declarative reference to a subset of columns from a FeatureSet."""
 
-    node: str
+    # ExperimentNode
+    node_label: str | None = None
+    node_id: str | None = None
+
+    # FeatureSet-specific
     features: tuple[str, ...] | None = None
     targets: tuple[str, ...] | None = None
     tags: tuple[str, ...] | None = None
 
-    # ==========================================
-    # Validation
-    # ==========================================
-    def __post_init__(self):
-        # Must refer to at least one column
-        if not any((self.features, self.targets, self.tags)):
-            raise ValueError("FeatureSetReference must specify at least one of `features`, `targets`, or `tags`.")
+    def resolve(self, ctx: ResolutionContext) -> FeatureSetView:
+        """Resolves this reference to a FeatureSetView instance."""
+        return super().resolve(ctx=ctx)
 
-        # Verify node exists
-        avail_nodes = ExperimentContext.available_nodes()
-        if self.node not in avail_nodes:
-            msg = f"Node '{self.node}' does not exist in ExperimentContext. Available: {avail_nodes}"
-            raise ValueError(msg)
+    def _resolve_experiment(self, experiment: ExperimentContext) -> FeatureSetView:
+        from modularml.core.data.featureset import FeatureSet
 
-        # Verify node is a FeatureSet
-        if not ExperimentContext.node_is_featureset(node_label=self.node):
-            msg = f"Node '{self.node}' is not a FeatureSet."
-            raise TypeError(msg)
+        # Get FeatureSet node
+        node_ref = ExperimentNodeReference(
+            node_label=self.node_label,
+            node_id=self.node_id,
+        )
+        node = node_ref._resolve_experiment(experiment=experiment)
+        if not isinstance(node, FeatureSet):
+            msg = f"Resolved node is not a FeatureSet. Received: {type(node)}."
+            raise ResolutionError(msg)
 
-        # Use regex to expand any wildcards
-        all_cols = ExperimentContext.get_all_featureset_keys(featureset_label=self.node)
-        selected: dict[str, Any] = resolve_column_selectors(
-            all_columns=all_cols,
+        # If features, targets, tags are all None -> use all columns
+        if all(x is None for x in [self.features, self.targets, self.tags]):
+            return node.to_view()
+
+        # Perform column-wise filtering
+        all_columns = node.get_all_keys(
+            include_domain_prefix=True,
+            include_rep_suffix=True,
+        )
+        selected = resolve_column_selectors(
+            all_columns=all_columns,
             features=self.features,
             targets=self.targets,
             tags=self.tags,
             include_all_if_empty=False,
         )
+        if not any(selected.values()):
+            raise ResolutionError("FeatureSetReference resolved to zero columns")
 
-        object.__setattr__(self, "features", tuple(selected[DOMAIN_FEATURES]) or None)
-        object.__setattr__(self, "targets", tuple(selected[DOMAIN_TARGETS]) or None)
-        object.__setattr__(self, "tags", tuple(selected[DOMAIN_TAGS]) or None)
-
-        # Final safety check
-        if not any((self.features, self.targets, self.tags)):
-            raise ValueError("Column selectors resolved to an empty set.")
-
-    def __str__(self) -> str:
-        """
-        Return a readable string representation for console or logs.
-
-        Example:
-            FeatureSetReference(node='PulseFeatures', features='...')
-
-        """
-        attrs = {
-            f.name: getattr(self, f.name)
-            for f in fields(self)
-            if getattr(self, f.name) is not None and f.name != "node_id"
-        }
-        attr_str = ", ".join(f"{k}={v!r}" for k, v in attrs.items())
-        return f"{self.__class__.__name__}({attr_str})"
-
-    __repr__ = __str__
-
-    def _summary_rows(self) -> list[tuple]:
-        return [
-            ("node", self.node),
-            ("features", str(list(self.features))),
-            ("targets", str(list(self.targets))),
-            ("tags", str(list(self.tags))),
-        ]
-
-    # ==========================================
-    # ReferenceLike Protocol
-    # ==========================================
-    @property
-    def node_label(self) -> str:
-        """Label of the ExperimentNode this reference points to."""
-        return self.node
-
-    @property
-    def node_id(self) -> str:
-        """ID of the ExperimentNode this reference points to."""
-        return ExperimentContext._node_label_to_id[self.node_label]
-
-    def resolve(self):
-        from modularml.core.references.data_reference_group import DataReferenceGroup
-
-        # Convert fully-qualified columns to DataReferences
-        refs: list[DataReference] = []
-        refs.extend(self._resolve_domain_refs(self.features))
-        refs.extend(self._resolve_domain_refs(self.targets))
-        refs.extend(self._resolve_domain_refs(self.tags))
-
-        if not refs:
-            raise ValueError("FeatureSetReference attributes produced no DataReferences.")
-        return DataReferenceGroup.from_refs(refs)
-
-    # ==========================================
-    # Utilities
-    # ==========================================
-    def _resolve_domain_refs(self, domain_strs: Iterable[str]) -> list[DataReference]:
-        from modularml.core.references.data_reference import DataReference
-
-        refs = []
-        for c in domain_strs:
-            d, k, r = c.split(".")
-            refs.append(DataReference(node=self.node, node_id=self.node_id, domain=d, key=k, rep=r))
-        return refs
-
-    def resolve_shapes(self) -> SampleShapes:
-        # Convert reference group to a list of columns
-        dref = self.resolve()
-        columns = [f"{ref.domain}.{ref.key}.{ref.rep}" for ref in dref.refs]
-
-        # Convert coulmns to a view over the specified FeatureSet
-        fs: FeatureSet = ExperimentContext.get_node(label=self.node)
-        fsv: FeatureSetView = fs.select(columns=columns)
-
-        # Get domain shapes
-        features = fsv.get_features(fmt=DataFormat.NUMPY, rep=None)
-        targets = fsv.get_targets(fmt=DataFormat.NUMPY, rep=None)
-        tags = fsv.get_tags(fmt=DataFormat.NUMPY, rep=None)
-
-        return SampleShapes(
-            features_shape=features.shape[1:],
-            targets_shape=targets.shape[1:],
-            tags_shape=tags.shape[1:],
+        return node.select(
+            features=list(selected[DOMAIN_FEATURES]),
+            targets=list(selected[DOMAIN_TARGETS]),
+            tags=list(selected[DOMAIN_TAGS]),
         )
 
     # ================================================
     # Configurable
     # ================================================
     def get_config(self) -> dict[str, Any]:
-        """
-        Return a JSON-serializable configuration.
-
-        Returns:
-            dict[str, Any]: Configuration used to reconstruct this reference.
-
-        """
+        """Return a JSON-serializable configuration."""
         return {
-            "node": self.node,
+            "node_id": self.node_id,
+            "node_label": self.node_label,
             "features": self.features,
             "targets": self.targets,
             "tags": self.tags,
         }
 
     @classmethod
-    def from_config(cls, config: dict) -> FeatureSetReference:
+    def from_config(cls, config: dict[str, Any]) -> FeatureSetReference:
         """Reconstructs the reference from config."""
-        return cls(
-            node=config["node"],
-            features=config["features"],
-            targets=config["targets"],
-            tags=config["tags"],
+        return cls(**config)
+
+
+@dataclass(frozen=True)
+class FeatureSetSplitReference(ExperimentReference):
+    """Declarative reference to a subset of columns from a FeatureSet."""
+
+    # Split-specific
+    split_name: str
+
+    # ExperimentNode
+    node_label: str | None = None
+    node_id: str | None = None
+
+    def resolve(self, ctx: ResolutionContext) -> FeatureSetView:
+        """Resolves this reference to a view of the reference FeatureSet split instance."""
+        return super().resolve(ctx=ctx)
+
+    def _resolve_experiment(self, experiment: ExperimentContext) -> FeatureSetView:
+        from modularml.core.data.featureset import FeatureSet
+
+        # Get FeatureSet node
+        node_ref = ExperimentNodeReference(
+            node_label=self.node_label,
+            node_id=self.node_id,
         )
+        node = node_ref._resolve_experiment(experiment=experiment)
+        if not isinstance(node, FeatureSet):
+            msg = f"Resolved node is not a FeatureSet. Received: {type(node)}."
+            raise ResolutionError(msg)
+
+        # Validate split exists
+        if self.split_name not in node.available_splits:
+            msg = (
+                f"Split '{self.split_name}' does not exist in FeatureSet '{node.label}'. "
+                f"Available splits: {node.available_splits}"
+            )
+            raise ResolutionError(msg)
+
+        return node.get_split(split_name=self.split_label)
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """Return a JSON-serializable configuration."""
+        return {
+            "node_id": self.node_id,
+            "node_label": self.node_label,
+            "split_name": self.split_name,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> FeatureSetReference:
+        """Reconstructs the reference from config."""
+        return cls(**config)
+
+
+@dataclass(frozen=True)
+class FeatureSetColumnReference(ExperimentReference):
+    """Reference to a single column of a FeatureSet."""
+
+    # FeatureSet-specific (single column)
+    domain: str
+    key: str
+    rep: str
+
+    # ExperimentNode
+    node_label: str | None = None
+    node_id: str | None = None
+
+    def __post_init__(self):
+        # Validate domain
+        valid_ds = [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_ID]
+        if self.domain not in valid_ds:
+            msg = f"Domain must be one of: {valid_ds}. Received: {self.domain}."
+            raise ValueError(msg)
+
+    def resolve(self, ctx: ResolutionContext) -> FeatureSetView:
+        """Resolves this single-column reference to a FeatureSetView instance."""
+        return super().resolve(ctx=ctx)
+
+    def _resolve_experiment(self, experiment: ExperimentContext) -> FeatureSetView:
+        # Convert column attributes to fully-qualified column
+        col = f"{self.domain}.{self.key}.{self.rep}"
+
+        # Resolve FeatureSetView
+        fs_ref = FeatureSetReference(
+            node_id=self.node_id,
+            node_label=self.node_label,
+            **{self.domain: col},  # attach domain = single column
+        )
+        fsv = fs_ref._resolve_experiment(experiment=experiment)
+
+        return fsv
+
+    @classmethod
+    def from_string(
+        cls,
+        val: str,
+        *,
+        experiment: ExperimentContext,
+        known_attrs: dict[str, str] | None = None,
+    ) -> FeatureSetColumnReference:
+        """
+        Parse a string into a FeatureSetColumnReference.
+
+        Supported forms (order-agnostic):
+            - FeatureSet.features.key.rep
+            - FeatureSet.key.rep
+            - FeatureSet.key
+            - features.key.rep        (only if exactly one FeatureSet exists)
+            - key.rep                 (same constraint)
+            - key                     (same constraint)
+
+        Resolution rules:
+            - domain inferred from FeatureSet schema if missing
+            - rep defaults to REP_RAW if ambiguous (with warning)
+
+        Args:
+            val (str):
+                String vlaue to parsed in a true reference.
+            experiment (ExperimentContext):
+                Context of active nodes.
+            known_attrs (dict[str, str], optional):
+                Known attributes can be provided. They will be used to supplement
+                any attributes parsed from `x`.
+
+        Returns:
+            FeatureSetColumnReference
+
+        """
+        parts = val.split(".")
+
+        # Collect known FeatureSet labels
+        fs_nodes = experiment.available_featuresets
+
+        # Known context
+        known_domains = set(get_args(T_ALL_DOMAINS))
+        known_reps = set(get_args(T_ALL_REPS))
+
+        # Parsed fields
+        parsed: dict[str, str | None] = {
+            "domain": None,
+            "key": None,
+            "rep": None,
+            "node_label": None,
+            "node_id": None,
+        }
+        # Load with known attributes (if any)
+        if known_attrs is not None:
+            for k, v in known_attrs.items():
+                if k not in parsed:
+                    msg = f"Invalid attribute in `known_attr` '{k}'"
+                    raise ValueError(msg)
+                parsed[k] = v
+
+        unmatched: list[str] = []
+
+        # First pass: explicit matches
+        for p in parts:
+            # Node label
+            if p in fs_nodes:
+                if parsed["node_label"] and parsed["node_label"] != p:
+                    msg = f"Multiple FeatureSet nodes found in '{val}' and `known_attr`: {p} != {parsed['node_label']}."
+                    raise ResolutionError(msg)
+                parsed["node_label"] = p
+
+            # Domain
+            elif p in known_domains:
+                if parsed["domain"] and parsed["domain"] != p:
+                    msg = f"Multiple domains found in '{val}' and `known_attr`: {p} != {parsed['domain']}."
+                    raise ResolutionError(msg)
+                parsed["domain"] = p
+
+            # Rep
+            elif p in known_reps:
+                if parsed["rep"] and parsed["rep"] != p:
+                    msg = f"Multiple reps found in '{val}' and `known_attr`: {p} != {parsed['rep']}."
+                    raise ResolutionError(msg)
+                parsed["rep"] = p
+
+            # Record as unmatched
+            else:
+                unmatched.append(p)
+
+        # Is no parsed node id, can only infer if only 1 featureset exists
+        if parsed["node_id"] is None and parsed["node_label"] is None:
+            if len(fs_nodes) == 1:
+                parsed["node_label"] = fs_nodes[0]
+            else:
+                msg = f"FeatureSet not specified and cannot be inferred in '{val}'. Available FeatureSets: {fs_nodes}"
+                raise ResolutionError(msg)
+
+        # Resolve FeatureSet (need node_id or node_label)
+        fs_ref = FeatureSetReference(
+            node_id=parsed["node_id"],
+            node_label=parsed["node_label"],
+        )
+        fs: FeatureSet = fs_ref.resolve(
+            ctx=ResolutionContext(experiment=experiment),
+        ).source
+
+        # Resolve domain and column
+        if parsed["domain"] is None and parsed["key"] is not None:
+            # Get potential domains, given the column key
+            all_keys = fs.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=False,
+            )
+            avail_parsed: list[tuple[str, str | None]] = []
+            for k in all_keys:
+                if "." in k:
+                    d, col = k.split(".", maxsplit=1)
+                else:
+                    d, col = k, None
+                if col == parsed["key"]:
+                    avail_parsed.append((d, col))
+
+            # If only one possible avilable -> use it
+            if len(avail_parsed) == 1:
+                parsed["domain"] = avail_parsed[0][0]
+
+            # Otherwise, check against unmatched values
+            elif not unmatched:
+                msg = f"No domain found in '{val}'."
+                raise ResolutionError(msg)
+
+            else:
+                unmatched_cands = [(d, v) for k in unmatched if k in [a[1] for a in avail_parsed]]
+                if len(unmatched_cands) != 1:
+                    msg = f"Could not uniquely identify a domain in '{val}'. Possible candidates: {unmatched_cands}."
+                    raise ResolutionError(msg)
+
+                parsed["domain"] = unmatched_cands[0][0]
+
+        # Resolve column key
+        if parsed["key"] is None:
+            if not unmatched:
+                msg = f"No column key found in '{val}'."
+                raise ResolutionError(msg)
+
+            # Get available columns to match to
+            if parsed["domain"]:
+                all_keys = fs.collection._get_domain_keys(
+                    domain=parsed["domain"],
+                    include_domain_prefix=True,
+                    include_rep_suffix=False,
+                )
+            else:
+                all_keys = fs.get_all_keys(
+                    include_domain_prefix=True,
+                    include_rep_suffix=False,
+                )
+            # Parse available into domain, colummn key
+            avail_parsed: list[tuple[str, str | None]] = []
+            for k in all_keys:
+                if "." in k:
+                    d, col = k.split(".", maxsplit=1)
+                else:
+                    d, col = k, None
+                avail_parsed.append((d, col))
+
+            candidates = [(d, k) for k in unmatched if k in [a[1] for a in avail_parsed]]
+            if len(candidates) != 1:
+                msg = f"Could not uniquely identify column key in '{val}'. Possible candidates: {candidates}."
+                raise ResolutionError(msg)
+
+            parsed["domain"] = candidates[0][0]
+            parsed["key"] = candidates[0][1]
+            if parsed["domain"] in unmatched:
+                unmatched.remove(parsed["domain"])
+            unmatched.remove(parsed["key"])
+
+        # Resolve rep
+        if parsed["rep"] is None:
+            # Check available reps on column
+            avail_reps = fs.collection._get_rep_keys(
+                domain=parsed["domain"],
+                key=parsed["key"],
+            )
+
+            # Check if `unmatched` vals are in `avail_reps`
+            if unmatched:
+                candidates = [v for v in unmatched if v in avail_reps]
+                if len(candidates) != 1:
+                    msg = f"Could not uniquely identify rep in '{val}'. Possible candidates: {candidates}."
+                    raise ResolutionError(msg)
+
+                parsed["rep"] = candidates[0]
+                unmatched.remove(candidates[0])
+
+            # If no unmatched, default to RAW_REP but raise warning
+            elif len(avail_reps) == 1:
+                parsed["rep"] = avail_reps[0]
+
+            elif REP_RAW in avail_reps:
+                msg = f" Multiple possible `reps` for '{val}'. Selecting the default representation: '{REP_RAW}'."
+                warnings.warn(msg, category=UserWarning, stacklevel=2)
+
+                parsed["rep"] = REP_RAW
+
+            else:
+                msg = f"Failed to identify rep in '{val}'."
+                raise ResolutionError(msg)
+
+        # Final validation
+        if parsed["domain"] == DOMAIN_SAMPLE_ID:
+            if parsed["key"] is not None and parsed["rep"] is not None:
+                msg = f"Failed to resolved '{val}' into column reference."
+                raise ResolutionError(msg)
+        else:
+            fq = f"{parsed['domain']}.{parsed['key']}.{parsed['rep']}"
+            if fq not in fs.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            ):
+                msg = f"Failed to resolved '{val}' into column reference."
+                raise ResolutionError(msg)
+
+        return cls(
+            node_label=fs.label,
+            node_id=fs.node_id,
+            domain=parsed["domain"],
+            key=parsed["key"],
+            rep=parsed["rep"],
+        )
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """Return a JSON-serializable configuration."""
+        return {
+            "node_id": self.node_id,
+            "node_label": self.node_label,
+            "domain": self.domain,
+            "key": self.key,
+            "rep": self.rep,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> FeatureSetReference:
+        """Reconstructs the reference from config."""
+        return cls(**config)

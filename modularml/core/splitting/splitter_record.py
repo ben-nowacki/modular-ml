@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from modularml.core.io.protocols import Configurable
-from modularml.core.references.data_reference import DataReference
+from modularml.core.references.featureset_reference import FeatureSetSplitReference
 from modularml.core.splitting.base_splitter import BaseSplitter
 
 
@@ -13,7 +13,7 @@ class SplitterRecord(Configurable):
     """Record describing an applied data-splitting operation."""
 
     splitter: BaseSplitter
-    applied_to: DataReference
+    applied_to: FeatureSetSplitReference
 
     def __eq__(self, other):
         if not isinstance(other, SplitterRecord):
@@ -49,5 +49,5 @@ class SplitterRecord(Configurable):
         """Reconstructs the record from config."""
         return cls(
             splitter=BaseSplitter.from_config(config["splitter_config"]),
-            applied_to=DataReference.from_config(config["applied_to_config"]),
+            applied_to=FeatureSetSplitReference.from_config(config["applied_to_config"]),
         )

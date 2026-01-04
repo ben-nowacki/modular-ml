@@ -4,7 +4,7 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
-from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.context.experiment_context import ExperimentContext
 from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.errors.error_handling import ErrorMode

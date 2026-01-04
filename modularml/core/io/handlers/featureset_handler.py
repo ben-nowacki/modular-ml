@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 
+from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_TAGS, DOMAIN_TARGETS, REP_TRANSFORMED
-from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.experiment_node import generate_node_id
 from modularml.core.io.handlers.handler import TypeHandler
 from modularml.core.io.serialization_policy import SerializationPolicy
 from modularml.core.io.symbol_registry import symbol_registry
-from modularml.core.references.data_reference import DataReference
+from modularml.core.references.featureset_reference import FeatureSetSplitReference
 from modularml.utils.data.pyarrow_data import hash_pyarrow_table
 
 if TYPE_CHECKING:
@@ -302,14 +302,15 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
         fs_obj.set_state(state=state)
 
         # Collision checking
-        if ExperimentContext.has_node(node_id=fs_obj.node_id):
+        exp_ctx: ExperimentContext = ExperimentContext.get_active()
+        if exp_ctx.has_node(node_id=fs_obj.node_id):
             # If same node_id exists, perform the following checks:
             # 1. same label + same state -> reuse existing
             # 2. different label or different state -> override or fork
 
             # Override = replace existing node_id reference in ExperimentContext with new object
             # Fork = generate new node_id for reloaded object and register
-            existing = ExperimentContext.get_node(node_id=fs_obj.node_id)
+            existing = exp_ctx.get_node(node_id=fs_obj.node_id)
 
             # Case 1
             if isinstance(existing, FeatureSet) and existing == fs_obj:
@@ -319,7 +320,7 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
             # Case 2
             if ctx.overwrite_collision:
                 # Remove existing from ExperimentContext
-                _ = ExperimentContext.remove_node(
+                _ = exp_ctx.remove_node(
                     node_id=existing.node_id,
                     error_if_missing=True,
                 )
@@ -328,7 +329,7 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
                 fs_obj._node_id = generate_node_id()
 
         # Register new node (we allow same labels)
-        ExperimentContext.register_experiment_node(
+        exp_ctx.register_experiment_node(
             node=fs_obj,
             check_label_collision=False,
         )
@@ -460,7 +461,7 @@ class FeatureSetHandler(TypeHandler[FeatureSet]):
             split_recs.append(
                 SplitterRecord(
                     splitter=splitter_obj,
-                    applied_to=DataReference.from_config(rec_cfg["applied_to_config"]),
+                    applied_to=FeatureSetSplitReference.from_config(rec_cfg["applied_to_config"]),
                 ),
             )
         state["splitter_records"] = split_recs

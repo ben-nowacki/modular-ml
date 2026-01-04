@@ -5,8 +5,11 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from modularml.context.experiment_context import ExperimentContext
+from modularml.context.resolution_context import ResolutionContext
 from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
-from modularml.core.references.data_reference import DataReference
+from modularml.core.references.experiment_reference import ResolutionError
+from modularml.core.references.featureset_reference import FeatureSetColumnReference, FeatureSetSplitReference
 from modularml.core.splitting.splitter_record import SplitterRecord
 from modularml.utils.data.data_format import DataFormat
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
@@ -134,7 +137,7 @@ class SplitMixin:
     def filter(
         self,
         *,
-        conditions: dict[str | DataReference, Any | list[Any], Callable],
+        conditions: dict[str | FeatureSetColumnReference, Any | list[Any], Callable],
         label: str | None = None,
     ) -> FeatureSetView | None:
         """
@@ -274,26 +277,35 @@ class SplitMixin:
         mask = np.ones(collection.n_samples, dtype=bool)
 
         for arg, cond in conditions.items():
-            # Try to cast ref to DataReference
+            # Try to cast ref to FeatureSetColumnReference
             if isinstance(arg, str):
-                ref = DataReference.from_string(arg, known_attrs={"node": source.label})
-            elif isinstance(arg, DataReference):
+                ref = FeatureSetColumnReference.from_string(
+                    val=arg,
+                    known_attrs={
+                        "node_id": source.node_id,
+                        "node_label": source.label,
+                    },
+                    experiment=ExperimentContext.get_active(),
+                )
+            elif isinstance(arg, FeatureSetColumnReference):
                 ref = arg
             else:
                 msg = (
-                    "filter conditions must be keyed by a string or DataReference object. "
+                    "Filter conditions must be keyed by a string or FeatureSetColumnReference object. "
                     f"Received key of type {type(ref)}"
                 )
                 raise TypeError(msg)
 
-            # Validate DataReference values
-            inval_props = [x for x in [ref.node, ref.domain, ref.key, ref.rep] if x is None]
-            if inval_props:
-                msg = f"Failed to interpret values for the following DataReference attributes: {inval_props}"
-                raise ValueError(msg)
-            if ref.node != source.label:
-                msg = f"DataReference.node '{ref.node}' does not match FeatureSet '{source.label}'."
-                raise ValueError(msg)
+            # Validate FeatureSetColumnReference values
+            try:
+                _ = ref.resolve(
+                    ctx=ResolutionContext(
+                        experiment=ExperimentContext.get_active(),
+                    ),
+                )
+            except ResolutionError as e:
+                msg = f"Filter condition ({ref}) could not be resolved. {e}."
+                raise ValueError(msg) from e
 
             # Retrieve column data explicitly
             col_data = collection._get_rep_data(
@@ -482,10 +494,10 @@ class SplitMixin:
             cloned_splitter: BaseSplitter = clone_via_serialization(obj=splitter)
             rec = SplitterRecord(
                 splitter=cloned_splitter,
-                applied_to=DataReference(
-                    node=source.label,
+                applied_to=FeatureSetSplitReference(
+                    node_label=source.label,
                     node_id=source.node_id,
-                    split=self.label if is_view else None,
+                    split_name=self.label if is_view else None,
                 ),
             )
             source._split_recs.append(rec)
