@@ -390,3 +390,14 @@ class ExperimentContext:
             if isinstance(n, FeatureSet):
                 avail_fs_labels.append(n.label)
         return avail_fs_labels
+
+    @property
+    def available_modelnodes(self) -> list[str]:
+        """List of registered ModelNode labels."""
+        from modularml.core.topology.model_node import ModelNode
+
+        avail_mn_labels = []
+        for n in self._nodes_by_id.values():
+            if isinstance(n, ModelNode):
+                avail_mn_labels.append(n.label)
+        return avail_mn_labels

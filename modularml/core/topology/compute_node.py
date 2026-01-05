@@ -8,7 +8,7 @@ from modularml.core.topology.graph_node import GraphNode
 if TYPE_CHECKING:
     from modularml.core.data.batch import Batch
     from modularml.core.data.sample_data import RoleData
-    from modularml.core.references.reference_like import ReferenceLike
+    from modularml.core.references.experiment_reference import ExperimentNodeReference
     from modularml.core.topology.node_shapes import NodeShapes
 
 
@@ -29,8 +29,8 @@ class ComputeNode(GraphNode):
     def __init__(
         self,
         label: str,
-        upstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
-        downstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
+        upstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
+        downstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
         *,
         node_id: str | None = None,
         register: bool = True,
@@ -41,9 +41,9 @@ class ComputeNode(GraphNode):
         Args:
             label (str):
                 Unique identifier for this node.
-            upstream_refs (ReferenceLike | list[ReferenceLike] | None):
+            upstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
                 References of upstream connections.
-            downstream_refs (ReferenceLike | list[ReferenceLike] | None):
+            downstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
                 References of downstream connections.
             node_id (str, optional):
                 Used only for de-serialization.

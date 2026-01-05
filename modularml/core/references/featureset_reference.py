@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class FeatureSetReference(ExperimentReference):
+class FeatureSetReference(ExperimentNodeReference):
     """Declarative reference to a subset of columns from a FeatureSet."""
 
     # ExperimentNode
@@ -36,7 +36,7 @@ class FeatureSetReference(ExperimentReference):
     targets: tuple[str, ...] | None = None
     tags: tuple[str, ...] | None = None
 
-    def resolve(self, ctx: ResolutionContext) -> FeatureSetView:
+    def resolve(self, ctx: ResolutionContext | None = None) -> FeatureSetView:
         """Resolves this reference to a FeatureSetView instance."""
         return super().resolve(ctx=ctx)
 
@@ -108,7 +108,7 @@ class FeatureSetSplitReference(ExperimentReference):
     node_label: str | None = None
     node_id: str | None = None
 
-    def resolve(self, ctx: ResolutionContext) -> FeatureSetView:
+    def resolve(self, ctx: ResolutionContext | None = None) -> FeatureSetView:
         """Resolves this reference to a view of the reference FeatureSet split instance."""
         return super().resolve(ctx=ctx)
 
@@ -172,7 +172,7 @@ class FeatureSetColumnReference(ExperimentReference):
             msg = f"Domain must be one of: {valid_ds}. Received: {self.domain}."
             raise ValueError(msg)
 
-    def resolve(self, ctx: ResolutionContext) -> FeatureSetView:
+    def resolve(self, ctx: ResolutionContext | None = None) -> FeatureSetView:
         """Resolves this single-column reference to a FeatureSetView instance."""
         return super().resolve(ctx=ctx)
 
@@ -348,6 +348,7 @@ class FeatureSetColumnReference(ExperimentReference):
                     include_domain_prefix=True,
                     include_rep_suffix=False,
                 )
+                all_keys.remove(DOMAIN_SAMPLE_ID)
             # Parse available into domain, colummn key
             avail_parsed: list[tuple[str, str | None]] = []
             for k in all_keys:

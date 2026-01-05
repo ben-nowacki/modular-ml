@@ -6,6 +6,7 @@ from typing import Any
 from modularml.context.experiment_context import ExperimentContext
 from modularml.core.data.schema_constants import INVALID_LABEL_CHARACTERS
 from modularml.core.io.protocols import Configurable
+from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.utils.representation.summary import Summarizable
 
 
@@ -71,6 +72,15 @@ class ExperimentNode(Summarizable, Configurable):
         self._validate_label(label=new_label)
         ExperimentContext.update_node_label(self, new_label)
         self._label = new_label
+
+    # ================================================
+    # Referencing
+    # ================================================
+    def reference(self) -> ExperimentNodeReference:
+        return ExperimentNodeReference(
+            node_id=self.node_id,
+            node_label=self.label,
+        )
 
     # ================================================
     # Representation

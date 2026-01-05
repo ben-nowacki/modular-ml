@@ -3,12 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
+from modularml.context.experiment_context import ExperimentContext
+from modularml.context.resolution_context import ResolutionContext
 from modularml.core.io.protocols import Configurable
 from modularml.core.references.reference_like import ReferenceLike
 
 if TYPE_CHECKING:
-    from modularml.context.experiment_context import ExperimentContext
-    from modularml.context.resolution_context import ResolutionContext
     from modularml.core.experiment.experiment_node import ExperimentNode
 
 
@@ -20,10 +20,9 @@ class ResolutionError(RuntimeError):
 class ExperimentReference(ReferenceLike, Configurable):
     """Base class for references resolvable at the Experiment scope."""
 
-    def resolve(self, ctx: ResolutionContext):
-        if ctx.experiment is None:
-            msg = f"{type(self).__name__} requires an ExperimentContext"
-            raise ResolutionError(msg)
+    def resolve(self, ctx: ResolutionContext | None = None):
+        if ctx is None:
+            ctx = ResolutionContext(experiment=ExperimentContext.get_active())
         return self._resolve_experiment(ctx.experiment)
 
     def _resolve_experiment(self, experiment: ExperimentContext):
@@ -73,7 +72,7 @@ class ExperimentNodeReference(ExperimentReference):
     node_label: str | None = None
     node_id: str | None = None
 
-    def resolve(self, ctx: ResolutionContext) -> ExperimentNode:
+    def resolve(self, ctx: ResolutionContext | None = None) -> ExperimentNode:
         """Resolves this reference to a ExperimentNode instance."""
         return super().resolve(ctx=ctx)
 
@@ -108,40 +107,3 @@ class ExperimentNodeReference(ExperimentReference):
     def from_config(cls, config: dict[str, Any]) -> ExperimentReference:
         """Reconstructs the reference from config."""
         return cls(**config)
-
-
-# TODO
-
-# class PhaseReference(ReferenceLike):
-#     def resolve(self, ctx: ResolutionContext):
-#         if ctx.phase is None:
-#             raise ResolutionError("Phase reference requires ExperimentPhase")
-#         return self._resolve_phase(ctx.phase)
-
-
-# # SamplerStreamReference
-# # PhaseInputReference
-# # RoleReference
-
-
-# class ExecutionReference(ReferenceLike):
-#     def resolve(self, ctx: ResolutionContext):
-#         if ctx.execution is None:
-#             raise ResolutionError("Execution reference requires ExecutionContext")
-#         return self._resolve_execution(ctx.execution)
-
-
-# # ModelOutputReference
-# # BatchRoleOutputReference
-# # LossInputReference
-
-
-# @dataclass(frozen=True)
-# class ModelOutputReference(ExecutionReference):
-#     node: GlobalReference
-#     role: PhaseReference
-
-#     def _resolve_execution(self, exec_ctx):
-#         node = self.node.resolve(exec_ctx.ctx)
-#         role = self.role.resolve(exec_ctx.ctx)
-#         return exec_ctx.outputs[node][role]

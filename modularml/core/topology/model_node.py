@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any, overload
 
 from modularml.core.data.batch import Batch
+from modularml.core.data.featureset import FeatureSet
+from modularml.core.data.featureset_view import FeatureSetView
 from modularml.core.data.sample_data import RoleData, SampleData
-from modularml.core.data.schema_constants import DOMAIN_OUTPUTS
+from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.core.models import wrap_model
+from modularml.core.references.experiment_reference import ExperimentNodeReference
 from modularml.core.topology.compute_node import ComputeNode
 from modularml.core.topology.mixins.evaluable import EvaluableMixin
 from modularml.core.topology.mixins.trainable import TrainableMixin
@@ -17,8 +21,8 @@ from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import safe_cast_to_summary_rows
 
 if TYPE_CHECKING:
+    from modularml.context.resolution_context import ResolutionContext
     from modularml.core.models.base_model import BaseModel
-    from modularml.core.references.reference_like import ReferenceLike
     from modularml.core.training.applied_loss import AppliedLoss
     from modularml.core.training.optimizer import Optimizer
 
@@ -42,7 +46,7 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         self,
         label: str,
         model: BaseModel | Any,
-        upstream_ref: ReferenceLike,
+        upstream_ref: ExperimentNode | ExperimentNodeReference,
         optimizer: Optimizer | None = None,
     ):
         """
@@ -53,13 +57,37 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
                 Unique name identifying this stage within the model graph.
             model (Union[BaseModel, Any]):
                 A backend-specific model instance or config.
-            upstream_ref (ReferenceLike):
+            upstream_ref (ExperimentReference):
                 Reference to the upstream node.
             optimizer (Optional[Optimizer]):
                 Optimizer to use during training (optional).
 
         """
-        super().__init__(label=label, upstream_refs=upstream_ref)
+        ref = None
+        if isinstance(upstream_ref, FeatureSet):
+            dup_rep_warnings = None
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always", UserWarning)
+                ref = upstream_ref.reference()
+                dup_rep_warnings = [ww for ww in w if "Multiple representations selected" in str(ww.message)]
+            if dup_rep_warnings:
+                msg = (
+                    "upstream_ref\nSetting a ModelNode `upstream_ref` with a FeatureSet will result in "
+                    "multiple representations of the same column being combined into input/target tensors. "
+                    "Use `FeatureSet(...).reference(...)` is this is not intentional."
+                )
+                warnings.warn(msg, category=UserWarning, stacklevel=2)
+        elif isinstance(upstream_ref, ExperimentNodeReference):
+            ref = upstream_ref
+        elif isinstance(upstream_ref, ExperimentNode):
+            ref = upstream_ref.reference()
+        else:
+            msg = (
+                f"`upstream_ref` must be of type ExperimentReference or ExperimentNode. Received: {type(upstream_ref)}."
+            )
+            raise TypeError(msg)
+
+        super().__init__(label=label, upstream_refs=ref)
 
         # Set model (cast to BaseModel if explicit subclass not provided)
         self._model: BaseModel = wrap_model(model)
@@ -272,16 +300,16 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             self._build_optimizer()
 
     @overload
-    def forward(self, batch: Batch, **kwargs) -> RoleData: ...
+    def forward(self, batch: Batch, **kwargs) -> Batch: ...
     @overload
     def forward(self, roles: RoleData, **kwargs) -> RoleData: ...
     @overload
-    def forward(self, data: SampleData, **kwargs) -> RoleData: ...
+    def forward(self, data: SampleData, **kwargs) -> SampleData: ...
     def forward(
         self,
         x: SampleData | RoleData | Batch,
         **kwargs,
-    ) -> SampleData | RoleData:
+    ) -> SampleData | RoleData | Batch:
         """
         Performs a forward pass through the model using SampleData.
 
@@ -293,15 +321,14 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             **kwargs: Any additional keyword arguments to provide to BaseModel.forward
 
         Returns:
-            SampleData | RoleData:
-                Outputs from the model. If input has role keys (i.e., if a Batch or dict),
-                the output maintains the same roles.
+            SampleData | RoleData | Batch:
+                Outputs from the model. Output type matches input.
 
         """
 
         def _forward_sample_data(d: SampleData) -> SampleData:
             # Ensure SampleData is in expected backend (modified inplace)
-            d.to_backend(self.backend)
+            d.as_backend(self.backend)
 
             # Pass features through internal model
             out_features = self._model(d.features, **kwargs)
@@ -318,23 +345,23 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         if isinstance(x, SampleData):
             return _forward_sample_data(x)
 
-        if isinstance(x, Batch):
-            role_data = x.role_data
-        elif isinstance(x, RoleData):
-            role_data = x
-        else:
-            msg = f"Input must be of type SampleData or RoleData or Batch. Received: {type(x)}"
-            raise TypeError(msg)
+        if isinstance(x, RoleData):
+            out = {k: _forward_sample_data(v) for k, v in x.items()}
+            return RoleData(data=out)
 
-        # Validate dict value types
-        if not all(isinstance(v, SampleData) for v in role_data.values()):
-            msg = (
-                f"For dict-based inputs, values must be of type SampleData. "
-                f"Received: {[type(v) for v in role_data.values()]}."
+        if isinstance(x, Batch):
+            out = RoleData(data={k: _forward_sample_data(v) for k, v in x.role_data.items()})
+
+            return Batch(
+                batch_size=x.batch_size,
+                role_data=out,
+                shapes=out.shapes,
+                role_weights=x.role_weights,
+                role_masks=x.role_masks,
             )
-            raise TypeError(msg)
-        out = {k: _forward_sample_data(v) for k, v in role_data.items()}
-        return RoleData(data=out)
+
+        msg = f"Input must be of type SampleData or RoleData or Batch. Received: {type(x)}"
+        raise TypeError(msg)
 
     # ================================================
     # Representation
@@ -375,16 +402,16 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
     # ModelNodes Properties & Dunders
     # ================================================
     @overload
-    def __call__(self, batch: Batch, **kwargs) -> RoleData: ...
+    def __call__(self, batch: Batch, **kwargs) -> Batch: ...
     @overload
     def __call__(self, roles: RoleData, **kwargs) -> RoleData: ...
     @overload
-    def __call__(self, data: SampleData, **kwargs) -> RoleData: ...
+    def __call__(self, data: SampleData, **kwargs) -> SampleData: ...
     def __call__(
         self,
         x: SampleData | RoleData | Batch,
         **kwargs,
-    ) -> SampleData | RoleData:
+    ) -> SampleData | RoleData | Batch:
         """
         Shorthand to call `forward()` on input.
 
@@ -393,9 +420,8 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             **kwargs: Any additional keyword arguments to provide to BaseModel.forward
 
         Returns:
-            SampleData | RoleData:
-                Outputs from the model. If input has role keys (i.e., if a Batch or dict),
-                the output maintains the same roles.
+            SampleData | RoleData | Batch:
+                Outputs from the model. Output type matches input.
 
         """
         return self.forward(x=x, **kwargs)
@@ -431,45 +457,32 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
 
     def _validate_source(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss] | None = None,
     ):
         """
-        Validates that the required sources for input and losses are present in batch_input.
+        Validates that the required sources for input and losses are present in `ctx`.
 
         Args:
-            batch (Batch): Batch data.
-            losses (list[AppliedLoss], optional): Losses to compute.
+            ctx (ResolutionContext):
+                Execution context to validate losses on.
+            losses (list[AppliedLoss], optional):
+                List of applied losses.
 
         Raises:
             ValueError: If any expected input or loss role is missing.
 
         """
         # Check that self.upstream_ref exists in batch
-        ups_node_lbl: str = self.upstream_ref.node_label
-        if ups_node_lbl not in batch.outputs:
-            msg = f"Batch missing outputs from required upstream reference ('{ups_node_lbl}'). Batch items: {batch.outputs.keys()}"
+        ups_node: ExperimentNode = self.upstream_ref.resolve(ctx=ctx)
+        if isinstance(ups_node, (FeatureSet, FeatureSetView)):
+            # This node must have direct inputs
+            if self.node_id not in ctx.execution.input_batches:
+                msg = f"ExecutionContext missing input data for ModelNode '{self.label}'."
+                raise ValueError(msg)
+        elif ups_node.node_id not in ctx.execution.model_outputs:
+            msg = f"ExecutionContext missing output data from upstream node '{ups_node.label}'."
             raise ValueError(msg)
-
-        # Check that all required loss roles exist in batch
-        if losses is not None:
-            for loss in losses:
-                # Check that data from node needed for loss exists in batch
-                for ref_groups in loss.resolved_inputs.values():
-                    for ref in ref_groups.refs:
-                        # Ignore if loss specifies this node's output (not yet generated)
-                        if ref.node == self.label and ref.domain == DOMAIN_OUTPUTS:
-                            continue
-
-                        # Check node exists
-                        if ref.node not in batch.outputs:
-                            msg = f"Batch missing outputs for node required by loss: {ref!r}"
-                            raise ValueError(msg)
-
-                        # Check that role exists
-                        if ref.role not in batch.outputs[ref.node]:
-                            msg = f"Batch missing output data for role required by loss: {ref!r}"
-                            raise ValueError(msg)
 
     # ================================================
     # Trainable Mixin
@@ -519,26 +532,33 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
 
     def get_input_data(
         self,
-        batch: Batch,
-    ) -> RoleData:
-        """Returns subset of Batch data needed for this ModelNode."""
-        return batch.role_data
+        ctx: ResolutionContext,
+    ) -> Batch:
+        """Retrieves Batch data for this ModelNode at the current execution step."""
+        # If head node, get input
+        if self.node_id in ctx.execution.input_batches:
+            return ctx.execution.input_batches[self.node_id]
+        # Otherwise, get output of upstream node
+        upstream_node: ExperimentNode = self.upstream_ref.resolve(ctx=ctx)
+        if upstream_node.node_id in ctx.execution.model_outputs:
+            return ctx.execution.model_outputs[upstream_node.node_id]
+
+        msg = f"Failed to get input data for ModelNode '{self.label}'."
+        raise RuntimeError(msg)
 
     def _train_step_torch(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss],
-    ) -> tuple[Batch, LossCollection]:
+    ):
         """
         Runs a training step using PyTorch: forward, loss, backward, optimizer.
 
         Args:
-            batch (Batch): Batch data including prior node inputs and outputs.
-            losses (list[AppliedLoss]): Loss functions to apply.
-
-        Returns:
-            tuple[Batch, LossCollection]: Batch updated with this ModelNode's outputs
-                and tracked outputs from the AppliedLosses
+            ctx (ResolutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                List of losses to be applied in this execution step.
 
         """
         # Set optimizer and train mode
@@ -546,15 +566,17 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         self._optimizer.zero_grad()
 
         loss_records: list[LossRecord] = []
-        # outputs: dict[str, RoleData] = {}
 
-        # Forward pass (batch modified inplace)
-        batch.outputs[self.label] = self.forward(batch)
+        # Forward pass (ctx.execution modified inplace)
+        out_batch: Batch = self.forward(self.get_input_data(ctx=ctx))
+        if ctx.execution.model_outputs is None:
+            ctx.execution.model_outputs = {}
+        ctx.execution.model_outputs[self.node_id] = out_batch
 
         # Compute losses
         if losses is not None:
             for loss in losses:
-                weighted_raw_loss = loss.compute(batch=batch)
+                weighted_raw_loss = loss.compute(ctx=ctx)
                 lr = LossRecord(
                     value=weighted_raw_loss,
                     label=loss.label,
@@ -567,41 +589,45 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         lc.trainable.backward()
         self._optimizer.step()
 
-        return batch, lc
+        if ctx.execution.model_losses is None:
+            ctx.execution.model_losses = {}
+        ctx.execution.model_losses[self.node_id] = lc
 
     def _train_step_tensorflow(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss],
-    ) -> tuple[Batch, LossCollection]:
+    ):
         """
         Runs a training step using Tensorflow: forward, loss, backward, optimizer.
 
         Args:
-            batch (Batch): Batch data including prior node inputs and outputs.
-            losses (list[AppliedLoss]): Loss functions to apply.
-
-        Returns:
-            tuple[Batch, LossCollection]: Batch updated with this ModelNode's outputs
-                and tracked outputs from the AppliedLosses
+            ctx (ResolutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                List of losses to be applied in this execution step.
 
         """
         # Zero optimizer
         self._optimizer.zero_grad()
 
         loss_records: list[LossRecord] = []
-        # outputs: dict[str, RoleData] = {}
 
         # Track gradients over forward passes & loss computation
         with tf.GradientTape() as tape:
-            # Forward pass (batch modified inplace)
-            # Must set training=True for tf
-            batch.outputs[self.label] = self.forward(batch, training=True)
+            # Forward pass (ctx.execution modified inplace)
+            out_batch: Batch = self.forward(
+                self.get_input_data(ctx=ctx),
+                training=True,
+            )
+            if ctx.execution.model_outputs is None:
+                ctx.execution.model_outputs = {}
+            ctx.execution.model_outputs[self.node_id] = out_batch
 
         # Compute losses
         if losses is not None:
             for loss in losses:
-                weighted_raw_loss = loss.compute(batch=batch)
+                weighted_raw_loss = loss.compute(ctx=ctx)
                 lr = LossRecord(
                     value=weighted_raw_loss,
                     label=loss.label,
@@ -614,21 +640,23 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         grads = tape.gradient(lc.total, self._model.trainable_variables)
         self._optimizer.step(grads=grads, variables=self._model.trainable_variables)
 
-        return batch, lc
+        if ctx.execution.model_losses is None:
+            ctx.execution.model_losses = {}
+        ctx.execution.model_losses[self.node_id] = lc
 
     def _train_step_scikit(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss],
-    ) -> tuple[Batch, LossCollection]:
+    ):
         # TODO:
         raise NotImplementedError("Training for scikit model not implemented yet.")
 
     def train_step(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss],
-    ) -> tuple[Batch, LossCollection]:
+    ):
         """
         Performs a training step (forward, loss, backward, optimizer step) for this stage.
 
@@ -636,12 +664,10 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
         must be delegated to `ModelGraph`.
 
         Args:
-            batch (Batch): Batch data including prior node inputs and outputs.
-            losses (list[AppliedLoss]): Loss functions to apply.
-
-        Returns:
-            tuple[Batch, LossCollection]: Batch updated with this ModelNode's outputs
-                and tracked outputs from the AppliedLosses
+            ctx (ResolutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                List of losses to be applied in this execution step.
 
         Raises:
             RuntimeError: If stage is frozen or optimizer is missing.
@@ -654,19 +680,19 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
             )
 
         # Ensure batch_input matches expected data in losses
-        self._validate_source(batch=batch, losses=losses)
+        self._validate_source(ctx=ctx, losses=losses)
 
         # Ensure optimizer is set and matches model backend
         self._check_valid_optimizer(required=True)
 
         if self.backend == Backend.TORCH:
-            return self._train_step_torch(batch=batch, losses=losses)
+            return self._train_step_torch(ctx=ctx, losses=losses)
 
         if self.backend == Backend.TENSORFLOW:
-            return self._train_step_tensorflow(batch=batch, losses=losses)
+            return self._train_step_tensorflow(ctx=ctx, losses=losses)
 
         if self.backend == Backend.SCIKIT:
-            return self._train_step_scikit(batch=batch, losses=losses)
+            return self._train_step_scikit(ctx=ctx, losses=losses)
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)
@@ -676,35 +702,35 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
     # ================================================
     def _eval_step_torch(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss] | None = None,
-    ) -> tuple[Batch, LossCollection]:
+    ):
         """
         Runs an evaluation step using PyTorch: forward + loss (no gradients).
 
         Args:
-            batch (Batch): Batch data including prior node inputs and outputs.
-            losses (list[AppliedLoss]): Loss functions to apply.
-
-        Returns:
-            tuple[Batch, LossCollection]: Batch updated with this ModelNode's outputs
-                and tracked outputs from the AppliedLosses
+            ctx (ResolutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                Optional list of losses to be applied in this execution step.
 
         """
         # Set eval mode
         self._model.eval()
 
         loss_records: list[LossRecord] = []
-        # outputs: dict[str, RoleData] = {}
 
-        # Forward pass (batch modified inplace)
+        # Forward pass (ctx.execution modified inplace)
         with torch.no_grad():
-            batch.outputs[self.label] = self.forward(batch)
+            out_batch: Batch = self.forward(self.get_input_data(ctx=ctx))
+            if ctx.execution.model_outputs is None:
+                ctx.execution.model_outputs = {}
+            ctx.execution.model_outputs[self.node_id] = out_batch
 
             # Compute losses
             if losses is not None:
                 for loss in losses:
-                    weighted_raw_loss = loss.compute(batch=batch)
+                    weighted_raw_loss = loss.compute(ctx=ctx)
                     lr = LossRecord(
                         value=weighted_raw_loss,
                         label=loss.label,
@@ -714,35 +740,40 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
 
         # Record loss records
         lc = LossCollection(records=loss_records)
-        return batch, lc
+        if ctx.execution.model_losses is None:
+            ctx.execution.model_losses = {}
+        ctx.execution.model_losses[self.node_id] = lc
 
     def _eval_step_tensorflow(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss] | None = None,
-    ) -> tuple[Batch, LossCollection]:
+    ):
         """
         Runs an evaluation step using Tensorflow: forward + loss (no gradients).
 
         Args:
-            batch (Batch): Batch data including prior node inputs and outputs.
-            losses (list[AppliedLoss]): Loss functions to apply.
-
-        Returns:
-            tuple[Batch, LossCollection]: Batch updated with this ModelNode's outputs
-                and tracked outputs from the AppliedLosses
+            ctx (ResolutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                Optional list of losses to be applied in this execution step.
 
         """
         loss_records: list[LossRecord] = []
-        # outputs: dict[str, RoleData] = {}
 
-        # Forward pass (batch modified inplace)
-        batch.outputs[self.label] = self.forward(batch, training=False)
+        # Forward pass (ctx.execution modified inplace)
+        out_batch: Batch = self.forward(
+            self.get_input_data(ctx=ctx),
+            training=False,
+        )
+        if ctx.execution.model_outputs is None:
+            ctx.execution.model_outputs = {}
+        ctx.execution.model_outputs[self.node_id] = out_batch
 
         # Compute losses
         if losses is not None:
             for loss in losses:
-                weighted_raw_loss = loss.compute(batch=batch)
+                weighted_raw_loss = loss.compute(ctx=ctx)
                 lr = LossRecord(
                     value=weighted_raw_loss,
                     label=loss.label,
@@ -752,33 +783,33 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
 
         # Record loss records
         lc = LossCollection(records=loss_records)
-        return batch, lc
+        if ctx.execution.model_losses is None:
+            ctx.execution.model_losses = {}
+        ctx.execution.model_losses[self.node_id] = lc
 
     def _eval_step_scikit(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss] | None = None,
-    ) -> tuple[Batch, LossCollection]:
+    ):
         # TODO:
         raise NotImplementedError("Evaluation for scikit model not implemented yet.")
 
     def eval_step(
         self,
-        batch: Batch,
+        ctx: ResolutionContext,
         losses: list[AppliedLoss] | None = None,
-    ) -> tuple[Batch, LossCollection]:
+    ):
         """
         Performs an evaluation step (forward pass and loss computation) for this stage.
 
         Only callable if this stage is frozen. No gradient tracking is performed.
 
         Args:
-            batch (Batch): Batch data including prior node inputs and outputs.
-            losses (list[AppliedLoss]): Loss functions to apply.
-
-        Returns:
-            tuple[Batch, LossCollection]: Batch updated with this ModelNode's outputs
-                and tracked outputs from the AppliedLosses
+            ctx (ResolutionContext):
+                Context (input/output data) for the given execution step.
+            losses (list[AppliedLoss]):
+                Optional list of losses to be applied in this execution step.
 
         Raises:
             RuntimeError: If stage is not frozen.
@@ -790,16 +821,16 @@ class ModelNode(ComputeNode, TrainableMixin, EvaluableMixin):
                 "`eval_step` called with `freeze=False`. Use `train_step` for training.",
             )
 
-        self._validate_source(batch=batch, losses=losses)
+        self._validate_source(ctx=ctx, losses=losses)
 
         if self.backend == Backend.TORCH:
-            return self._eval_step_torch(batch=batch, losses=losses)
+            return self._eval_step_torch(ctx=ctx, losses=losses)
 
         if self.backend == Backend.TENSORFLOW:
-            return self._eval_step_tensorflow(batch=batch, losses=losses)
+            return self._eval_step_tensorflow(ctx=ctx, losses=losses)
 
         if self.backend == Backend.SCIKIT:
-            return self._eval_step_scikit(batch=batch, losses=losses)
+            return self._eval_step_scikit(ctx=ctx, losses=losses)
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)

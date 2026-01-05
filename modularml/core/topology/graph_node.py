@@ -5,13 +5,15 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal
 
 from modularml.context.experiment_context import ExperimentContext
+from modularml.context.resolution_context import ResolutionContext
 from modularml.core.experiment.experiment_node import ExperimentNode
+from modularml.core.references.experiment_reference import ResolutionError
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import GraphNodeInputError, GraphNodeOutputError
 
 if TYPE_CHECKING:
-    from modularml.core.references.reference_like import ReferenceLike
+    from modularml.core.references.experiment_reference import ExperimentNodeReference
 
 
 class GraphNode(ABC, ExperimentNode):
@@ -29,8 +31,8 @@ class GraphNode(ABC, ExperimentNode):
     def __init__(
         self,
         label: str,
-        upstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
-        downstream_refs: ReferenceLike | list[ReferenceLike] | None = None,
+        upstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
+        downstream_refs: ExperimentNodeReference | list[ExperimentNodeReference] | None = None,
         *,
         node_id: str | None = None,
         register: bool = True,
@@ -41,9 +43,9 @@ class GraphNode(ABC, ExperimentNode):
         Args:
             label (str):
                 Unique identifier for this node.
-            upstream_refs (ReferenceLike | list[ReferenceLike] | None):
+            upstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
                 References of upstream connections.
-            downstream_refs (ReferenceLike | list[ReferenceLike] | None):
+            downstream_refs (ExperimentNodeReference | list[ExperimentNodeReference] | None):
                 References of downstream connections.
             node_id (str, optional):
                 Used only for de-serialization.
@@ -57,8 +59,8 @@ class GraphNode(ABC, ExperimentNode):
         super().__init__(label=label, node_id=node_id, register=register)
 
         # Normalize inputs as lists
-        self._upstream_refs: list[ReferenceLike] = ensure_list(upstream_refs)
-        self._downstream_refs: list[ReferenceLike] = ensure_list(downstream_refs)
+        self._upstream_refs: list[ExperimentNodeReference] = ensure_list(upstream_refs)
+        self._downstream_refs: list[ExperimentNodeReference] = ensure_list(downstream_refs)
 
         # Validate connections
         self._validate_connections()
@@ -77,8 +79,14 @@ class GraphNode(ABC, ExperimentNode):
                 self._downstream_refs = self._downstream_refs[: self.max_downstream_refs]
 
         # Ensure referenced connections exist in this ExperimentContext
-        def _val_ref_existence(refs: list[ReferenceLike], direction: Literal["upstream", "downstream"]):
-            failed: list[ReferenceLike] = [r for r in refs if not ExperimentContext.has_node_for_ref(r)]
+        def _val_ref_existence(refs: list[ExperimentNodeReference], direction: Literal["upstream", "downstream"]):
+            exp_ctx = ExperimentContext.get_active()
+            failed: list[ExperimentNodeReference] = []
+            for r in refs:
+                try:
+                    _ = r.resolve(ctx=ResolutionContext(experiment=exp_ctx))
+                except ResolutionError:  # noqa: PERF203
+                    failed.append(r)
             if failed:
                 details = "\n".join(f"  - {ref.__class__.__name__}: {ref!r}" for ref in failed)
                 msg = (
@@ -113,7 +121,7 @@ class GraphNode(ABC, ExperimentNode):
         return None
 
     @property
-    def upstream_ref(self) -> ReferenceLike | None:
+    def upstream_ref(self) -> ExperimentNodeReference | None:
         """
         Return the single upstream reference, if only one is allowed.
 
@@ -128,7 +136,7 @@ class GraphNode(ABC, ExperimentNode):
         )
 
     @property
-    def downstream_ref(self) -> ReferenceLike | None:
+    def downstream_ref(self) -> ExperimentNodeReference | None:
         """
         Return the single downstream reference, if only one is allowed.
 
@@ -162,7 +170,7 @@ class GraphNode(ABC, ExperimentNode):
     # ================================================
     # Connection Management
     # ================================================
-    def get_upstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE) -> list[ReferenceLike]:
+    def get_upstream_refs(self, error_mode: ErrorMode = ErrorMode.RAISE) -> list[ExperimentNodeReference]:
         """
         Retrieve all upstream (input) references.
 
@@ -170,7 +178,7 @@ class GraphNode(ABC, ExperimentNode):
             error_mode (ErrorMode): Error handling strategy if input is invalid.
 
         Returns:
-            list[ReferenceLike]: List of upstream connection references.
+            list[ExperimentNodeReference]: List of upstream connection references.
 
         """
         if not self.allows_upstream_connections:
@@ -185,7 +193,7 @@ class GraphNode(ABC, ExperimentNode):
     def get_downstream_refs(
         self,
         error_mode: ErrorMode = ErrorMode.RAISE,
-    ) -> list[ReferenceLike]:
+    ) -> list[ExperimentNodeReference]:
         """
         Retrieve all downstream (output) references.
 
@@ -193,7 +201,7 @@ class GraphNode(ABC, ExperimentNode):
             error_mode (ErrorMode): Error handling strategy if input is invalid.
 
         Returns:
-            list[ReferenceLike]: List of downstream connection references.
+            list[ExperimentNodeReference]: List of downstream connection references.
 
         """
         if not self.allows_downstream_connections:
@@ -205,12 +213,12 @@ class GraphNode(ABC, ExperimentNode):
             return [] if handled is False else self._downstream_refs
         return self._downstream_refs
 
-    def add_upstream_ref(self, ref: ReferenceLike, error_mode: ErrorMode = ErrorMode.RAISE):
+    def add_upstream_ref(self, ref: ExperimentNodeReference, error_mode: ErrorMode = ErrorMode.RAISE):
         """
         Add a new upstream connection.
 
         Args:
-            ref (ReferenceLike): Reference of upstream connection.
+            ref (ExperimentNodeReference): Reference of upstream connection.
             error_mode (ErrorMode): Error handling mode for duplicates or limits.
 
         """
@@ -250,12 +258,12 @@ class GraphNode(ABC, ExperimentNode):
 
         self._upstream_refs.append(ref)
 
-    def remove_upstream_ref(self, ref: ReferenceLike, error_mode: ErrorMode = ErrorMode.RAISE):
+    def remove_upstream_ref(self, ref: ExperimentNodeReference, error_mode: ErrorMode = ErrorMode.RAISE):
         """
         Remove an upstream reference.
 
         Args:
-            ref (ReferenceLike): Upstream reference to remove.
+            ref (ExperimentNodeReference): Upstream reference to remove.
             error_mode (ErrorMode): Error handling mode if ref not found.
 
         """
@@ -305,14 +313,14 @@ class GraphNode(ABC, ExperimentNode):
 
     def set_upstream_refs(
         self,
-        upstream_refs: list[ReferenceLike],
+        upstream_refs: list[ExperimentNodeReference],
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
         Replace all upstream connections with a new list of references.
 
         Args:
-            upstream_refs (list[ReferenceLike]): List of new upstream references.
+            upstream_refs (list[ExperimentNodeReference]): List of new upstream references.
             error_mode (ErrorMode): Error handling mode for violations.
 
         """
@@ -320,12 +328,12 @@ class GraphNode(ABC, ExperimentNode):
         for ref in upstream_refs:
             self.add_upstream_ref(ref, error_mode=error_mode)
 
-    def add_downstream_ref(self, ref: ReferenceLike, error_mode: ErrorMode = ErrorMode.RAISE):
+    def add_downstream_ref(self, ref: ExperimentNodeReference, error_mode: ErrorMode = ErrorMode.RAISE):
         """
         Add a new downstream connection.
 
         Args:
-            ref (ReferenceLike): Reference of downstream connection.
+            ref (ExperimentNodeReference): Reference of downstream connection.
             error_mode (ErrorMode): Error handling mode for duplicates or limits.
 
         """
@@ -367,14 +375,14 @@ class GraphNode(ABC, ExperimentNode):
 
     def remove_downstream_ref(
         self,
-        ref: ReferenceLike,
+        ref: ExperimentNodeReference,
         error_mode: ErrorMode = ErrorMode.RAISE,
     ):
         """
         Remove a downstream reference.
 
         Args:
-            ref (ReferenceLike): Downstream reference to remove.
+            ref (ExperimentNodeReference): Downstream reference to remove.
             error_mode (ErrorMode): Error handling mode if ref not found.
 
         """
@@ -431,7 +439,7 @@ class GraphNode(ABC, ExperimentNode):
         Replace all downstream connections with a new list of references.
 
         Args:
-            downstream_refs (list[ReferenceLike]): List of new downstream references.
+            downstream_refs (list[ExperimentNodeReference]): List of new downstream references.
             error_mode (ErrorMode): Error handling mode for violations.
 
         """
