@@ -1024,10 +1024,10 @@ class FeatureSet(GraphNode, SplitMixin, SampleCollectionMixin, Configurable, Sta
         # Perform column selection (organized by domain)
         selected: dict[str, set[str]] = resolve_column_selectors(
             all_columns=all_cols,
-            columns=[column],
-            features=[feature],
-            targets=[target],
-            tags=[tag],
+            columns=[column] if column is not None else None,
+            features=[feature] if feature is not None else None,
+            targets=[target] if target is not None else None,
+            tags=[tag] if tag is not None else None,
             rep=rep,
             include_all_if_empty=False,
         )

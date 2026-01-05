@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
@@ -127,6 +127,14 @@ class SplitMixin:
             raise IndexError("Some relative indices exceed the size of the current view.")
         abs_indices = np.asarray(idxs)[rel_indices]
 
+        # Preserve columns if already a view
+        if is_view:
+            return FeatureSetView(
+                source=source,
+                indices=abs_indices,
+                columns=self.columns,
+                label=label or f"{self.label}_view",
+            )
         return FeatureSetView(
             source=source,
             indices=abs_indices,
@@ -439,6 +447,51 @@ class SplitMixin:
             columns=list(sel_cols),
             label=label or f"{self.label}_view",
         )
+
+    def take_intersection(
+        self,
+        other: FeatureSet | FeatureSetView,
+        *,
+        order: Literal["self", "other"] = "self",
+    ) -> FeatureSetView:
+        """
+        Return a view containing rows of `self` that also appear in `other`.
+
+        Description:
+            Takes the intersection of this view's indices and anothers.
+            The columns of the calling view are preserved.
+
+        Args:
+            other (FeatureSet | FeatureSetView):
+                Other indice-containing FeatureSet object.
+            order (str):
+                Whether the intersecting view should use the indice order defined
+                in `'self'` or `'other'`. Defaults to `'self'`.
+
+        """
+        if not isinstance(other, SplitMixin):
+            msg = f"Intersection is only possible between FeatureSets or FeatureSetViews. Received: {type(other)}."
+            raise TypeError(msg)
+
+        # Get indices of caller
+        _, self_is_view = self._get_split_context()
+        self_idxs = self.indices if self_is_view else np.arange(self.collection.n_samples)
+
+        # Get indices of other
+        _, other_is_view = other._get_split_context()
+        other_idxs = other.indices if other_is_view else np.arange(other.collection.n_samples)
+
+        # Map self idxs to ordering idx
+        abs_to_rel = {abs_idx: rel_idx for rel_idx, abs_idx in enumerate(self_idxs)}
+
+        if order == "self":
+            common_abs = np.intersect1d(self_idxs, other_idxs)
+        else:
+            abs_set = set(self_idxs)
+            common_abs = [i for i in other_idxs if i in abs_set]
+
+        rel = [abs_to_rel[i] for i in common_abs]
+        return self.take(rel, label="intersection")
 
     # ================================================
     # Split methods

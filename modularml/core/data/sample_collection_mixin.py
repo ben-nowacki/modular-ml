@@ -7,6 +7,7 @@ import pandas as pd
 import pyarrow as pa
 
 from modularml.core.data.sample_collection import SampleCollection
+from modularml.core.data.sample_data import SampleData
 from modularml.core.data.schema_constants import (
     DOMAIN_FEATURES,
     DOMAIN_SAMPLE_ID,
@@ -14,7 +15,7 @@ from modularml.core.data.schema_constants import (
     DOMAIN_TARGETS,
 )
 from modularml.utils.data.conversion import convert_dict_to_format, convert_to_format
-from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.data_format import _TENSORLIKE_FORMATS, DataFormat, format_is_tensorlike
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
 
 if TYPE_CHECKING:
@@ -801,3 +802,25 @@ class SampleCollectionMixin:
         from modularml.core.data.featureset import FeatureSet
 
         return FeatureSet(label=label, table=self.to_arrow())
+
+    def to_sample_data(self, fmt: DataFormat = DataFormat.NUMPY) -> SampleData:
+        """
+        Converts all columns referenced by this view to tensor-based SampleData.
+
+        Args:
+            fmt (DataFormat, optional):
+                The data format to use for the tensors constructed from the
+                "features" and "targets" columns. `fmt` must be TensorLike
+                (e.g., "torch", "tf", "np"). Defaults to "numpy".
+
+        """
+        if not format_is_tensorlike(fmt):
+            msg = f"DataFormat must be tensor-like. Received: {fmt}. Allowed formats: {_TENSORLIKE_FORMATS}."
+            raise ValueError(msg)
+
+        return SampleData(
+            sample_uuids=self.get_sample_uuids(fmt=DataFormat.NUMPY),
+            features=self.get_features(fmt=fmt),
+            targets=self.get_targets(fmt=fmt),
+            tags=self.get_tags(fmt=DataFormat.NUMPY),
+        )
