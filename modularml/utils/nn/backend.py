@@ -16,6 +16,7 @@ class Backend(str, Enum):
 
     TORCH = "torch"
     TENSORFLOW = "tensorflow"
+    NUMPY = "numpy"
     SCIKIT = "scikit"
     NONE = "none"
 
@@ -33,6 +34,8 @@ def normalize_backend(value: str | Backend):
         if value in ["tensorflow", "tf", "keras"]:
             return Backend.TENSORFLOW
         if value in ["scikit", "sklearn"]:
+            return Backend.SCIKIT
+        if value in ["numpy", "np"]:
             return Backend.SCIKIT
         return Backend(value)
     msg = f"Unsupported Backend value: {value}"
@@ -105,12 +108,25 @@ def infer_backend(obj_or_cls: Any) -> Backend:
         pass
 
     # ================================================
-    # Sklearn / Numpy
+    # NumPy
+    # ================================================
+    try:
+        import numpy as np
+
+        if isinstance(obj_or_cls, np.ndarray) or (
+            isinstance(obj_or_cls, type) and _safe_issubclass(obj_or_cls, np.ndarray)
+        ):
+            return Backend.NUMPY
+    except ImportError:
+        pass
+
+    # ================================================
+    # Sklearn
     # ================================================
     try:
         from sklearn.base import BaseEstimator
 
-        if isinstance(obj_or_cls, BaseEstimator) or (
+        if isinstance(obj_or_cls, (BaseEstimator, np.ndarray)) or (
             isinstance(obj_or_cls, type) and _safe_issubclass(obj_or_cls, BaseEstimator)
         ):
             return Backend.SCIKIT

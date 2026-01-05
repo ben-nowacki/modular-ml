@@ -3,12 +3,27 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
-from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_OUTPUTS,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+)
 from modularml.utils.data.conversion import convert_to_format
-from modularml.utils.data.data_format import get_data_format_for_backend
+from modularml.utils.data.data_format import (
+    _TENSORLIKE_FORMATS,
+    DataFormat,
+    format_is_tensorlike,
+    get_data_format_for_backend,
+    infer_data_type,
+)
+from modularml.utils.data.shape_utils import ensure_tuple_shape
+from modularml.utils.nn.backend import infer_backend
 from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
+    from modularml.core.references.execution_reference import TensorLike
     from modularml.utils.nn.backend import Backend
 
 
@@ -72,6 +87,18 @@ class SampleData(Summarizable):
             if tags is not None:
                 self.data[DOMAIN_TAGS] = tags
 
+        self._shapes = SampleShapes(
+            shapes={k: ensure_tuple_shape(v.shape[1:]) for k, v in self.data.items()},
+            kind=kind,
+        )
+
+    # ================================================
+    # Shape access
+    # ================================================
+    @property
+    def shapes(self) -> SampleShapes:
+        return self._shapes
+
     # ================================================
     # Data access
     # ================================================
@@ -101,62 +128,178 @@ class SampleData(Summarizable):
             raise AttributeError("`outputs` is only defined for SampleData produced by a model.")
         return self.features
 
+    def get_domain_data(self, domain: str) -> TensorLike:
+        """Retrieves the tensor-like data stored in the specified domain."""
+        valid_attrs = ("sample_uuids", "features", "targets", "tags", "outputs")
+        if domain not in valid_attrs:
+            msg = f"Invalid domain: '{domain}'. Available: {valid_attrs}."
+            raise KeyError(msg)
+        return getattr(self, domain)
+
     # ================================================
-    # Backend casting
+    # Format conversion (inplace and copy)
     # ================================================
-    def to_backend(self, backend: Backend):
+    def as_format(self, fmt: DataFormat):
+        """
+        Casts the data to the specified tensor-like DataFormat.
+
+        This is an *in-place* conversion. If copying is needed,
+        use `to_format`.
+
+        Description:
+            Performs an in-place data casting of the underlying tensors.
+            Note that only the features and targets are converted; tags
+            are left in the format originally defined in FeatureSet
+            construction.
+
+        Args:
+            fmt (DataFormat):
+                The format to cast to. `fmt` must be TensorLike
+                (e.g., "torch", "tf", "np").
+
+        """
+        if not format_is_tensorlike(fmt):
+            msg = f"DataFormat must be tensor-like. Received: {fmt}. Allowed formats: {_TENSORLIKE_FORMATS}."
+            raise ValueError(msg)
+
+        self.data[DOMAIN_FEATURES] = convert_to_format(
+            data=self.data[DOMAIN_FEATURES],
+            fmt=fmt,
+        )
+        self.data[DOMAIN_TARGETS] = convert_to_format(
+            data=self.data[DOMAIN_TARGETS],
+            fmt=fmt,
+        )
+
+    def to_format(self, fmt: DataFormat) -> SampleData:
+        """
+        Casts the data to the specified tensor-like DataFormat.
+
+        This is a *non-mutating* conversion. A new copy is returned
+        with the old SampleData isntance unchanged.
+
+        Description:
+            Performs a data casting on a copy of the underlying tensors.
+            Note that only the features and targets are converted; tags
+            are left in the format originally defined in FeatureSet
+            construction.
+
+        Args:
+            fmt (DataFormat):s
+                The format to cast to. `fmt` must be TensorLike
+                (e.g., "torch", "tf", "np").
+
+        """
+        new_data = SampleData(data=dict(self.data), kind=self._kind)
+        new_data.as_format(fmt=fmt)
+        return new_data
+
+    def as_backend(self, backend: Backend):
         """
         Casts the data to a DataFormat compatible with specified backend.
+
+        This is an *in-place* conversion. If copying is needed,
+        use `to_format`.
 
         Description:
             Performs an in-place data casting of the underlying tensors.
             Reformats the features and targets, but not the tags.
 
         """
-        self.data[DOMAIN_FEATURES] = convert_to_format(
-            data=self.data[DOMAIN_FEATURES],
-            fmt=get_data_format_for_backend(backend=backend),
-        )
-        self.data[DOMAIN_TARGETS] = convert_to_format(
-            data=self.data[DOMAIN_TARGETS],
-            fmt=get_data_format_for_backend(backend=backend),
-        )
+        return self.as_format(get_data_format_for_backend(backend=backend))
+
+    def to_backend(self, backend: Backend) -> SampleData:
+        """
+        Casts the data to a DataFormat compatible with specified backend.
+
+        This is a *non-mutating* conversion. A new copy is returned
+        with the old SampleData isntance unchanged.
+
+        Description:
+            Performs a data casting on a copy of the underlying tensors.
+            Reformats the features and targets, but not the tags.
+
+        """
+        return self.to_format(get_data_format_for_backend(backend=backend))
 
     # ================================================
     # Representation
     # ================================================
-    @property
-    def _primary_domain_name(self) -> str:
-        return "outputs" if self._kind == "output" else "features"
+    def _summary_rows(
+        self,
+        row_order: Literal["attribute", "domain"] = "domain",
+    ) -> list[tuple]:
+        # "attribute": rows = shapes, dtype, backend
+        if row_order == "attribute":
+            rows: list[tuple] = []
+            shape_rows = self.shapes._summary_rows()
+            dtype_rows: list[tuple] = []
+            backend_rows: list[tuple] = []
 
-    def _summary_rows(self) -> list[tuple]:
+            domain_order = [
+                DOMAIN_FEATURES,
+                DOMAIN_TARGETS,
+                DOMAIN_TAGS,
+                DOMAIN_SAMPLE_ID,
+            ]
+            for d in domain_order:
+                row_lbl = d
+                if d == DOMAIN_FEATURES and self._kind == "output":
+                    row_lbl = DOMAIN_OUTPUTS
+
+                if d not in self.data:
+                    dtype_rows.append((row_lbl, "None"))
+                    continue
+
+                v = self.data[d]
+                dtype_rows.append(
+                    (row_lbl, str(infer_data_type(v))),
+                )
+                backend_rows.append(
+                    (row_lbl, str(infer_backend(v).value)),
+                )
+
+            rows.append(("shapes", shape_rows))
+            rows.append(("dtype", dtype_rows))
+            rows.append(("backend", backend_rows))
+            return rows
+
+        # "domain": rows = features, targets tags, sample_id
         rows: list[tuple] = []
-
-        def _add_domain_row(
-            row_label: str,
-            domain_data: Any,
-        ):
-            if domain_data is not None:
-                try:
-                    shape = str(tuple(domain_data.shape))
-                except Exception:  # noqa: BLE001
-                    shape = "N/A"
-
-            rows.append((row_label, shape))
-
-        for domain_name, domain_data in self.data.items():
-            row_label = domain_name
-            if domain_name == "features":
-                row_label = self._primary_domain_name
-            _add_domain_row(row_label=row_label, domain_data=domain_data)
+        domain_order = [
+            DOMAIN_FEATURES,
+            DOMAIN_TARGETS,
+            DOMAIN_TAGS,
+            DOMAIN_SAMPLE_ID,
+        ]
+        for d in domain_order:
+            row_lbl = d
+            if d == DOMAIN_FEATURES and self._kind == "output":
+                row_lbl = DOMAIN_OUTPUTS
+            if d not in self.data:
+                rows.append((row_lbl, "None"))
+            v = self.data[d]
+            rows.append(
+                (
+                    row_lbl,
+                    [
+                        ("shape", str(self.shapes.shapes[d])),
+                        ("dtype", str(infer_data_type(v))),
+                        ("backend", str(infer_backend(v).value)),
+                    ],
+                ),
+            )
 
         return rows
 
     def __repr__(self) -> str:
-        f = self.features.shape if self.features is not None else None
-        t = self.targets.shape if self.targets is not None else None
-        g = self.tags.shape if self.tags is not None else None
-        return f"SampleData({self._primary_domain_name}={f}, targets={t}, tags={g})"
+        f_lbl = DOMAIN_FEATURES
+        if self._kind == "output":
+            f_lbl = DOMAIN_OUTPUTS
+        f = self.shapes.features_shape
+        t = self.shapes.targets_shape
+        g = self.shapes.tags_shape
+        return f"SampleData({f_lbl}={f}, targets={t}, tags={g})"
 
 
 class RoleData(Mapping[str, SampleData], Summarizable):
@@ -204,63 +347,170 @@ class RoleData(Mapping[str, SampleData], Summarizable):
         return len(self._data)
 
     # ================================================
-    # Role access
+    # Properties and data access
     # ================================================
     @property
-    def roles(self) -> list[str]:
+    def available_roles(self) -> list[str]:
         """List of available role names."""
         return list(self._data.keys())
 
-    def get_role(self, role: str, default: Any = None) -> SampleData | Any:
-        return self._data.get(role, default)
+    @property
+    def shapes(self) -> SampleShapes:
+        """
+        The per-domain data shapes.
+
+        By definition, all roles have the same shapes.
+        """
+        return self.get_data(role=self.available_roles[0]).shapes
+
+    def get_data(
+        self,
+        role: str,
+        domain: str | None = None,
+    ) -> SampleData | TensorLike:
+        """
+        Retrieves the data stored in the specified role.
+
+        Args:
+            role (str):
+                The role to retrieve data from.
+
+            domain (str, optional):
+                An optional domain within the given role to return.
+                If None, the entire SampleData instance of the given
+                role is returned. Defaults to None.
+
+        Returns:
+            SampleData | TensorLike
+
+        """
+        if role not in self._data:
+            msg = f"Role '{role}' not found. Available roles: {self.available_roles}"
+            raise KeyError(msg)
+        if domain is not None:
+            return self._data[role].get_domain_data(domain=domain)
+        return self._data[role]
 
     # ================================================
-    # Attribute access
+    # Pseudo-attribute access
     # ================================================
     def __getattr__(self, name: str) -> SampleData:
         # Called only if attribute not found normally
         if name in self._data:
             return self._data[name]
-        msg = f"{self.__class__.__name__} has no role '{name}'. Available roles: {self.roles}"
+        msg = f"{self.__class__.__name__} has no role '{name}'. Available roles: {self.available_roles}."
         raise AttributeError(msg)
 
     # ================================================
     # Utilities
     # ================================================
-    def to_dict(self) -> dict[str, SampleData]:
-        """Explicitly unwrap to a plain dict."""
-        return dict(self._data)
+    def copy(self) -> RoleData:
+        """Returns new RoleData instance with copied data."""
+        new_rd = {}
+        for k, v in self._data.items():
+            new_rd[k] = SampleData(data=dict(v.data), kind=v._kind)
+        return RoleData(data=new_rd)
 
-    def to_backend(self, backend) -> RoleData:
+    # ================================================
+    # Format conversion (inplace and copy)
+    # ================================================
+    def as_format(self, fmt: DataFormat):
         """
-        Cast all SampleData objects to a backend-compatible format.
+        Casts all SampleData objects to the specified tensor-like DataFormat.
 
-        Returns:
-            RoleData: New RoleData with converted SampleData.
+        This is an *in-place* conversion. If copying is needed,
+        use `to_format`.
+
+        Description:
+            Performs an in-place data casting of the underlying tensors
+            for every role. Only features and targets are converted;
+            tags and sample IDs are left untouched.
+
+        Args:
+            fmt (DataFormat):
+                The format to cast to. `fmt` must be TensorLike
+                (e.g., "torch", "tf", "np").
 
         """
-        return RoleData({role: sd.to_backend(backend) or sd for role, sd in self._data.items()})
+        if not format_is_tensorlike(fmt):
+            msg = f"DataFormat must be tensor-like. Received: {fmt}. Allowed formats: {_TENSORLIKE_FORMATS}."
+            raise ValueError(msg)
+
+        for sd in self._data.values():
+            sd.as_format(fmt=fmt)
+
+    def to_format(self, fmt: DataFormat) -> RoleData:
+        """
+        Casts all SampleData objects to the specified tensor-like DataFormat.
+
+        This is a *non-mutating* conversion. A new RoleData instance
+        is returned with the original unchanged.
+
+        Description:
+            Performs data casting of the underlying tensors for every
+            role on a new copy. Only features and targets are converted;
+            tags and sample IDs are left untouched.
+
+        Args:
+            fmt (DataFormat):s
+                The format to cast to. `fmt` must be TensorLike
+                (e.g., "torch", "tf", "np").
+
+        """
+        new_rd = self.copy()
+        new_rd.as_format(fmt=fmt)
+        return new_rd
+
+    def as_backend(self, backend: Backend):
+        """
+        Casts the data to a DataFormat compatible with the specified backend.
+
+        This is an *in-place* conversion. If copying is needed, use `to_format`.
+
+        Description:
+            Performs an in-place data casting of the underlying tensors.
+            Reformats the features and targets, but not the tags.
+
+        """
+        return self.as_format(get_data_format_for_backend(backend=backend))
+
+    def to_backend(self, backend: Backend) -> RoleData:
+        """
+        Casts the data to a DataFormat compatible with the specified backend.
+
+        This is a *non-mutating* conversion. A new copy is returned with the
+        old SampleData instance unchanged.
+
+        Description:
+            Performs a data casting on a copy of the underlying tensors.
+            Reformats the features and targets, but not the tags.
+
+        """
+        return self.to_format(get_data_format_for_backend(backend=backend))
 
     # ================================================
     # Representation
     # ================================================
-    def _summary_rows(self) -> list[tuple]:
+    def _summary_rows(
+        self,
+        row_order: Literal["attribute", "domain"] = "domain",
+    ) -> list[tuple]:
         rows: list[tuple] = []
 
-        # Avialable roles
-        rows.append(("roles", [(r, "") for r in self.roles]))
+        # Available roles
+        rows.append(("roles", [(r, "") for r in self.available_roles]))
 
         # One row per role with SampleData summary
         for role, sample_data in self._data.items():
-            rows.append((role, sample_data._summary_rows()))
+            rows.append((role, sample_data._summary_rows(row_order=row_order)))
 
         return rows
 
     def __repr__(self) -> str:
-        return f"RoleData(roles={self.roles})"
+        return f"RoleData(roles={self.available_roles})"
 
 
-class SampleShapes:
+class SampleShapes(Summarizable):
     """
     Shape specification for all schema domains with tensor-like data.
 
@@ -296,7 +546,9 @@ class SampleShapes:
         features_shape: tuple[int, ...] | None = None,
         targets_shape: tuple[int, ...] | None = None,
         tags_shape: tuple[int, ...] | None = None,
+        kind: Literal["input", "output"] = "input",
     ):
+        self._kind = kind
         if shapes is not None:
             # Use provided dictionary directly
             self.shapes = dict(shapes)
@@ -323,6 +575,13 @@ class SampleShapes:
         return self.shapes[DOMAIN_FEATURES]
 
     @property
+    def outputs_shape(self) -> tuple[int, ...]:
+        """Shape tuple for the DOMAIN_OUTPUTS."""
+        if self._kind != "output":
+            raise AttributeError("`outputs_shape` is only defined for SampleShapes produced by a model.")
+        return self.features_shape
+
+    @property
     def targets_shape(self) -> tuple[int, ...]:
         """Shape tuple for the DOMAIN_TARGETS domain."""
         return self.shapes[DOMAIN_TARGETS]
@@ -331,3 +590,23 @@ class SampleShapes:
     def tags_shape(self) -> tuple[int, ...]:
         """Shape tuple for the DOMAIN_TAGS domain."""
         return self.shapes[DOMAIN_TAGS]
+
+    def _summary_rows(self) -> list[tuple]:
+        rows: list[tuple] = []
+
+        domain_priority = [
+            DOMAIN_FEATURES,
+            DOMAIN_TARGETS,
+            DOMAIN_TAGS,
+        ]
+        for d in domain_priority:
+            row_lbl = d
+            if d == DOMAIN_FEATURES and self._kind == "output":
+                row_lbl = DOMAIN_OUTPUTS
+            if d not in self.shapes:
+                rows.append((row_lbl, "None"))
+                continue
+
+            rows.append((row_lbl, str(self.shapes[d])))
+
+        return rows

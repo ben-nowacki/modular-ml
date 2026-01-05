@@ -38,6 +38,12 @@ _FORMAT_ALIASES = {
     "tensorflow.tensor": DataFormat.TENSORFLOW,
 }
 
+_TENSORLIKE_FORMATS = (
+    DataFormat.NUMPY,
+    DataFormat.TORCH,
+    DataFormat.TENSORFLOW,
+)
+
 
 def normalize_format(fmt: str | DataFormat) -> DataFormat:
     if isinstance(fmt, DataFormat):
@@ -57,7 +63,7 @@ def format_requires_compatible_shapes(fmt: DataFormat) -> bool:
 def format_is_tensorlike(fmt: DataFormat) -> bool:
     """True if specified DataFormat returns a tensor-like object."""
     fmt = normalize_format(fmt)
-    return fmt in [DataFormat.NUMPY, DataFormat.TORCH, DataFormat.TENSORFLOW]
+    return fmt in _TENSORLIKE_FORMATS
 
 
 def infer_data_type(obj) -> str:
