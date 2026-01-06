@@ -6,14 +6,21 @@ from typing import TYPE_CHECKING
 
 import pyarrow as pa
 
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+    INVALID_LABEL_CHARACTERS,
+    REP_RAW,
+    REP_TRANSFORMED,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-# =====================================================================
-# ModularML Sample Schema Constants
-# =====================================================================
+
 SCHEMA_VERSION = "1.0.0"
-INVALID_LABEL_CHARACTERS: set[str] = {".", " ", "/", "\\", ":"}
 
 # Metadata keys / prefixes embedded in Arrow tables
 METADATA_PREFIX = "modularml"
@@ -21,20 +28,7 @@ METADATA_SCHEMA_VERSION_KEY = f"{METADATA_PREFIX}.version"
 SHAPE_SUFFIX = "shape"
 DTYPE_SUFFIX = "dtype"
 
-# Reserved domain column names
-FEATURES_COLUMN = "features"
-TARGETS_COLUMN = "targets"
-TAGS_COLUMN = "tags"
-SAMPLE_ID_COLUMN = "sample_id"
 
-# Reserved column variants
-RAW_VARIANT = "raw"
-TRANSFORMED_VARIANT = "transformed"
-
-
-# =====================================================================
-# SampleSchema
-# =====================================================================
 @dataclass
 class SampleSchema:
     """
@@ -46,16 +40,16 @@ class SampleSchema:
           - **targets**: supervised outputs (e.g., SOH, capacity)
           - **tags**: metadata or identifiers (e.g., cell_id, SOC)
 
-        The schema acts as the contract that ensures consistent column names,
+        The schema acts as the contract that ensures consistent column names, \
         data types, and separation across these domains.
 
-        Every Arrow table that follows this schema must also contain a
-        global identifier column, `SAMPLE_ID_COLUMN`, storing a unique
+        Every Arrow table that follows this schema must also contain a \
+        global identifier column, `DOMAIN_SAMPLE_ID`, storing a unique \
         per-row ID string (UUID or hash).
 
     """
 
-    # Mapping: domain -> column name -> column variant -> dtype
+    # Mapping: domain -> column name -> column representation -> dtype
     features: Mapping[str, Mapping[str, pa.DataType]] = field(default_factory=dict)
     targets: Mapping[str, Mapping[str, pa.DataType]] = field(default_factory=dict)
     tags: Mapping[str, Mapping[str, pa.DataType]] = field(default_factory=dict)
@@ -88,9 +82,9 @@ class SampleSchema:
         all_keys = set(self.features.keys()) | set(self.targets.keys()) | set(self.tags.keys())
         validate_str_list(list(all_keys))
 
-    # =================================================================
+    # ================================================
     # Domain utility methods
-    # =================================================================
+    # ================================================
     def domain_keys(self, domain: str) -> list[str]:
         """
         Return the list of column names for a given domain.
@@ -106,13 +100,13 @@ class SampleSchema:
 
         """
         domain = domain.lower()
-        if domain == FEATURES_COLUMN:
+        if domain == DOMAIN_FEATURES:
             return list(self.features.keys())
-        if domain == TARGETS_COLUMN:
+        if domain == DOMAIN_TARGETS:
             return list(self.targets.keys())
-        if domain == TAGS_COLUMN:
+        if domain == DOMAIN_TAGS:
             return list(self.tags.keys())
-        msg = f"Unknown domain '{domain}'. Expected one of: {FEATURES_COLUMN}, {TARGETS_COLUMN}, {TAGS_COLUMN}"
+        msg = f"Unknown domain '{domain}'. Expected one of: {DOMAIN_FEATURES}, {DOMAIN_TARGETS}, {DOMAIN_TAGS}"
         raise ValueError(msg)
 
     def domain_types(self, domain: str) -> dict[str, dict[str, pa.DataType]]:
@@ -123,29 +117,29 @@ class SampleSchema:
             domain: Domain name ("features", "targets", "tags").
 
         Returns:
-            Mapping of column names to variants to Arrow data types.
+            Mapping of column names to representation to Arrow data types.
 
         """
         domain = domain.lower()
-        if domain == FEATURES_COLUMN:
+        if domain == DOMAIN_FEATURES:
             return self.features
-        if domain == TARGETS_COLUMN:
+        if domain == DOMAIN_TARGETS:
             return self.targets
-        if domain == TAGS_COLUMN:
+        if domain == DOMAIN_TAGS:
             return self.tags
-        msg = f"Unknown domain '{domain}'. Expected one of: {FEATURES_COLUMN}, {TARGETS_COLUMN}, {TAGS_COLUMN}"
+        msg = f"Unknown domain '{domain}'. Expected one of: {DOMAIN_FEATURES}, {DOMAIN_TARGETS}, {DOMAIN_TAGS}"
         raise ValueError(msg)
 
-    def variant_keys(self, domain: str, key: str) -> list[str]:
+    def rep_keys(self, domain: str, key: str) -> list[str]:
         """
-        Return available variants for a given column key.
+        Return available representations for a given column key.
 
         Args:
             domain (str): Domain name ("features", "targets", "tags").
             key (str): Column name in specified domain.
 
         Returns:
-            list[str]: Variant names
+            list[str]: Representation names (e.g., "raw")
 
         """
         dom_types = self.domain_types(domain)
@@ -154,16 +148,16 @@ class SampleSchema:
             raise KeyError(msg)
         return list(dom_types[key].keys())
 
-    def variant_types(self, domain: str, key: str) -> dict[str, pa.DataType]:
+    def rep_types(self, domain: str, key: str) -> dict[str, pa.DataType]:
         """
-        Return the {variant_name: DataType} mapping for a given domain and column.
+        Return the {rep_name: DataType} mapping for a given domain and column.
 
         Args:
             domain (str): Domain name ("features", "targets", "tags").
             key (str): Column name in specified domain.
 
         Returns:
-            Mapping of variants to Arrow data types.
+            Mapping of representations to Arrow data types.
 
         """
         dom_types = self.domain_types(domain)
@@ -172,73 +166,57 @@ class SampleSchema:
             raise KeyError(msg)
         return dom_types[key]
 
-    def struct_type(self, domain: str) -> pa.StructType:
-        """
-        Build a `pyarrow.StructType` for a given domain, supporting variants.
-
-        Example:
-            ``` python
-            features: struct<
-                voltage: struct<raw: list<float32>, transformed: list<float32>>,
-                current: struct<raw: list<float32>>
-            >
-            ```
-
-        Args:
-            domain: One of {"features", "targets", "tags"}.
-
-        Returns:
-            pa.StructType corresponding to that domain.
-
-        """
-        dom_types = self.domain_types(domain)
-        fields = []
-        for name, var_types in dom_types.items():
-            subfields = [pa.field(vname, vtype) for vname, vtype in var_types.items()]
-            fields.append(pa.field(name, pa.struct(subfields)))
-        return pa.struct(fields)
-
-    # =================================================================
-    # Constructors and serialization
-    # =================================================================
+    # ================================================
+    # Flat schema inference
+    # ================================================
     @classmethod
     def from_table(cls, table: pa.Table) -> SampleSchema:
         """
-        Infer a SampleSchema from a pyarrow.Table.
+        Infer SampleSchema from a flat Arrow table.
 
-        Args:
-            table: Arrow table containing 'features', 'targets', and 'tags' StructArrays.
+        Expected column naming:
+            "<domain>.<key>.<representation>"
 
-        Returns:
-            A SampleSchema describing each domain's fields and data types.
+        Example:
+            features.voltage.raw
+            features.voltage.transformed
+            targets.soh.raw
+            tags.cell_id.raw
+            sample_id
 
         """
+        features: dict[str, dict[str, pa.DataType]] = {}
+        targets: dict[str, dict[str, pa.DataType]] = {}
+        tags: dict[str, dict[str, pa.DataType]] = {}
 
-        def _extract_struct_type(domain: str) -> dict[str, dict[str, pa.DataType]]:
-            if domain not in table.column_names:
-                return {}
-            struct_type = table[domain].type
-            if not isinstance(struct_type, pa.StructType):
-                msg = f"Column '{domain}' must be a StructType, not {struct_type}."
-                raise TypeError(msg)
-            domain_map: dict[str, dict[str, pa.DataType]] = {}
-            for fld in struct_type:
-                if isinstance(fld.type, pa.StructType):
-                    domain_map[fld.name] = {subfield.name: subfield.type for subfield in fld.type}
-                else:
-                    domain_map[fld.name] = {RAW_VARIANT: fld.type}
-            return domain_map
+        for col in table.schema.names:
+            if col == DOMAIN_SAMPLE_ID:
+                continue
 
-        return cls(
-            features=_extract_struct_type(FEATURES_COLUMN),
-            targets=_extract_struct_type(TARGETS_COLUMN),
-            tags=_extract_struct_type(TAGS_COLUMN),
-        )
+            parts = col.split(".")
+            if len(parts) != 3:
+                msg = f"Invalid column '{col}'. Expected '<domain>.<key>.<representations>' format."
+                raise ValueError(msg)
+
+            domain, key, rep = parts
+            dtype = table.schema.field(col).type
+
+            if domain == DOMAIN_FEATURES:
+                features.setdefault(key, {})[rep] = dtype
+            elif domain == DOMAIN_TARGETS:
+                targets.setdefault(key, {})[rep] = dtype
+            elif domain == DOMAIN_TAGS:
+                tags.setdefault(key, {})[rep] = dtype
+            else:
+                msg = f"Unknown domain '{domain}' in column '{col}'"
+                raise ValueError(msg)
+
+        return cls(features=features, targets=targets, tags=tags)
 
 
-def ensure_sample_id_column(table: pa.Table) -> pa.Table:
+def ensure_sample_id(table: pa.Table) -> pa.Table:
     """
-    Ensure that the Arrow table contains a unique SAMPLE_ID_COLUMN.
+    Ensure that the Arrow table contains a unique DOMAIN_SAMPLE_ID.
 
     Description:
         - If the column exists, validates that it is of type string.
@@ -249,19 +227,18 @@ def ensure_sample_id_column(table: pa.Table) -> pa.Table:
         table (pa.Table): Input Arrow table.
 
     Returns:
-        pa.Table: A table guaranteed to contain a valid SAMPLE_ID_COLUMN.
+        pa.Table: A table guaranteed to contain a valid DOMAIN_SAMPLE_ID.
 
     """
-    if SAMPLE_ID_COLUMN in table.column_names:
-        col = table[SAMPLE_ID_COLUMN]
+    if DOMAIN_SAMPLE_ID in table.column_names:
+        col = table[DOMAIN_SAMPLE_ID]
         if not pa.types.is_string(col.type):
-            msg = f"'{SAMPLE_ID_COLUMN}' column must be of type string, got {col.type}."
+            msg = f"'{DOMAIN_SAMPLE_ID}' column must be of type string, got {col.type}."
             raise TypeError(msg)
         return table
 
-    n = table.num_rows
-    sample_ids = pa.array([str(uuid.uuid4()) for _ in range(n)], type=pa.string())
-    return table.append_column(SAMPLE_ID_COLUMN, sample_ids)
+    sample_ids = pa.array([str(uuid.uuid4()) for _ in range(table.num_rows)], type=pa.string())
+    return table.append_column(DOMAIN_SAMPLE_ID, sample_ids)
 
 
 def validate_str_list(keys: list[str]):
@@ -274,8 +251,8 @@ def validate_str_list(keys: list[str]):
         enforces:
           - Uniqueness of all keys.
           - Absence of invalid characters (see `INVALID_LABEL_CHARACTERS`).
-          - Exclusion of reserved schema keywords (e.g., `SAMPLE_ID_COLUMN`,
-            `FEATURES_COLUMN`, etc.).
+          - Exclusion of reserved schema keywords (e.g., `DOMAIN_SAMPLE_ID`,
+            `DOMAIN_FEATURES`, etc.).
           - Exclusion of internal metadata prefixes/postfixes used in column
             naming conventions.
 
@@ -317,12 +294,12 @@ def validate_str_list(keys: list[str]):
 
     # Ensure reserved names are not used
     for res_key in (
-        SAMPLE_ID_COLUMN,
-        FEATURES_COLUMN,
-        TARGETS_COLUMN,
-        TAGS_COLUMN,
-        RAW_VARIANT,
-        TRANSFORMED_VARIANT,
+        DOMAIN_SAMPLE_ID,
+        DOMAIN_FEATURES,
+        DOMAIN_TARGETS,
+        DOMAIN_TAGS,
+        REP_RAW,
+        REP_TRANSFORMED,
         METADATA_PREFIX,
         DTYPE_SUFFIX,
         SHAPE_SUFFIX,

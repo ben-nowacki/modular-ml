@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import importlib
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from modularml.utils.serialization import SerializableMixin
+from modularml.core.io.protocols import Configurable, Stateful
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from modularml.core.data.featureset_view import FeatureSetView
 
 
-class BaseSplitter(SerializableMixin, ABC):
+class BaseSplitter(Configurable, Stateful, ABC):
     """
     Abstract base class for algorithms that derive FeatureSetViews from a FeatureSet.
 
@@ -36,9 +36,9 @@ class BaseSplitter(SerializableMixin, ABC):
 
     """
 
-    # =====================================================
+    # ================================================
     # Core abstract methods
-    # =====================================================
+    # ================================================
     @abstractmethod
     def split(
         self,
@@ -72,48 +72,9 @@ class BaseSplitter(SerializableMixin, ABC):
 
         """
 
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
-    @abstractmethod
-    def get_state(self) -> dict[str, Any]:
-        pass
-
-    @abstractmethod
-    def set_state(self, state: dict[str, Any]):
-        pass
-
-    @classmethod
-    def from_state(cls, state: dict) -> BaseSplitter:
-        """
-        Reconstruct the correct splitter subclass from serialized state.
-
-        Expected state:
-            {
-                "version": "1.0",
-                "_target_": "modularml.core.splitting.random_splitter.RandomSplitter",
-                ... other subclass-specific fields ...
-            }
-        """
-        if "_target_" not in state:
-            raise ValueError("State dict is missing required '_target_' field.")
-        target_path = state["_target_"]
-
-        # Load splitter class from path
-        module_name, cls_name = target_path.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        splitter_cls = getattr(module, cls_name)
-        if not issubclass(splitter_cls, BaseSplitter):
-            msg = f"Target '{target_path}' does not resolve to a BaseSplitter subclass."
-            raise TypeError(msg)
-
-        # Create instance
-        obj = splitter_cls.from_state(state)
-        return obj
-
-    # =====================================================
+    # ================================================
     # Convenience methods for subclasses
-    # =====================================================
+    # ================================================
     def _return_splits(
         self,
         view: FeatureSetView,
@@ -160,4 +121,113 @@ class BaseSplitter(SerializableMixin, ABC):
             return split_indices
 
         # FeatureSetView.select_rows constructs new views from itself
-        return {label: view.select_rows(rel_indices=idxs, label=label) for label, idxs in split_indices.items()}
+        return {label: view.take(rel_indices=idxs, label=label) for label, idxs in split_indices.items()}
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this splitter.
+
+        Returns:
+            dict[str, Any]: Splitter configuration.
+
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> BaseSplitter:
+        """
+        Construct a Splitter from configuration.
+
+        Args:
+            config (dict[str, Any]): Splitter configuration.
+
+        Returns:
+            BaseSplitter: Unfitted splitter instance.
+
+        """
+        from modularml.splitters import splitter_registry
+
+        if "splitter_name" not in config:
+            msg = "Splitter config must store 'splitter_name' if using BaseSplitter to instantiate."
+            raise KeyError(msg)
+        splitter_cls: BaseSplitter = splitter_registry.get(config["splitter_name"])
+        return splitter_cls.from_config(config)
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Return runtime (i.e. rng) state of the splitter.
+
+        Returns:
+            dict[str, Any]: Splitter state.
+
+        """
+        raise NotImplementedError
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore runtime state of the splitter.
+
+        Args:
+            state (dict[str, Any]):
+                State produced by get_state().
+
+        """
+        raise NotImplementedError
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this Splitter to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the Splitter is saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> BaseSplitter:
+        """
+        Load a Splitter from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved Splitter.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+
+        Returns:
+            BaseSplitter: The reloaded sampler.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)

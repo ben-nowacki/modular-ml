@@ -3,7 +3,7 @@ from typing import Any
 
 import numpy as np
 
-from modularml.core.graph.featureset import FeatureSet
+from modularml.core.data.featureset import FeatureSet
 
 rng = np.random.default_rng(seed=13)
 

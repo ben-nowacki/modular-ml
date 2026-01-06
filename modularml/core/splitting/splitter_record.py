@@ -3,67 +3,51 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from modularml.core.references.featureset_ref import FeatureSetRef
-from modularml.utils.serialization import SerializableMixin
+from modularml.core.io.protocols import Configurable
+from modularml.core.references.featureset_reference import FeatureSetSplitReference
+from modularml.core.splitting.base_splitter import BaseSplitter
 
 
-@dataclass
-class SplitterRecord(SerializableMixin):
-    """
-    Record describing an applied data-splitting operation.
+@dataclass(frozen=True)
+class SplitterRecord(Configurable):
+    """Record describing an applied data-splitting operation."""
 
-    Description:
-        A `SplitterRecord` captures metadata about a single call to a \
-        :class:`BaseSplitter` subclass (e.g., :class:`RandomSplitter`, \
-        :class:`ConditionSplitter`). It documents where the splitter was \
-        applied, whether it targeted a full :class:`FeatureSet` or a \
-        :class:`FeatureSetView`, and which configuration parameters were used.
+    splitter: BaseSplitter
+    applied_to: FeatureSetSplitReference
 
-        Each FeatureSet instance maintains an ordered list of `SplitterRecord` \
-        entries under its `_split_configs` dictionary, allowing the complete \
-        history of applied splits to be reconstructed or replayed deterministically.
+    def __eq__(self, other):
+        if not isinstance(other, SplitterRecord):
+            msg = f"Cannot compare equality between SplitterRecord and {type(other)}"
+            raise TypeError(msg)
 
-    Attributes:
-        split_config (dict[str, Any]):
-            The configuration dictionary returned by \
-            :meth:`BaseSplitter.get_config()`, containing all parameters \
-            necessary to reproduce the split operation (e.g., ratios, seed, \
-            grouping keys, conditions).
+        return (self.splitter == other.splitter) and (self.applied_to == other.applied_to)
 
-        applied_to (FeatureSetRef):
-            A reference to the FeatureSet or FeatureSetView on which this \
-            splitter was applied. This includes the FeatureSet label, \
-            collection key, and optional split or fold identifiers.
+    __hash__ = None
 
-    """
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return a JSON-serializable configuration.
 
-    splitter_state: dict[str, Any]
-    applied_to: FeatureSetRef
+        Note:
+            This config does not include the splitter instance, only the
+            `splitter.get_config()` dict.
 
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
-    def get_state(self) -> dict:
-        """Return full serializable state."""
+        Returns:
+            dict[str, Any]: Configuration used to reconstruct this record.
+
+        """
         return {
-            "version": "1.0",
-            "splitter_state": self.splitter_state,
-            "applied_to": self.applied_to.get_state(),
+            "splitter_config": self.splitter.get_config(),
+            "applied_to_config": self.applied_to.get_config(),
         }
 
-    def set_state(self, state: dict) -> None:
-        """Restore SplitterRecord state from a serialized dictionary."""
-        version = state.get("version")
-        if version != "1.0":
-            msg = f"Unsupported SplitterRecord version: {version}"
-            raise NotImplementedError(msg)
-
-        self.splitter_state = state["splitter_state"]
-        self.applied_to = FeatureSetRef.from_state(state["applied_to"])
-
     @classmethod
-    def from_state(cls, state: dict) -> SplitterRecord:
+    def from_config(cls, config: dict[str, Any]) -> SplitterRecord:
+        """Reconstructs the record from config."""
         return cls(
-            splitter_state=state["splitter_state"],
-            applied_to=FeatureSetRef.from_state(state["applied_to"]),
+            splitter=BaseSplitter.from_config(config["splitter_config"]),
+            applied_to=FeatureSetSplitReference.from_config(config["applied_to_config"]),
         )

@@ -1,0 +1,108 @@
+import numpy as np
+
+from modularml.utils.nn.backend import Backend
+
+
+def deep_equal(a, b):
+    """Recursively check deep equality of arbitrarily nested dicts/lists/tuples."""
+    if a is b:
+        return True
+
+    # NumPy array
+    if isinstance(a, np.ndarray) or isinstance(b, np.ndarray):
+        return isinstance(a, np.ndarray) and isinstance(b, np.ndarray) and np.array_equal(a, b)
+
+    # Primitive types
+    if isinstance(a, (int, float, str, bool)) or a is None:
+        return a == b
+
+    # Dictionary
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(deep_equal(a[k], b[k]) for k in a)
+
+    # List or tuple
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        if len(a) != len(b):
+            return False
+        return all(deep_equal(x, y) for x, y in zip(a, b, strict=True))
+
+    # Fallback
+    return a == b
+
+
+def tensors_are_equal(a, b, *, tol: float = 1e-9, strict_backend_match: bool = True):
+    """
+    Compares to Tensor-like elements for equality.
+
+    Args:
+        a (Tensor-like):
+            First tensor to compare.
+        b (Tensor-like):
+            Second tensor to compare.
+        tol (float, optional):
+            How close numeric values need to be to be considered equal.
+            Defaults to 1e-9.
+        strict_backend_match (bool, optional):
+            Whether a "match" requires the tensors be of the same backend, in addition
+            to value matches. Defaults to True.
+
+    """
+
+    # Detect backends
+    def detect_backend(x):
+        try:
+            import numpy as np
+
+            if isinstance(x, np.ndarray):
+                return Backend.SCIKIT
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+        try:
+            import torch
+
+            if isinstance(x, torch.Tensor):
+                return Backend.TORCH
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+        try:
+            import tensorflow as tf
+
+            if isinstance(x, (tf.Tensor, tf.Variable)):
+                return Backend.TENSORFLOW
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+        # Allow Python scalars, lists, tuples -> treat as numpy
+        if isinstance(x, (int, float, complex, list, tuple)):
+            return Backend.SCIKIT
+
+        return type(x).__name__
+
+    backend_a = detect_backend(a)
+    backend_b = detect_backend(b)
+
+    # 2. Strict backend check
+    if strict_backend_match and backend_a != backend_b:
+        return False
+
+    # 3. Convert both to NumPy for value comparison
+    from modularml.utils.data.conversion import convert_to_format
+    from modularml.utils.data.data_format import DataFormat
+
+    a_np = convert_to_format(a, fmt=DataFormat.NUMPY)
+    b_np = convert_to_format(b, fmt=DataFormat.NUMPY)
+
+    # 4. Shape check
+    if a_np.shape != b_np.shape:
+        return False
+
+    # 5. Numeric equality check
+    # Handle NaN cases explicitly: NaN should not equal NaN
+    if np.any(np.isnan(a_np)) or np.any(np.isnan(b_np)):
+        return False
+
+    return np.allclose(a_np, b_np, atol=tol, rtol=0.0)

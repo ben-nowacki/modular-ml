@@ -1,14 +1,21 @@
+from dataclasses import dataclass
+
 import numpy as np
+from numpy.typing import NDArray
 
-from modularml.core.data.batch import Batch, NodeShapes, RoleData
+from modularml.core.data.batch import Batch
+from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.data.sample_schema import FEATURES_COLUMN, TAGS_COLUMN, TARGETS_COLUMN
-from modularml.core.graph.featureset import FeatureSet
-from modularml.utils.data_conversion import to_numpy
-from modularml.utils.data_format import DataFormat, format_is_tensorlike
+from modularml.core.data.sample_data import RoleData, SampleData, SampleShapes
+from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_SAMPLE_ID, DOMAIN_TAGS, DOMAIN_TARGETS
+from modularml.utils.data.conversion import to_numpy
+from modularml.utils.data.data_format import DataFormat, format_is_tensorlike
+from modularml.utils.data.pyarrow_data import resolve_column_selectors
+from modularml.utils.representation.summary import Summarizable
 
 
-class BatchView:
+@dataclass(frozen=True)
+class BatchView(Summarizable):
     """
     A multi-role, zero-copy grouped view over a parent FeatureSet.
 
@@ -17,26 +24,43 @@ class BatchView:
         row indices into the parent FeatureSet.
     """
 
-    def __init__(
-        self,
-        source: FeatureSet,
-        role_indices: dict[str, np.ndarray],
-        role_indice_weights: dict[str, np.ndarray] | None = None,
-    ):
-        self.source = source
-        self.role_indices = role_indices
-        self.role_indice_weights = role_indice_weights
+    source: FeatureSet
+    role_indices: dict[str, NDArray[np.int64]]
+    role_indice_weights: dict[str, NDArray[np.float32]] | None = None
 
-        # validation
+    def __post_init__(self):
+        # Validate source
         if not isinstance(self.source, FeatureSet):
-            raise TypeError("BatchView.source must be a FeatureSet")
+            msg = f"`source` must be of type FeatureSet. Received: {type(self.source)}"
+            raise TypeError(msg)
+
+        # Validate indices
         if not isinstance(self.role_indices, dict):
             raise TypeError("role_indices must be a dict[str, np.ndarray]")
+        np_idxs = {}
+        for r, idxs in self.role_indices.items():
+            np_idxs[r] = np.asarray(idxs, dtype=np.int64)
+        # Override frozen attributes
+        object.__setattr__(self, "role_indices", np_idxs)
 
-        # ensure arrays
-        for r, idx in self.role_indices.items():
-            self.role_indices[r] = np.asarray(idx, dtype=int)
+        # Validate weights
+        if self.role_indice_weights is not None:
+            idx_keys = set(self.role_indices.keys())
+            weight_keys = set(self.role_indice_weights.keys())
+            if idx_keys != weight_keys:
+                msg = f"Indices and weights do not have the same role keys: {idx_keys} != {weight_keys}"
+                raise ValueError(msg)
 
+            np_weights = {}
+            for k, wghts in self.role_indice_weights.items():
+                np_weights[k] = np.asarray(wghts, dtype=np.float32)
+
+            # Override frozen attributes
+            object.__setattr__(self, "role_indice_weights", np_weights)
+
+    # ==========================================
+    # Properties
+    # ==========================================
     @property
     def roles(self) -> list[str]:
         return list(self.role_indices.keys())
@@ -47,6 +71,26 @@ class BatchView:
         # all roles have the same number of samples
         first_role = next(iter(self.role_indices))
         return len(self.role_indices[first_role])
+
+    @property
+    def role_masks(self) -> dict[str, NDArray[np.int8]]:
+        """
+        Binary mask per role.
+
+        1 = valid sample
+        0 = padded / missing sample (index < 0)
+        """
+        return {r: self.get_role_mask(r) for r in self.roles}
+
+    # ==========================================
+    # Data Accessors
+    # ==========================================
+    def get_role_mask(self, role: str) -> NDArray[np.int8]:
+        fsv = self.get_role_view(role=role)
+        mask = fsv.sample_mask.astype(np.int8)
+        if mask is None:
+            return np.ones(len(fsv), dtype=np.int8)
+        return mask
 
     def get_role_view(self, role: str) -> FeatureSetView:
         """
@@ -78,41 +122,64 @@ class BatchView:
         return FeatureSetView(
             source=self.source,
             indices=self.role_indices[role],
+            columns=self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True),
             label=role,
         )
 
-    def materialize_batch(self, *, fmt: DataFormat = DataFormat.NUMPY) -> Batch:
+    def materialize_batch(
+        self,
+        fmt: DataFormat = DataFormat.NUMPY,
+        *,
+        columns: str | list[str] | None = None,
+        features: str | list[str] | None = None,
+        targets: str | list[str] | None = None,
+        tags: str | list[str] | None = None,
+        rep: str | None = None,
+    ) -> Batch:
         """
         Convert this BatchView into a fully materialized in-memory Batch.
 
         Description:
-            Builds a runtime-ready :class:`Batch` object from the current \
-            BatchView by converting all role-based subsets into backend-specific \
-            tensor formats. Each role (e.g., "anchor", "pair") is materialized \
-            independently based on its assigned sample indices and selected \
-            feature/target/tag columns.
+            Builds a runtime-ready :class:`Batch` object from the current BatchView
+            by converting all role-based subsets into backend-specific tensor formats.
+            Each role (e.g., "anchor", "pair") is materializedindependently based
+            on its assigned sample indices and selected feature/target/tag columns.
 
-            The resulting Batch contains:
-            - A mapping of node_label → role → :class:`RoleData`
-            - Optional per-sample weights for each role
-            - Recorded output shapes (excluding batch dimension) for each domain
+            By default, all columns (and all representations) are used in batch creation.
 
-            This method enforces that the leading dimension of all tensors \
-            matches the expected batch size (`self.n_samples`).
+            This method enforces that the leading dimension of all tensors matches
+            the expected batch size (`self.n_samples`).
 
         Args:
             fmt (DataFormat):
-                Desired output data format, typically one of \
-                :attr:`DataFormat.NUMPY`, :attr:`DataFormat.TORCH`, \
-                or :attr:`DataFormat.TENSORFLOW`. Defaults to ``NUMPY``.
+                Desired output data format, typically one of
+                :attr:`DataFormat.NUMPY`, :attr:`DataFormat.TORCH`,
+                or :attr:`DataFormat.TENSORFLOW`. Defaults to `NUMPY`.
+
+            columns (str | list[str] | None):
+                Fully-qualified column names to include in the materialized tensor.
+
+            features (str | list[str] | None):
+                Feature-domain selectors. Accepts bare keys, key/rep pairs,
+                or wildcards.
+
+            targets (str | list[str] | None):
+                Target-domain selectors.
+
+            tags (str | list[str] | None):
+                Tag-domain selectors.
+
+            rep (str | None):
+                Default representation suffix applied when omitted in selectors.
+
 
         Returns:
             Batch:
                 A fully materialized :class:`Batch` instance containing:
-                - ``outputs``: node- and role-specific :class:`RoleData` objects \
+                - `outputs`: node- and role-specific :class:`SampleData` objects \
                     with "features", "targets", and "tags".
-                - ``role_sample_weights``: optional array-like weight vectors.
-                - ``shapes``: per-node :class:`NodeShapes` objects describing \
+                - `role_sample_weights`: optional array-like weight vectors.
+                - `shapes`: per-node :class:`SampleShapes` objects describing \
                     per-sample tensor shapes (without batch dimension).
 
         Example:
@@ -124,10 +191,10 @@ class BatchView:
 
         Raises:
             TypeError:
-                If the requested ``fmt`` is not a tensor-compatible DataFormat.
+                If the requested `fmt` is not a tensor-compatible DataFormat.
             ValueError:
                 If any tensor does not have the batch size as its leading dimension,
-                or if sample weight shapes do not match ``n_samples``.
+                or if sample weight shapes do not match `n_samples`.
 
         """
         # Format must be tensor-like:
@@ -135,30 +202,70 @@ class BatchView:
             msg = f"DataFormat must be tensor-like. Received: {fmt}"
             raise TypeError(msg)
 
-        role_data: dict[str, RoleData] = {}
-        shapes: NodeShapes | None = None
-        role_sample_weights: dict[str, np.ndarray] = {}
+        # Get column filters
+        # Each domain defaults to all columns, unless subset specified
+        all_cols = self.source.get_all_keys(include_domain_prefix=True, include_rep_suffix=True)
+        all_cols.remove(DOMAIN_SAMPLE_ID)
 
+        # Fill any empty domain keys with all columns
+        selected: dict[str, set[str]] = resolve_column_selectors(
+            all_columns=all_cols,
+            columns=columns,
+            features=features,
+            targets=targets,
+            tags=tags,
+            rep=rep,
+            include_all_if_empty=True,
+        )
+
+        # Construct tensors for each role
+        role_data: RoleData = {}
+        shapes: SampleShapes | None = None
+        role_sample_weights: dict[str, np.ndarray] = {}
         for role in self.role_indices:
             # Get tensor-like data for each domain
-            coll = self.get_role_view(role).to_samplecollection()
-            features = coll.get_features(fmt=fmt)
-            targets = coll.get_targets(fmt=fmt)
-            tags = coll.get_tags(fmt=fmt)
-            uuids = coll.get_sample_uuids(fmt=fmt)
+            fsv = self.get_role_view(role).select(
+                features=list(selected[DOMAIN_FEATURES]),
+                targets=list(selected[DOMAIN_TARGETS]),
+                tags=list(selected[DOMAIN_TAGS]),
+            )
 
-            role_data[role] = RoleData(
+            # Extract feature/target/tag values in chosen format
+            # These are padded automically
+            features = fsv.get_features(
+                fmt=fmt,
+                rep=None,
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
+            targets = fsv.get_targets(
+                fmt=fmt,
+                rep=None,
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
+            tags = fsv.get_tags(
+                fmt=fmt,
+                rep=None,
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
+            uuids = fsv.get_sample_uuids(fmt=fmt)
+
+            # Build SampleData for this role
+            role_data[role] = SampleData(
                 sample_uuids=uuids,
                 features=features,
                 targets=targets,
                 tags=tags,
+                kind="input",
             )
 
             # Ensure shapes are as expected (batch_size is first dim)
             all_shapes = {
-                FEATURES_COLUMN: features.shape,
-                TARGETS_COLUMN: targets.shape,
-                TAGS_COLUMN: tags.shape,
+                DOMAIN_FEATURES: features.shape,
+                DOMAIN_TARGETS: targets.shape,
+                DOMAIN_TAGS: tags.shape,
             }
             for k, v in all_shapes.items():
                 if v[0] != self.n_samples:
@@ -168,7 +275,7 @@ class BatchView:
                     )
                     raise ValueError(msg)
             # Drop batch_size
-            shapes = NodeShapes(shapes={k: v[1:] for k, v in all_shapes.items()})
+            shapes = SampleShapes(shapes={k: v[1:] for k, v in all_shapes.items()})
 
             # Add role_sample_weights (if defined)
             if self.role_indice_weights and role in self.role_indice_weights:
@@ -185,14 +292,13 @@ class BatchView:
             else:
                 role_sample_weights[role] = np.ones(shape=(self.n_samples))
 
-        # Get GraphNode label of originating FeatureSet
-        node_label = f"{self.source.label}"
-
         # Construct Batch
         return Batch(
-            outputs={node_label: role_data},
-            role_sample_weights=role_sample_weights,
-            shapes={node_label: shapes},
+            batch_size=self.n_samples,
+            role_data=role_data,
+            role_masks=self.role_masks,
+            shapes=shapes,
+            role_weights=role_sample_weights,
         )
 
     def __repr__(self) -> str:
@@ -200,3 +306,10 @@ class BatchView:
 
     def __str__(self):
         return self.__repr__()
+
+    def _summary_rows(self) -> list[tuple]:
+        return [
+            ("source", self.source.label),
+            ("n_samples", self.n_samples),
+            ("roles", [(r, "") for r in self.roles]),
+        ]

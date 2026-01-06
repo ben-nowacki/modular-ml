@@ -1,83 +1,436 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from collections import defaultdict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from modularml.core.data.batch_view import BatchView
+from modularml.core.data.featureset import FeatureSet
 from modularml.core.data.featureset_view import FeatureSetView
-from modularml.core.graph.featureset import FeatureSet
+from modularml.core.data.sampled_view import SampledView
+from modularml.core.io.protocols import Configurable, Stateful
+from modularml.core.sampling.batcher import Batcher
+from modularml.utils.data.comparators import deep_equal
+from modularml.utils.data.formatting import ensure_list
+from modularml.utils.environment.environment import running_in_notebook
+from modularml.utils.representation.progress_bars import LazyProgress
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from numpy.typing import NDArray
 
 
-class BaseSampler(ABC):
+@dataclass(frozen=True)
+class Samples:
+    role_indices: dict[str, NDArray[np.int_]]
+    role_weights: dict[str, NDArray[np.float32]] | None = None
+
+
+class BaseSampler(Configurable, Stateful, ABC):
     """
     Base class for all samplers.
 
-    Accepts either a FeatureSet or FeatureSetView.
+    Accepts a list of either a FeatureSet or FeatureSetView.
     Always converts to a FeatureSetView internally.
     Produces zero-copy BatchView objects (not materialized batches).
     """
 
     def __init__(
         self,
-        source: FeatureSet | FeatureSetView | None = None,
+        sources: list[FeatureSet | FeatureSetView] | None = None,
         *,
         batch_size: int = 1,
         shuffle: bool = False,
+        group_by: list[str] | None = None,
+        group_by_role: str = "default",
+        stratify_by: list[str] | None = None,
+        stratify_by_role: str = "default",
+        strict_stratification: bool = True,
         drop_last: bool = False,
         seed: int | None = None,
+        show_progress: bool = True,
     ):
-        self.source: FeatureSetView | None = None
-        self.batch_size = int(batch_size)
-        self.shuffle = bool(shuffle)
-        self.drop_last = bool(drop_last)
-        self.seed = int(seed)
+        self.sources: dict[str, FeatureSetView] | None = None
+        self.seed = seed
         self.rng = np.random.default_rng(self.seed)
+        self.show_progress = show_progress
 
-        self._batches: list[BatchView] | None = None
+        if stratify_by and group_by:
+            msg = "Both `group_by` and `stratify_by` cannot be applied at the same."
+            raise ValueError(msg)
 
-        if source is not None:
-            self.bind_source(source)
+        self.batcher = Batcher(
+            batch_size=batch_size,
+            shuffle=shuffle,
+            drop_last=drop_last,
+            group_by=ensure_list(group_by),
+            group_by_role=group_by_role,
+            stratify_by=ensure_list(stratify_by),
+            stratify_by_role=stratify_by_role,
+            strict_stratification=strict_stratification,
+            seed=seed,
+        )
+
+        # list of BatchViews keyed by output stream
+        self._sampled: SampledView | None = None
+        self._stream_to_source_label: dict[str, str] = {}
+
+        # Optional progress bar
+        self._progress: LazyProgress | None = None
+        self._show_progress = show_progress
+
+        if sources is not None:
+            self.bind_sources(sources)
+
+    def __eq__(self, other):
+        if not isinstance(other, BaseSampler):
+            msg = f"Equality can only be compared between two samplers. Received: {type(other)}."
+            raise TypeError(msg)
+
+        # Check config first
+        if self.get_config() != other.get_config():
+            return False
+
+        # Then check state
+        return deep_equal(self.get_state(), other.get_state())
+
+    __hash__ = None
 
     # =====================================================
     # Properties
     # =====================================================
     @property
     def is_bound(self) -> bool:
-        return self.source is not None and self._batches is not None
+        return self.sources is not None and self._sampled is not None
 
     @property
-    def batches(self) -> list[BatchView]:
-        """All batches for this sampler."""
-        if self._batches is None:
+    def sampled(self) -> SampledView:
+        """Sampled batch views keyed by output stream."""
+        if self.is_bound and self._sampled is None:
+            self._sampled = self.build_sampled_view()
+        if self._sampled is None:
             raise RuntimeError("Sampler has no bound source. Call bind_source().")
-        return self._batches
+        return self._sampled
 
-    def __len__(self) -> int:
-        return len(self.batches)
+    # ================================================
+    # SampledView interface
+    # ================================================
+    def __iter__(self) -> Iterator[dict[str, BatchView]]:
+        """
+        Iterate over aligned BatchViews across all streams.
 
-    def __iter__(self):
-        yield from self.batches
+        Yields:
+            dict[str, BatchView]:
+                Mapping of stream name to BatchView for a single batch index.
+
+        """
+        if not self.is_bound:
+            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+        yield from self.sampled
+
+    @property
+    def stream_names(self) -> list[str]:
+        """Names of all output streams."""
+        if not self.is_bound:
+            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+        return self.sampled.stream_names
+
+    @property
+    def num_streams(self) -> int:
+        """Number of aligned streams."""
+        if not self.is_bound:
+            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+        return self.sampled.num_streams
+
+    @property
+    def num_batches(self) -> int:
+        """Number of aligned batches across all streams."""
+        if not self.is_bound:
+            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+        return self.sampled.num_batches
+
+    def get_stream(self, name: str) -> list[BatchView]:
+        """Explicit stream accessor."""
+        if not self.is_bound:
+            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+        return self.sampled.get_stream(name=name)
+
+    def get_batches(self, stream: str | None = None) -> list[BatchView]:
+        """
+        Obtains the list of BatchViews for a given sampler output stream.
+
+        Args:
+            stream (str, optional):
+                The name of an output stream. Typically the label of
+                the source FeatureSet. None is allowed only when a single output stream exists.
+
+        Returns:
+            list[BatchView]: The list of batches created by this sampler.
+
+        """
+        if not self.is_bound:
+            raise RuntimeError("`bind_source` must be called before sampling can occur.")
+        if stream is None:
+            if self.num_streams != 1:
+                msg = "This sampler outputs multiple streams. `stream` cannot be None."
+                raise ValueError(msg)
+            stream = self.stream_names[0]
+        return self.get_stream(name=stream)
 
     # =====================================================
     # Source Binding (batch instantiation)
     # =====================================================
-    def bind_source(self, source: FeatureSet | FeatureSetView):
-        """Sets the source and instantiates batches via `build_batches()`."""
-        if isinstance(source, FeatureSet):
-            source = source._as_view()
-        if not isinstance(source, FeatureSetView):
-            raise TypeError("Sampler source must be FeatureSet or FeatureSetView.")
+    def bind_sources(self, sources: list[FeatureSet | FeatureSetView]):
+        """Instantiates batches via `build_sampled_view()`."""
+        src_views: dict[str, FeatureSetView] = {}
+        for src in ensure_list(sources):
+            if isinstance(src, FeatureSet):
+                view = src.to_view()
+            elif isinstance(src, FeatureSetView):
+                view = src
+            else:
+                raise TypeError("Sampler source must be a FeatureSet or FeatureSetView.")
+            src_views[view.source.label] = view
 
-        self.source = source
-        self._batches = self.build_batches()
+        self.sources = src_views
+        self._sampled = self.build_sampled_view()
+
+    def build_sampled_view(self) -> SampledView:
+        """
+        Construct and return a SampledView.
+
+        SampledView keyed multiple output streams, where each stream
+        holds a list of BatchViews. Each BatchView groups row indices
+        into roles.
+        """
+        self._progress = LazyProgress(
+            total=None,
+            description=f"Sampling ({type(self).__name__})",
+            enabled=self._show_progress,
+            persist=running_in_notebook(),
+        )
+
+        try:
+            samples_by_stream: dict[tuple[str, str], Samples] = self.build_samples()
+        finally:
+            # Ensure cleanup even if never started
+            if self._progress is not None:
+                self._progress.close()
+                self._progress = None
+
+        # Construct SampledView
+        streams: dict[str, list[BatchView]] = {}
+        self._stream_to_source_label = {}
+        for (stream_lbl, source_lbl), samples in samples_by_stream.items():
+            streams[stream_lbl] = self.batcher.batch(
+                view=self.sources[source_lbl],
+                role_indices=samples.role_indices,
+                role_weights=samples.role_weights,
+            )
+            self._stream_to_source_label[stream_lbl] = source_lbl
+
+        return SampledView(streams=streams)
 
     # =====================================================
     # Abstract Methods
     # =====================================================
     @abstractmethod
-    def build_batches(self) -> list[BatchView]:
+    def build_samples(self) -> dict[tuple[str, str], Samples]:
         """
-        Construct and return a list of BatchView objects.
+        Builds sample streams from source data.
 
-        A BatchView is a grouping of row indices into roles.
+        The returned mapping must use 2-tuple-based keys.
+        The first tuple element is the stream name, the second is the
+        name of the source FeatureSet.
+        E.g. `{("streamA", "MyFeatureSet"): Samples(...)}`
         """
         raise NotImplementedError
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this sampler.
+
+        Description:
+            This *does not* restore the source, only the sampler configurtion.
+
+        Returns:
+            dict[str, Any]: Sampler configuration.
+
+        """
+        return {
+            "batch_size": self.batcher.batch_size,
+            "shuffle": self.batcher.shuffle,
+            "group_by": self.batcher.group_by,
+            "group_by_role": self.batcher.group_by_role,
+            "stratify_by": self.batcher.stratify_by,
+            "stratify_by_role": self.batcher.stratify_by_role,
+            "strict_stratification": self.batcher.strict_stratification,
+            "drop_last": self.batcher.drop_last,
+            "seed": self.batcher.seed,
+            "show_progress": self.show_progress,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> BaseSampler:
+        """
+        Construct a sampler from configuration.
+
+        Args:
+            config (dict[str, Any]): Sampler configuration.
+
+        Returns:
+            BaseSampler: Unfitted sampler instance.
+
+        """
+        from modularml.samplers import sampler_registry
+
+        if "sampler_name" not in config:
+            msg = "Sampler config must store 'sampler_name' if using BaseSampler to instantiate."
+            raise KeyError(msg)
+
+        sampler_cls: BaseSampler = sampler_registry[str(config["sampler_name"])]
+        return sampler_cls.from_config(config)
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Return runtime state (i.e. rng and source)  of the splitter.
+
+        Returns:
+            dict[str, Any]: Splitter state.
+
+        """
+        # Construct reference of each source
+        # This is later re-linked via ExperimentContext
+        source_cfgs: dict[str, dict[str, Any]] | None = None
+        if self.sources is not None:
+            source_cfgs = {}
+            for src_lbl, src_view in self.sources.items():
+                source_cfgs[src_lbl] = src_view.get_config()
+
+        state = {
+            "sources_config": source_cfgs,
+            "sources_label_map": self._stream_to_source_label,
+            "sampled_config": None,
+        }
+        if self._sampled is not None:
+            sampled_cfg = defaultdict(list)
+            for stream_lbl, bv_list in self._sampled.streams.items():
+                for bv in bv_list:
+                    bv_cfg = {
+                        "role_indices": bv.role_indices,
+                        "role_indice_weights": bv.role_indice_weights,
+                    }
+                    sampled_cfg[stream_lbl].append(bv_cfg)
+            state["sampled_config"] = sampled_cfg
+
+        return state
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore runtime state of the splitter.
+
+        Args:
+            state (dict[str, Any]):
+                State produced by get_state().
+
+        """
+        # If state has sources, rebuild views
+        if state.get("sources_config") is None:
+            # Can't set anything without a source
+            # Sampler is in a config-only runtime state
+            return
+
+        # To rebuild sources, we also need to know which sources each stream used
+        stream_to_source_label: dict[str, str] = state.get("sources_label_map")
+        if stream_to_source_label is None:
+            msg = "Sampler state is missing required keyword: 'sources_label_map'."
+            raise RuntimeError(msg)
+
+        # Rebuild sources
+        sources: dict[str, FeatureSetView] = {}
+        for src_lbl, src_view_cfg in state["sources_config"].items():
+            sources[src_lbl] = FeatureSetView.from_config(src_view_cfg)
+
+        # If state has batches saved, we can manually set source and batches
+        sampled_cfg: dict[str, list[dict]] | None = state.get("sampled_config")
+        if sampled_cfg is not None:
+            # Construct SampledView from psuedo-config
+            # Need to relink source view to stream
+            streams: dict[str, list[BatchView]] = defaultdict(list)
+            for stream_lbl, bv_cfg_list in sampled_cfg.items():
+                for bv_cfg in bv_cfg_list:
+                    bv = BatchView(
+                        source=sources[stream_to_source_label[stream_lbl]],
+                        role_indices=bv_cfg["role_indices"],
+                        role_indice_weights=bv_cfg["role_indice_weights"],
+                    )
+                    streams[stream_lbl].append(bv)
+            self._sampled = SampledView(streams=streams)
+            self.sources = sources
+
+        # Otherwise, we should call bind_sources
+        else:
+            self.bind_sources(sources=list(sources.values()))
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this Sampler to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the Sampler is saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> BaseSampler:
+        """
+        Load a Sampler from file.
+
+        Args:
+            filepath (Path):
+                File location of a previously saved Sampler.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+
+        Returns:
+            BaseSampler: The reloaded sampler.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)

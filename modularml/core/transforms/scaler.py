@@ -1,31 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from modularml.core.transforms.scaler_registry import SCALER_REGISTRY
-from modularml.utils.serialization import SerializableMixin
+from modularml.core.io.protocols import Configurable, Stateful
 
 if TYPE_CHECKING:
     import numpy as np
 
 
-class Scaler(SerializableMixin):
+class Scaler(Configurable, Stateful):
     """
     Wrapper for feature scaling and transformation operations.
 
     Description:
-        Provides a standardized interface for initializing, fitting, transforming, \
-        and serializing feature scaling objects. The scaler can be specified by name \
-        (from the global SCALER_REGISTRY) or provided as an existing sklearn-like \
-        transformer instance.
-
-    Example:
-        ```python
-        ft = Scaler("standard")
-        ft.fit(X_train)
-        X_scaled = ft.transform(X_test)
-        ```
-
+        Provides a standardized interface for initializing, fitting, transforming,
+        and serializing feature scaling objects.
     """
 
     def __init__(
@@ -36,70 +26,116 @@ class Scaler(SerializableMixin):
         """
         Initialize a ModularML Scaler wrapper.
 
-        Description:
-            It is better to initiallize with the name of a registered scaler \
-            (eg, `"StandardScaler"`) and kwargs (eg, `{"with_mean: True}`) than to \
-            provide an instance of a scaler class.
-            While providing an instance is supported, it may not be possible \
-            to seriallize and reproduce its state.
-
-            If an instance is provided, this constructor attempts to:
-                1. Find a matching class name in SCALER_REGISTRY
-                2. Extract constructor parameters using method signatures \
-                    and reachable parameters
-                3. Store the recovered `scaler_name` and `scaler_kwargs`
-
         Args:
-            scaler (str | Any, optional):
-                Name of a registered scaler (preferred), or an sklearn-like \
-                transformer instance. Defaults to `"StandardScaler"`.
-            scaler_kwargs (dict[str, Any] | None, optional):
-                Keyword arguments used when constructing the scaler from its name. \
-                Ignored if a pre-instantiated instance is provided.
+            scaler (str | Any):
+                Name of a registered scaler (preferred) or a scaler instance.
+            scaler_kwargs (dict[str, Any] | None):
+                Keyword arguments for constructing the scaler.
 
         """
+        # Ensure all items in registry are imported
+        from modularml.scalers import scaler_registry
+
         # Case 1: scaler given by name
         if isinstance(scaler, str):
-            if scaler not in SCALER_REGISTRY:
+            if scaler not in scaler_registry:
                 msg = (
                     f"Scaler '{scaler}' not recognized. Run `Scaler.get_supported_scalers()` to see supported scalers."
                 )
                 raise ValueError(msg)
-
             self.scaler_name = scaler
             self.scaler_kwargs = scaler_kwargs or {}
-            self._scaler = SCALER_REGISTRY[scaler](**self.scaler_kwargs)
+            self._scaler = scaler_registry[scaler](**self.scaler_kwargs)
             self._is_fit = False
 
         # Case 2: scaler given as instance
         else:
-            extracted_kwargs: dict[str, Any] = {}
-            if hasattr(scaler, "get_params"):
-                extracted_kwargs = scaler.get_params()
-            else:
-                import inspect
-
-                try:
-                    sig = inspect.signature(scaler.__class__.__init__)
-                    for p_name in sig.parameters:
-                        if p_name == "self":
-                            continue
-                        if hasattr(scaler, p_name):
-                            extracted_kwargs[p_name] = getattr(scaler, p_name)
-                except Exception:  # noqa: BLE001
-                    extracted_kwargs = {}
-
-            # Store names/kwargs or fall back to class name
             cls_name = scaler.__class__.__name__
-            self.scaler_name = SCALER_REGISTRY.get_original_key(cls_name) or cls_name
-            self.scaler_kwargs = scaler_kwargs or extracted_kwargs or {}
-
-            # Store instance for now, but it will be lost during serialization
+            self.scaler_name = scaler_registry.get_original_key(cls_name) or cls_name
+            self.scaler_kwargs = scaler_kwargs or getattr(scaler, "get_params", dict)()
             self._scaler = scaler
             self._is_fit = False
 
         # Validate scaler
         self._validate_scaler()
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this Scaler.
+
+        Returns:
+            dict[str, Any]: Scaler configuration.
+
+        """
+        return {
+            "scaler_name": self.scaler_name,
+            "scaler_kwargs": self.scaler_kwargs,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> Scaler:
+        """
+        Construct a Scaler from configuration.
+
+        Args:
+            config (dict[str, Any]): Scaler configuration.
+
+        Returns:
+            Scaler: Unfitted Scaler instance.
+
+        """
+        return cls(
+            scaler=config["scaler_name"],
+            scaler_kwargs=config.get("scaler_kwargs"),
+        )
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        """
+        Return learned state of the scaler.
+
+        Returns:
+            dict[str, Any]: Learned scaler state.
+
+        """
+        state: dict[str, Any] = {"is_fit": self._is_fit}
+
+        if self._is_fit:
+            state["learned"] = {k: v for k, v in self._scaler.__dict__.items() if k.endswith("_")}
+
+        return state
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """
+        Restore learned state of the scaler.
+
+        Args:
+            state (dict[str, Any]):
+                State produced by get_state().
+
+        """
+        if not state.get("is_fit", False):
+            self._is_fit = False
+            return
+
+        for attr, val in state.get("learned", {}).items():
+            setattr(self._scaler, attr, val)
+
+        self._is_fit = True
+
+    # ================================================
+    # Helpers
+    # ================================================
+    def _validate_scaler(self):
+        if not hasattr(self._scaler, "fit"):
+            raise AttributeError("Underlying scaler instance does not have a `fit()` method.")
+        if not hasattr(self._scaler, "transform"):
+            raise AttributeError("Underlying scaler instance does not have a `transform()` method.")
 
     @classmethod
     def get_supported_scalers(cls) -> dict[str, Any]:
@@ -112,19 +148,17 @@ class Scaler(SerializableMixin):
 
         """
         # Ensure all scalers are registered
-        import modularml.preprocessing  # noqa: F401
+        from modularml.scalers import scaler_registry
 
-        return SCALER_REGISTRY
+        return scaler_registry
 
-    def _validate_scaler(self):
-        if not hasattr(self._scaler, "fit"):
-            raise AttributeError("Underlying scaler instance does not have a `fit()` method.")
-        if not hasattr(self._scaler, "transform"):
-            raise AttributeError("Underlying scaler instance does not have a `transform()` method.")
+    def clone_unfitted(self) -> Scaler:
+        """Create a fresh, unfitted Scaler with the same config."""
+        return self.from_config(self.get_config())
 
-    # ==========================================
+    # ================================================
     # Core logic
-    # ==========================================
+    # ================================================
     def fit(self, data: np.ndarray):
         """
         Fit the scaler to input data.
@@ -175,11 +209,11 @@ class Scaler(SerializableMixin):
         """
         if hasattr(self._scaler, "fit_transform"):
             out = self._scaler.fit_transform(data)
-            self._is_fit = True
-            return out
-        self._scaler.fit(data)
+        else:
+            self._scaler.fit(data)
+            out = self._scaler.transform(data)
         self._is_fit = True
-        return self._scaler.transform(data)
+        return out
 
     def inverse_transform(self, data: np.ndarray) -> np.ndarray:
         """
@@ -200,60 +234,59 @@ class Scaler(SerializableMixin):
         """
         if not self._is_fit:
             raise RuntimeError("Scaler has not been fit yet.")
-        if hasattr(self._scaler, "inverse_transform"):
-            return self._scaler.inverse_transform(data)
-        msg = f"{self.scaler_name} does not support inverse_transform."
-        raise NotImplementedError(msg)
-
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
-    def get_state(self) -> dict:
-        """Returns config of Scaler."""
-        state = {
-            "version": "1.0",
-            "scaler_name": self.scaler_name,
-            "scaler_kwargs": self.scaler_kwargs,
-            "_is_fit": self._is_fit,
-        }
-        if self._is_fit:
-            # Save learned attributes only
-            learned = {
-                k: v
-                for k, v in self._scaler.__dict__.items()
-                if k.endswith("_")  # sklearn learned attributes convention
-            }
-            state["learned_attributes"] = learned
-
-        return state
-
-    def set_state(self, state: dict) -> None:
-        """Reverse operation of get_state()."""
-        # Ensure all scalers are registered
-        import modularml.preprocessing  # noqa: F401
-
-        if state["version"] == "1.0":
-            self.scaler_name = state["scaler_name"]
-            self.scaler_kwargs = state["scaler_kwargs"]
-        else:
-            msg = f"Not implemented for version: {state['version']}"
+        if not hasattr(self._scaler, "inverse_transform"):
+            msg = f"{self.scaler_name} does not support inverse_transform."
             raise NotImplementedError(msg)
+        return self._scaler.inverse_transform(data)
 
-        # Rebuild fresh scaler from registry
-        self._scaler = SCALER_REGISTRY[self.scaler_name](**self.scaler_kwargs)
-        self._is_fit = False
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serializes this Scaler to the specified filepath.
 
-        # Restore learned attributes
-        if "learned_attributes" in state:
-            for attr, val in state["learned_attributes"].items():
-                setattr(self._scaler, attr, val)
-            self._is_fit = True
+        Args:
+            filepath (Path):
+                File location to save to. Note that the suffix may be overwritten
+                to enforce the ModularML file extension schema.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file at the save location.
+                Defaults to False.
+
+        Returns:
+            Path: The actual filepath to write the Scaler is saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
 
     @classmethod
-    def from_state(cls, state: dict) -> Scaler:
-        # Ensure all scalers are registered
-        import modularml.preprocessing  # noqa: F401
+    def load(cls, filepath: Path, *, allow_packaged_code: bool = False) -> Scaler:
+        """
+        Load a Scaler from file.
 
-        obj = cls.__new__(cls)
-        obj.set_state(state)
-        return obj
+        Args:
+            filepath (Path):
+                File location of a previously saved Scaler.
+            allow_packaged_code : bool
+                Whether bundled code execution is allowed.
+
+        Returns:
+            Scaler: The reloaded scaler.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        # Append proper sufficx only if no suffix is given
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)

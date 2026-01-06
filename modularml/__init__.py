@@ -1,18 +1,16 @@
-try:
-    from importlib.metadata import version
+from contextvars import ContextVar
+from modularml.context.experiment_context import ExperimentContext
+from modularml.core.data.featureset import FeatureSet
+from modularml.core.data.featureset_view import FeatureSetView
 
-    __version__ = version("modularml")
-except ImportError:
-    __version__ = "unknown"
+from modularml.core.sampling.similiarity_condition import SimilarityCondition
 
+from modularml.registry import register_all
 
-from .logger import logger
-from .api import Backend, DataFormat, core, models
+register_all()
 
-__all__ = [
-    "Backend",
-    "DataFormat",
-    "core",
-    "logger",
-    "models",
-]
+# Create a default, empty context immediately
+DEFAULT_EXPERIMENT_CONTEXT = ExperimentContext()
+
+# Make it the active context
+ExperimentContext._set_active(DEFAULT_EXPERIMENT_CONTEXT)

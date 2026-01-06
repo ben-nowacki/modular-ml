@@ -1,55 +1,65 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pyarrow as pa
 
-from modularml.core.data.sample_schema import SAMPLE_ID_COLUMN
+from modularml.context.experiment_context import ExperimentContext
+from modularml.core.data.sample_collection_mixin import SampleCollectionMixin
+from modularml.core.data.schema_constants import (
+    DOMAIN_FEATURES,
+    DOMAIN_SAMPLE_ID,
+    DOMAIN_TAGS,
+    DOMAIN_TARGETS,
+)
+from modularml.core.io.protocols import Configurable
 from modularml.core.splitting.split_mixin import SplitMixin
+from modularml.utils.representation.summary import Summarizable
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from numpy.typing import NDArray
 
-    import pandas as pd
-
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.data.sample_collection import SampleCollection
-    from modularml.core.graph.featureset import FeatureSet
 
 
-class FeatureSetView(SplitMixin):
+@dataclass
+class FeatureSetView(SampleCollectionMixin, SplitMixin, Summarizable, Configurable):
     """
-    Logical row-indexed view over a specific collection within a FeatureSet.
+    Immutable row+column projection of a FeatureSet.
 
-    Description:
-        A `FeatureSetView` provides a lightweight, index-based handle over a
-        given collection inside a parent :class:`FeatureSet`. The view \
-        reatins a reference to its parent FeatureSet (for context and metadata).
-
-        The view can be materialized into a new :class:`SampleCollection` \
-        or a fully realized :class:`FeatureSet`.
+    Intended for inspection, export, and analysis.
     """
 
-    def __init__(self, source: FeatureSet, indices: np.ndarray, label: str):
-        super().__init__()
-        self.source = source
-        self.indices = indices
-        self.label = label
+    source: FeatureSet
+    indices: NDArray[np.int64]
+    columns: list[str]
+    label: str | None = None
 
-    # =====================================================
-    # Basic info
-    # =====================================================
-    @property
-    def n_samples(self) -> int:
-        """Number of rows (samples) in this view."""
-        return len(self.indices)
+    @classmethod
+    def from_featureset(
+        cls,
+        fs: FeatureSet,
+        *,
+        rows: NDArray[np.int64] | None = None,
+        columns: list[str] | None = None,
+    ) -> FeatureSetView:
+        if rows is None:
+            rows = np.arange(fs.n_samples)
+        if columns is None:
+            columns = fs.collection.get_all_keys(
+                include_domain_prefix=True,
+                include_rep_suffix=True,
+            )
+        return cls(source=fs, indices=np.asarray(rows, dtype=np.int64), columns=columns)
 
-    def __len__(self) -> int:
-        return self.n_samples
-
-    def __repr__(self) -> str:
-        return f"FeatureSetView(label='{self.label}', n_samples={len(self)}, source={self.source.label})"
+    # ================================================
+    # Properties & Dunders
+    # ================================================
+    def __repr__(self):
+        return f"FeatureSetView(source='{self.source.label}', n_samples={self.n_samples}, label='{self.label}')"
 
     def __eq__(self, other):
         """Compares source and indicies. Label is ignored."""
@@ -57,90 +67,49 @@ class FeatureSetView(SplitMixin):
             msg = f"Cannot compare equality between FeatureSetView and {type(other)}"
             raise TypeError(msg)
 
-        return self.source == other.source and self.indices == other.indices
+        return (self.source == other.source) and (self.indices == other.indices)
 
     __hash__ = None
 
-    # =====================================================
-    # Row selection & filtering
-    # =====================================================
-    def select_rows(
+    def __setattr__(self, name, value):
+        # Overrriding __setattr__ to make all attributes frozen except label
+        frozen_attrs = ["source", "indices", "columns"]
+
+        # Check if attr is frozen and if it's already set (to allow init)
+        if name in frozen_attrs and name in self.__dict__:
+            msg = f"Cannot reassign frozen attribute '{name}'"
+            raise AttributeError(msg)
+
+        # Use default __setattr__ behavior
+        super().__setattr__(name, value)
+
+    @property
+    def valid_indices(self) -> np.ndarray:
+        """Indices >= 0 (used for data lookup)."""
+        return self.indices[self.indices >= 0]
+
+    # ================================================
+    # SampleCollectionMixin
+    # ================================================
+    def _resolve_caller_attributes(
         self,
-        rel_indices: Sequence[int],
-        label: str | None = None,
-    ) -> FeatureSetView:
-        """
-        Create a new FeatureSetView derived from this one using relative indices.
-
-        Description:
-            Produces a new view referencing the same collection and parent \
-            FeatureSet but restricted to a subset of rows. The provided indices \
-            are interpreted *relative to this view* and mapped to *absolute* \
-            indices in the underlying collection.
-        """
-        rel_indices = np.asarray(rel_indices)
-        if rel_indices.ndim != 1:
-            raise ValueError("rel_indices must be a 1D sequence of integer positions.")
-        if np.any(rel_indices >= len(self.indices)):
-            raise IndexError("Some relative indices exceed the size of the current view.")
-        abs_indices = np.asarray(self.indices)[rel_indices]
-        return FeatureSetView(
-            source=self.source,
-            indices=abs_indices,
-            label=label or f"{self.label}_selection",
+    ) -> tuple[SampleCollection, list[str] | None, np.ndarray | None]:
+        return (
+            self.source.collection,
+            self.columns,
+            self.indices,
         )
 
-    # =====================================================
-    # Conversion handling
-    # =====================================================
-    def to_samplecollection(self) -> SampleCollection:
-        """
-        Materialize this view as a new SampleCollection.
-
-        Description:
-            Produces a :class:`SampleCollection` containing only the rows \
-            referenced by this view. Row filtering is applied using the \
-            stored index array (`self.indices`). The full domains from the \
-            parent FeatureSet are retained.
-
-        Returns:
-            SampleCollection:
-                A new SampleCollection containing only the requested subset of \
-                rows. **Note that the returned table shares underlying buffers \
-                with the source FeatureSet (no deep copy).**
-
-        """
-        from modularml.core.data.sample_collection import SampleCollection
-
-        # 1. Row subset (store original source indices for traceability)
-        sub_table = self.source.collection.table.take(pa.array(self.indices))
-
-        # 2. Return new collection
-        return SampleCollection(table=sub_table)
-
-    def to_pandas(self) -> pd.DataFrame:
-        """Converts this view into a flattened pandas DataFrame."""
-        return self.to_samplecollection().to_pandas()
-
-    def to_featureset(self) -> FeatureSet:
-        """Converts this view into a FeatureSet."""
-        from modularml.core.graph.featureset import FeatureSet
-
-        return FeatureSet(
-            label=self.label,
-            table=self.to_samplecollection().table,
-        )
-
-    # =====================================================
+    # ================================================
     # Comparators
-    # =====================================================
+    # ================================================
     def is_disjoint_with(self, other: FeatureSetView) -> bool:
         """
         Check if this view has no overlapping samples.
 
         Description:
             - If both views share the same source FeatureSet, comparison is based on indices.
-            - If they originate from different sources, comparison falls back to `SAMPLE_ID_COLUMN` \
+            - If they originate from different sources, comparison falls back to `DOMAIN_SAMPLE_ID` \
                 to ensure identity consistency across saved or merged datasets.
         """
         if not isinstance(other, FeatureSetView):
@@ -152,8 +121,8 @@ class FeatureSetView(SplitMixin):
             return len(np.intersect1d(self.indices, other.indices, assume_unique=True)) == 0
 
         # Otherwise compare SAMPLE_IDs
-        ids_self = {self.source.collection.table[SAMPLE_ID_COLUMN].to_pylist()[i] for i in self.indices}
-        ids_other = {other.source.collection.table[SAMPLE_ID_COLUMN].to_pylist()[i] for i in other.indices}
+        ids_self = {self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in self.indices}
+        ids_other = {other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in other.indices}
         return ids_self.isdisjoint(ids_other)
 
     def get_overlap_with(self, other: FeatureSetView) -> list[int]:
@@ -171,9 +140,95 @@ class FeatureSetView(SplitMixin):
         # Same collection (fast index-based check)
         if self.source is other.source:
             overlap = np.intersect1d(self.indices, other.indices, assume_unique=True)
-            return self.source.collection.table[SAMPLE_ID_COLUMN].take(pa.array(overlap)).to_pylist()
+            return self.source.collection.table[DOMAIN_SAMPLE_ID].take(pa.array(overlap)).to_pylist()
 
         # Otherwise compare SAMPLE_IDs
-        ids_self = {self.source.collection.table[SAMPLE_ID_COLUMN].to_pylist()[i] for i in self.indices}
-        ids_other = {other.source.collection.table[SAMPLE_ID_COLUMN].to_pylist()[i] for i in other.indices}
+        ids_self = {self.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in self.indices}
+        ids_other = {other.source.collection.table[DOMAIN_SAMPLE_ID].to_pylist()[i] for i in other.indices}
         return list(ids_self.intersection(ids_other))
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return configuration required to reconstruct this view.
+
+        Returns:
+            dict[str, Any]: View configuration.
+
+        """
+        return {
+            "source": {
+                "node_label": self.source.label,
+                "node_id": self.source.node_id,
+            },
+            "indices": np.asarray(self.indices).tolist(),
+            "columns": self.columns,
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> FeatureSetView:
+        """
+        Construct a view from configuration.
+
+        Args:
+            config (dict[str, Any]): View configuration.
+
+        Returns:
+            FeatureSetView: Reconstructed view.
+
+        """
+        from modularml.core.data.featureset import FeatureSet
+
+        if not all(x in config for x in ["source", "indices", "columns", "label"]):
+            raise ValueError("Invalid config for FeatureSetView.")
+
+        # Re-link source using ExperimentContext
+        try:
+            node = ExperimentContext.get_node(node_id=config["source"]["node_id"])
+        except KeyError as e:
+            msg = (
+                f"There are no registered nodes with id: '{config['source']['node_id']}'. "
+                f"Ensure FeatureSet '{config['source']['node_label']}' exists in the current ExperimentContext."
+            )
+            raise RuntimeError(msg) from e
+        if not isinstance(node, FeatureSet):
+            msg = f"Node with ID ('{config['source']['node_id']}') is not a FeatureSet. Received: {type(node)}."
+            raise TypeError(msg)
+
+        # Create view
+        return FeatureSetView(
+            source=node,
+            indices=np.asarray(config["indices"], dtype=np.int64),
+            columns=config["columns"],
+            label=config["label"],
+        )
+
+    # ================================================
+    # Representation
+    # ================================================
+    def _summary_rows(self) -> list[tuple]:
+        return [
+            ("label", self.label),
+            ("source", self.source.label),
+            ("n_samples", self.n_samples),
+            (
+                "columns",
+                [
+                    (
+                        DOMAIN_FEATURES,
+                        str(self.get_feature_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TARGETS,
+                        str(self.get_target_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                    (
+                        DOMAIN_TAGS,
+                        str(self.get_tag_keys(include_domain_prefix=False, include_rep_suffix=True)),
+                    ),
+                ],
+            ),
+        ]

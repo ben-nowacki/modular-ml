@@ -1,12 +1,18 @@
-from collections.abc import Callable
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from modularml.core.io.protocols import Configurable
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 
 @dataclass
-class SimilarityCondition:
+class SimilarityCondition(Configurable):
     """
     A flexible rule for defining similarity or dissimilarity between two samples.
 
@@ -159,3 +165,21 @@ class SimilarityCondition:
             ).__float__()
 
         return 0.0
+
+    # ================================================
+    # Configuration
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "tolerance": self.tolerance,
+            "metric": self.metric,
+            "weight_mode": self.weight_mode,
+            "max_weight": self.max_weight,
+            "min_weight": self.min_weight,
+            "allow_fallback": self.allow_fallback,
+        }
+
+    @classmethod
+    def from_config(cls, cfg: dict[str, Any]) -> SimilarityCondition:
+        return cls(**cfg)

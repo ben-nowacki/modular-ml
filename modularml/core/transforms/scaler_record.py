@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any
 
-from modularml.utils.comparators import deep_equal
-
-if TYPE_CHECKING:
-    from modularml.core.transforms.scaler import Scaler
+from modularml.core.io.protocols import Configurable
+from modularml.core.transforms.scaler import Scaler
 
 
-@dataclass
-class ScalerRecord:
+@dataclass(frozen=True)
+class ScalerRecord(Configurable):
     """
     Metadata describing a single applied scaling transform.
 
@@ -21,36 +19,40 @@ class ScalerRecord:
       - replay transform history
 
     Args:
-        order : int
+        order (int):
             Monotonically increasing identifier indicating transform order.
-        domain : str
+        domain (str):
             One of {"features", "targets", "tags"}.
-        keys : tuple[str]
+        keys (tuple[str]):
             Column names within the domain that were transformed.
-        variant_in : str
-            Input variant name (e.g., "raw" or "transformed").
-        variant_out : str
-            Output variant name produced by this transform.
-        fit_split : str | None
+        rep_in (str):
+            Input representation name (e.g., "raw" or "transformed").
+        rep_out (str):
+            Output representation name produced by this transform.
+        fit_split (str | None):
             Name of the split used for fitting, or None if fit on all samples.
-        merged_axes : tuple[int] | None
+        merged_axes (tuple[int] | None):
             Axes merged during flattening prior to scaling (if any).
-        flatten_meta : dict
+        flatten_meta (dict):
             Metadata required to reverse flattening (e.g., original_shape).
-        scaler_object : Scaler
+        scaler_obj (Scaler):
             Fitted scaler instance supporting transform() and inverse_transform().
+        scaler_artifact_path (str):
+            Relative path to fully serialized scaler artifact (relative to FeatureSet artifact).
+            E.g., "scalers/scaler_000.sc.mml".
 
     """
 
     order: int
     domain: str
     keys: tuple[str]
-    variant_in: str
-    variant_out: str
+    rep_in: str
+    rep_out: str
     fit_split: str | None
     merged_axes: tuple[int] | None
     flatten_meta: dict
-    scaler_object: Scaler
+
+    scaler_obj: Scaler | None = None
 
     def __eq__(self, other):
         if not isinstance(other, ScalerRecord):
@@ -61,88 +63,58 @@ class ScalerRecord:
             self.order == other.order
             and self.domain == other.domain
             and self.keys == other.keys
-            and self.variant_in == other.variant_in
-            and self.variant_out == other.variant_out
+            and self.rep_in == other.rep_in
+            and self.rep_out == other.rep_out
             and self.fit_split == other.fit_split
             and self.merged_axes == other.merged_axes
             and self.flatten_meta == other.flatten_meta
-            and deep_equal(self.scaler_object.get_state(), other.scaler_object.get_state()),
         )
 
-    def __hash__(self):
-        return hash(
-            (
-                self.order,
-                self.domain,
-                self.keys,
-                self.variant_in,
-                self.variant_out,
-                self.fit_split,
-                self.merged_axes,
-                self.flatten_meta,
-                self.scaler_object.get_state(),
-            ),
-        )
+    __hash__ = None
 
-    # ==========================================
-    # SerializableMixin
-    # ==========================================
-    def get_state(self) -> dict:
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
         """
-        Full serializable state including fitted parameters.
+        Return a JSON-serializable configuration.
 
-        Include scaler's fitted state, flattening metadata, and applied \
-        specification, and ordering information.
+        Note:
+            This config does not include the scaler instance, only the
+            `scaler.get_config()` dict.
+
+        Returns:
+            dict[str, Any]: Configuration used to reconstruct this record.
+
         """
         return {
-            "version": "1.0",
             "order": self.order,
             "domain": self.domain,
             "keys": self.keys,
-            "variant_in": self.variant_in,
-            "variant_out": self.variant_out,
+            "rep_in": self.rep_in,
+            "rep_out": self.rep_out,
             "fit_split": self.fit_split,
             "merged_axes": self.merged_axes,
             "flatten_meta": self.flatten_meta,
-            "scaler_state": self.scaler_object.get_state(),
+            "scaler_config": None if self.scaler_obj is None else self.scaler_obj.get_config(),
         }
 
-    def set_state(self, state: dict) -> None:
-        """Restore the full ScalerRecord state (including Scaler state)."""
-        from modularml.core.transforms.scaler import Scaler
-
-        if state.get("version") != "1.0":
-            msg = f"Unsupported version: {state.get('version')}"
-            raise NotImplementedError(msg)
-
-        self.order = state["order"]
-        self.domain = state["domain"]
-        self.keys = tuple(state["keys"])
-        self.variant_in = state["variant_in"]
-        self.variant_out = state["variant_out"]
-        self.fit_split = state["fit_split"]
-        self.merged_axes = state["merged_axes"]
-        self.flatten_meta = state["flatten_meta"]
-
-        # scaler reconstruction
-        self.scaler_object = Scaler.from_state(state["scaler_state"])
-
     @classmethod
-    def from_state(cls, state: dict) -> ScalerRecord:
-        from modularml.core.transforms.scaler import Scaler
+    def from_config(cls, config: dict) -> ScalerRecord:
+        """
+        Reconstructs the record from config.
 
-        if state.get("version") != "1.0":
-            msg = f"Unsupported version: {state.get('version')}"
-            raise NotImplementedError(msg)
-
+        This *does not* rebuild the scaler state, only its config.
+        """
+        scaler_cfg = config.get("scaler_config")
         return cls(
-            order=state["order"],
-            domain=state["domain"],
-            keys=state["keys"],
-            variant_in=state["variant_in"],
-            variant_out=state["variant_out"],
-            fit_split=state["fit_split"],
-            merged_axes=state["merged_axes"],
-            flatten_meta=state["flatten_meta"],
-            scaler_object=Scaler.from_state(state["scaler_state"]),
+            order=config["order"],
+            domain=config["domain"],
+            keys=config["keys"],
+            rep_in=config["rep_in"],
+            rep_out=config["rep_out"],
+            fit_split=config["fit_split"],
+            merged_axes=config["merged_axes"],
+            flatten_meta=config["flatten_meta"],
+            scaler_obj=None if scaler_cfg is None else Scaler.from_config(scaler_cfg),
         )
