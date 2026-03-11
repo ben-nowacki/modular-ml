@@ -40,6 +40,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 source_suffix = {
     ".rst": "restructuredtext",
     ".md": "restructuredtext",
+    ".ipynb": "myst-nb",
 }
 
 # Mock heavy optional dependencies so autodoc can import all modules
