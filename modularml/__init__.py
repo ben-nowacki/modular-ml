@@ -30,6 +30,7 @@ from modularml.api import (
     TrainPhase,
     TrainResults,
     supported_scalers,
+    scaler_registry,
 )
 from modularml.registry import register_all
 

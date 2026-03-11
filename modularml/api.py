@@ -82,6 +82,7 @@ All built-in splitters are accessed with:
 # Scaling
 # ================================================
 from modularml.core.transforms.scaler import Scaler
+from modularml.scalers import scaler_registry
 
 supported_scalers = Scaler.get_supported_scalers()
 """
@@ -122,5 +123,6 @@ __all__ = [
     "TorchBaseModel",
     "TrainPhase",
     "TrainResults",
+    "scaler_registry",
     "supported_scalers",
 ]
