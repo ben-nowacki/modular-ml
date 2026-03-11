@@ -26,7 +26,6 @@ language = "en"
 extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
-    "sphinx.ext.autodoc.typehints",
     "sphinx.ext.viewcode",
     "myst_nb",
     "sphinx_design",

@@ -1,6 +1,7 @@
 from typing import Any
 
 from modularml.core.models.base_model import BaseModel
+from modularml.utils.environment.optional_imports import ensure_tensorflow, ensure_torch
 from modularml.utils.nn.backend import Backend, infer_backend
 
 from .scikit_wrapper import ScikitModelWrapper
@@ -47,7 +48,7 @@ def wrap_model(model: Any) -> BaseModel:
     backend = infer_backend(model)
 
     if backend == Backend.TORCH:
-        import torch
+        torch = ensure_torch()
 
         if issubclass(model.__class__, torch.nn.Module) or isinstance(
             model,
@@ -61,7 +62,7 @@ def wrap_model(model: Any) -> BaseModel:
         raise ValueError(msg)
 
     if backend == Backend.TENSORFLOW:
-        import tensorflow as tf
+        tf = ensure_tensorflow()
 
         if issubclass(model.__class__, tf.keras.Model) or isinstance(
             model,

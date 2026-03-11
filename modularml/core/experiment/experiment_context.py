@@ -5,10 +5,9 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 from weakref import ref
-
-from matplotlib.pylab import Enum
 
 from modularml.utils.environment.environment import IN_NOTEBOOK
 from modularml.utils.logging.warnings import warn

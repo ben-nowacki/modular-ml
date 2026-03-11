@@ -137,21 +137,13 @@ def tensors_are_equal(a, b, *, tol: float = 1e-9, strict_backend_match: bool = T
         except Exception:  # noqa: BLE001, S110
             pass
 
-        try:
-            import torch
+        torch = check_torch()
+        if torch is not None and isinstance(x, torch.Tensor):
+            return Backend.TORCH
 
-            if isinstance(x, torch.Tensor):
-                return Backend.TORCH
-        except Exception:  # noqa: BLE001, S110
-            pass
-
-        try:
-            import tensorflow as tf
-
-            if isinstance(x, (tf.Tensor, tf.Variable)):
-                return Backend.TENSORFLOW
-        except Exception:  # noqa: BLE001, S110
-            pass
+        tf = check_tensorflow()
+        if tf is not None and isinstance(x, (tf.Tensor, tf.Variable)):
+            return Backend.TENSORFLOW
 
         # Allow Python scalars, lists, tuples -> treat as numpy
         if isinstance(x, (int, float, complex, list, tuple)):
