@@ -5,21 +5,25 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING, Any
 
-import torch
-
 from modularml.core.models.base_model import BaseModel
+from modularml.core.models.torch_base_model import TorchModuleBase
 from modularml.utils.data.shape_utils import ensure_tuple_shape
+from modularml.utils.environment.optional_imports import check_torch
 from modularml.utils.io.inspection import infer_kwargs_from_init
 from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.backend import Backend
+
+torch = check_torch()
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     import numpy as np
 
+    from modularml.utils.data.types import TorchModule, TorchTensor
 
-class TorchModelWrapper(BaseModel, torch.nn.Module):
+
+class TorchModelWrapper(BaseModel, TorchModuleBase):
     """
     Wrap an arbitrary :class:`torch.nn.Module` into :class:`BaseModel`.
 
@@ -40,7 +44,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
     def __init__(
         self,
         *,
-        model: torch.nn.Module = None,
+        model: TorchModule = None,
         model_class: Callable | None = None,
         model_kwargs: dict[str, Any] | None = None,
         inject_input_shape_as: str = "input_shape",
@@ -51,7 +55,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         Initialize the wrapper for an eager or lazy PyTorch model.
 
         Args:
-            model (torch.nn.Module | None):
+            model (TorchModule | None):
                 Already-instantiated module to wrap.
             model_class (Callable | None):
                 Module class to instantiate lazily when `model` is not provided.
@@ -114,7 +118,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
         )
 
         # Init args
-        self.model: torch.nn.Module | None = model
+        self.model: TorchModule | None = model
         self.model_class = model_class
         self.model_kwargs = model_kwargs
         self.inject_input_shape_as = inject_input_shape_as
@@ -360,7 +364,7 @@ class TorchModelWrapper(BaseModel, torch.nn.Module):
     # ================================================
     # Forward Pass
     # ================================================
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: TorchTensor) -> TorchTensor:
         """Run a forward pass through the wrapped module."""
         if not self.is_built:
             self.build(input_shape=tuple(x.shape[1:]))

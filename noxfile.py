@@ -106,7 +106,7 @@ def run_doc_tests(session):
 def build_docs(session):
     """Run doc tests."""
     set_env(session, PROJECT_ENV)
-    session.install("-e", ".[all,dev]", silent=False)
+    session.install("-e", ".[all,dev,docs]", silent=False)
     session.chdir("docs")
 
     # Clean stale build artifacts to prevent cached duplicates
@@ -124,7 +124,7 @@ def build_docs(session):
             "-b",
             "html",
             "-j",
-            "auto",
+            "1",
             "--open-browser",
             "-qT",
         )

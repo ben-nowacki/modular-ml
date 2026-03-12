@@ -4,13 +4,26 @@ from abc import ABC
 from typing import Any
 
 import numpy as np
-import torch
 
 from modularml.core.models.base_model import BaseModel
+from modularml.utils.environment.optional_imports import check_torch
 from modularml.utils.nn.backend import Backend
 
+torch = check_torch()
 
-class TorchBaseModel(BaseModel, torch.nn.Module, ABC):
+if torch is not None:
+    TorchModuleBase = torch.nn.Module
+else:
+
+    class TorchModuleBase:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
+            raise ImportError(
+                "PyTorch is required to use TorchBaseModel. "
+                "Install it with `pip install torch`.",
+            )
+
+
+class TorchBaseModel(BaseModel, TorchModuleBase, ABC):
     """
     Base class for ModularML-native PyTorch models.
 
@@ -23,6 +36,12 @@ class TorchBaseModel(BaseModel, torch.nn.Module, ABC):
 
     def __init__(self, **init_args: Any):
         """Initialize the PyTorch + :class:`BaseModel` inheritance chain."""
+        if torch is None:
+            raise ImportError(
+                "PyTorch is required to instantiate TorchBaseModel. "
+                "Install it with `pip install torch`.",
+            )
+
         # torch.nn.Module must be initialized first
         torch.nn.Module.__init__(self)
 
