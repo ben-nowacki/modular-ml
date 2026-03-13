@@ -680,13 +680,14 @@ class TrainPhase(ExperimentPhase):
                     ),
                     label=f"{fsv.label}_for_sampler",
                 )
-                # Materialize batches once
-                binding.sampler.bind_sources(sources=[sampler_src])
-                binding.sampler.show_progress = show_sampler_progress
-                binding.sampler._progress_task.enabled = show_sampler_progress
-                binding.sampler.materialize_batches(
-                    show_progress=show_sampler_progress,
-                )
+                # Materialize batches once, unless sampler was pre-built for this source
+                if not binding.sampler.is_materialized_for(fsv):
+                    binding.sampler.bind_sources(sources=[sampler_src])
+                    binding.sampler.show_progress = show_sampler_progress
+                    binding.sampler._progress_task.enabled = show_sampler_progress
+                    binding.sampler.materialize_batches(
+                        show_progress=show_sampler_progress,
+                    )
 
                 # Capture the sampled output
                 id_to_sampled[sampler_id] = binding.sampler.sampled

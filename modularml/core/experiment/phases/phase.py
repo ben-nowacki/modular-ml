@@ -379,6 +379,10 @@ class InputBinding:
         """
         Executes sampling of the source data defined by this binding.
 
+        Description:
+            If the sampler was already materialized manually for the same source
+            and row indices, it is reused as-is and sampling is skipped.
+
         Args:
             show_progress (bool, optional):
                 Whether to show a progress bar of the batch construction process.
@@ -391,14 +395,12 @@ class InputBinding:
         if self.sampler is None:
             raise ValueError("Cannot materialize batches for a `sampler` of None.")
 
-        # Bind resolved source to sampler
         fsv = self.resolve_input_view()
-        self.sampler.bind_sources(sources=[fsv])
 
-        # Create batches for all streams defined by sampler
-        self.sampler.materialize_batches(show_progress=show_progress)
+        if not self.sampler.is_materialized_for(fsv):
+            self.sampler.bind_sources(sources=[fsv])
+            self.sampler.materialize_batches(show_progress=show_progress)
 
-        # Return only the batches for the specified stream
         return self.sampler.get_batches(stream=self.stream)
 
     # ================================================

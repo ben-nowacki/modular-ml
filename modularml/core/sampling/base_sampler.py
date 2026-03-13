@@ -212,6 +212,30 @@ class BaseSampler(Configurable, Stateful, ABC):
         """Whether batches have been materialized."""
         return self.is_bound and (self._sampled is not None)
 
+    def is_materialized_for(self, fsv: FeatureSetView) -> bool:
+        """
+        True if this sampler is already materialized for a source matching ``fsv``.
+
+        Matching checks source identity (node_id) and row indices only.
+        Column selection is intentionally ignored; samplers are column-agnostic.
+
+        Args:
+            fsv (FeatureSetView): The view that would be bound for sampling.
+
+        Returns:
+            bool: True if the sampler can be reused as-is.
+
+        """
+        if not self.is_materialized:
+            return False
+        if self.sources is None or len(self.sources) != 1:
+            return False
+        bound_view = next(iter(self.sources.values()))
+        return bound_view.source.node_id == fsv.source.node_id and np.array_equal(
+            bound_view.indices,
+            fsv.indices,
+        )
+
     @property
     def sampled(self) -> SampledView:
         """
