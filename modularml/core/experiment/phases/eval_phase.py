@@ -271,6 +271,7 @@ class EvalPhase(ExperimentPhase):
         )
         spinner.start()
         pre_batches: list[dict[tuple[str, FeatureSetReference], Batch]] = []
+        pre_views: list[dict[tuple[str, FeatureSetReference], BatchView]] = []
         for i in range(n_batches):
             start = i * batch_size
             end = min((i + 1) * batch_size, n)
@@ -280,11 +281,14 @@ class EvalPhase(ExperimentPhase):
                 role_indices={ROLE_DEFAULT: fsv_batch.indices},
             )
             batch_inputs: dict[tuple[str, FeatureSetReference], Batch] = {}
+            batch_views: dict[tuple[str, FeatureSetReference], BatchView] = {}
             for binding in self.input_sources:
                 node = model_graph.nodes.get(binding.node_id)
                 fmt = model_graph._data_format_for_node(node)
                 resolved = model_graph._resolve_node_accelerator(node, self.accelerator)
-                effective_acc = ComputeNode._normalize_accelerator(resolved) or Accelerator("cpu")
+                effective_acc = ComputeNode._normalize_accelerator(
+                    resolved,
+                ) or Accelerator("cpu")
                 ref = binding.upstream_ref
                 batch = bv.materialize_batch(
                     fmt=fmt,
@@ -292,9 +296,14 @@ class EvalPhase(ExperimentPhase):
                     targets=ref.targets,
                     tags=ref.tags,
                 )
-                batch = ComputeNode._move_torch_to_device_if_needed(batch, effective_acc)
+                batch = ComputeNode._move_torch_to_device_if_needed(
+                    batch,
+                    effective_acc,
+                )
                 batch_inputs[(binding.node_id, ref)] = batch
+                batch_views[(binding.node_id, ref)] = bv
             pre_batches.append(batch_inputs)
+            pre_views.append(batch_views)
         spinner.finish()
 
         # ------------------------------------------------
@@ -331,12 +340,12 @@ class EvalPhase(ExperimentPhase):
             # Iterate over all batches
             # ------------------------------------------------
             for i in range(n_batches):
-                inputs: dict[tuple[str, FeatureSetReference], Batch] = pre_batches[i]
                 exec_ctx = ExecutionContext(
                     phase_label=self.label,
                     epoch_idx=0,
                     batch_idx=i,
-                    inputs=inputs,
+                    inputs=pre_batches[i],
+                    input_views=pre_views[i],
                 )
 
                 # ------------------------------------------------

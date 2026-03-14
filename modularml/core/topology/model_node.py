@@ -262,7 +262,9 @@ class ModelNode(ComputeNode):
             return
         target = accelerator.torch_device_str()
         first_param = next(torch_module.parameters(), None)
-        already_on_device = first_param is not None and str(first_param.device) == target
+        already_on_device = (
+            first_param is not None and str(first_param.device) == target
+        )
         if not already_on_device:
             torch_module.to(target)
             # Migrate optimizer state tensors to avoid device mismatch on .step()
@@ -495,7 +497,9 @@ class ModelNode(ComputeNode):
             )
             raise ValueError(msg)
 
-        resolved_accelerator = self._resolve_batch_accelerator(kwargs.pop("accelerator", None))
+        resolved_accelerator = self._resolve_batch_accelerator(
+            kwargs.pop("accelerator", None),
+        )
         self._ensure_node_on_device(resolved_accelerator)
 
         x = next(iter(inputs.values()))
@@ -537,7 +541,10 @@ class ModelNode(ComputeNode):
         except (ValueError, AttributeError):
             pass
 
-        if self.backend == Backend.TENSORFLOW and isinstance(eff_accelerator, Accelerator):
+        if self.backend == Backend.TENSORFLOW and isinstance(
+            eff_accelerator,
+            Accelerator,
+        ):
             with eff_accelerator.tf_device_scope():
                 return self.forward_single(x, **kwargs)
         return self.forward_single(x, **kwargs)
@@ -1296,7 +1303,9 @@ class ModelNode(ComputeNode):
                 else self._optimizer.get_config(),
                 "frozen": self._freeze,
                 "accelerator": (
-                    self._accelerator.get_config() if self._accelerator is not None else None
+                    self._accelerator.get_config()
+                    if self._accelerator is not None
+                    else None
                 ),
                 "graph_node_type": "ModelNode",
             },

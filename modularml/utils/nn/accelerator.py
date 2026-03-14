@@ -25,6 +25,7 @@ def _validate_device_str(device: str) -> None:
         )
         raise ValueError(msg)
 
+
 def _parse_device_index(device: str) -> int | None:
     """Extract numeric index from a device string like 'cuda:0' or 'gpu:1'."""
     match = re.search(r":(\d+)$", device)
@@ -329,6 +330,3 @@ class Accelerator:
             device=config.get("device", "cpu"),
             pin_memory=config.get("pin_memory", False),
         )
-
-
-

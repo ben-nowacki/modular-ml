@@ -270,6 +270,7 @@ class FitPhase(ExperimentPhase):
             role_indices={ROLE_DEFAULT: self._inp_fsv.indices},
         )
         inputs: dict[tuple[str, FeatureSetReference], Batch] = {}
+        input_views: dict[tuple[str, FeatureSetReference], BatchView] = {}
         for binding in self.input_sources:
             node = model_graph.nodes.get(binding.node_id)
             fmt = model_graph._data_format_for_node(node)
@@ -284,6 +285,7 @@ class FitPhase(ExperimentPhase):
             )
             batch = ComputeNode._move_torch_to_device_if_needed(batch, effective_acc)
             inputs[(binding.node_id, ref)] = batch
+            input_views[(binding.node_id, ref)] = bv
         spinner.finish()
 
         # ------------------------------------------------
@@ -308,6 +310,7 @@ class FitPhase(ExperimentPhase):
                 epoch_idx=0,
                 batch_idx=0,
                 inputs=inputs,
+                input_views=input_views,
             )
 
             # ------------------------------------------------

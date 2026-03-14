@@ -609,11 +609,14 @@ class TrainPhase(ExperimentPhase):
         return self._is_epoch_end
 
     def _masked_batch_like(self, bv: BatchView) -> BatchView:
-        """Creates a new, fully masked BatchView with the same size as `bv`."""
+        """Creates a masked BatchView with the same indices as `bv` but zero weights."""
         return BatchView(
             source=bv.source,
-            role_indices=np.full(bv.n_samples, -1, dtype=int),
-            role_indice_weights=None,
+            role_indices=bv.role_indices,
+            role_indice_weights={
+                role: np.zeros(len(idxs), dtype=np.float32)
+                for role, idxs in bv.role_indices.items()
+            },
         )
 
     def _build_sampler_executions(
@@ -738,13 +741,17 @@ class TrainPhase(ExperimentPhase):
         self,
         sampler_execs: list[SamplerExecution],
         model_graph: ModelGraph,
-    ) -> dict[tuple[str, FeatureSetReference, int], Batch]:
+    ) -> tuple[
+        dict[tuple[str, FeatureSetReference, int], Batch],
+        dict[tuple[str, FeatureSetReference, int], BatchView],
+    ]:
         """
         Convert all lazy BatchViews to concrete Batch objects and move to device.
 
         Eliminates per-epoch PyArrow materialization overhead by front-loading
         all ``.take()`` calls, numpy conversions, and device transfers before
-        the epoch loop starts.
+        the epoch loop starts. Also pre-materializes one masked batch per binding
+        used by ALTERNATE schedulers when a sampler is inactive.
 
         Args:
             sampler_execs (list[SamplerExecution]):
@@ -753,8 +760,11 @@ class TrainPhase(ExperimentPhase):
                 The active model graph used to resolve node formats and devices.
 
         Returns:
-            dict[tuple[str, FeatureSetReference, int], Batch]:
-                Pre-materialized batches keyed by ``(node_id, upstream_ref, batch_idx)``.
+            tuple:
+                - ``pre_batches``: Pre-materialized batches keyed by
+                  ``(node_id, upstream_ref, batch_idx)``.
+                - ``raw_bvs``: Original :class:`BatchView` objects for each
+                  active batch, keyed by ``(node_id, upstream_ref, batch_idx)``.
 
         """
         spinner = ProgressTask(
@@ -767,6 +777,7 @@ class TrainPhase(ExperimentPhase):
 
         cpu_acc = Accelerator("cpu")
         pre_batches: dict[tuple[str, FeatureSetReference, int], Batch] = {}
+        raw_bvs: dict[tuple[str, FeatureSetReference, int], BatchView] = {}
 
         for se in sampler_execs:
             for binding in se.bindings:
@@ -789,9 +800,27 @@ class TrainPhase(ExperimentPhase):
                         effective_acc,
                     )
                     pre_batches[(binding.node_id, ref, batch_idx)] = batch
+                    raw_bvs[(binding.node_id, ref, batch_idx)] = bv
+
+                # Pre-materialize one masked batch per binding
+                # Used by ALTERNATE schedulers when a sampler is inactive this step
+                # Uses real indices from stream[0] with zero weights so materialization
+                # succeeds; zero weights ensure the loss contribution is zero
+                masked_bv = self._masked_batch_like(bv=stream[0])
+                masked_batch = masked_bv.materialize_batch(
+                    fmt=fmt,
+                    features=ref.features,
+                    targets=ref.targets,
+                    tags=ref.tags,
+                )
+                masked_batch = ComputeNode._move_torch_to_device_if_needed(
+                    masked_batch,
+                    effective_acc,
+                )
+                pre_batches[(binding.node_id, ref, -1)] = masked_batch
 
         spinner.finish()
-        return pre_batches
+        return pre_batches, raw_bvs
 
     def _iter_schedule(
         self,
@@ -881,14 +910,15 @@ class TrainPhase(ExperimentPhase):
               - If a sampler is active in the current step, its corresponding
                 batch is selected.
               - If a sampler is inactive (ALTERNATE policies), its inputs are
-                replaced with a fully masked :class:`BatchView`.
+                replaced with a pre-materialized masked :class:`Batch` (zero weights).
 
         4. Yield an :class:`ExecutionContext` containing:
 
            - Phase label
            - Epoch index
            - Batch index (within the epoch)
-           - Resolved input :class:`BatchView` objects for all bindings
+           - Pre-materialized input :class:`Batch` objects for all bindings
+           - Original :class:`BatchView` objects for active bindings (for loss column resolution)
 
         Notes:
             - ZIP scheduling policies always provide one batch per sampler per step.
@@ -953,7 +983,7 @@ class TrainPhase(ExperimentPhase):
         )
 
         # Pre-materialize all BatchViews to concrete tensors on device
-        pre_batches = self._pre_materialize_sampler_execs(
+        pre_batches, raw_bvs = self._pre_materialize_sampler_execs(
             sampler_execs=sampler_execs,
             model_graph=model_graph,
         )
@@ -1034,30 +1064,35 @@ class TrainPhase(ExperimentPhase):
                 # ------------------------------------------------
                 for step_idx, step_plan in enumerate(step_iter):
                     # step_plan: {sampler_id: batch_idx_for_that_sampler}
-                    inputs: dict[tuple[str, FeatureSetReference], Batch | BatchView] = {}
+                    inputs: dict[tuple[str, FeatureSetReference], Batch] = {}
+                    input_views: dict[tuple[str, FeatureSetReference], BatchView] = {}
 
                     # For each sampler, decide whether it's active this step and select/mask
                     for sid, se in enumerate(sampler_execs):
                         for binding in se.bindings:
-                            # Get list of batches for a given binding
-                            all_bvs = se.sampled.get_stream(name=binding.stream)
                             key = (binding.node_id, binding.upstream_ref)
 
                             # Use pre-materialized batch if this sampler is active this step
                             if sid in step_plan:
                                 batch_idx = step_plan[sid]
-                                pre_key = (binding.node_id, binding.upstream_ref, batch_idx)
-                                inputs[key] = pre_batches.get(pre_key, all_bvs[batch_idx])
-                            # Otherwise, use a fully masked batch
+                                inputs[key] = pre_batches[
+                                    (binding.node_id, binding.upstream_ref, batch_idx)
+                                ]
+                                input_views[key] = raw_bvs[
+                                    (binding.node_id, binding.upstream_ref, batch_idx)
+                                ]
+                            # Otherwise, use the pre-materialized masked batch
                             else:
-                                bv = all_bvs[0]
-                                inputs[key] = self._masked_batch_like(bv=bv)
+                                inputs[key] = pre_batches[
+                                    (binding.node_id, binding.upstream_ref, -1)
+                                ]
 
                     ctx = ExecutionContext(
                         phase_label=self.label,
                         epoch_idx=epoch_idx,
                         batch_idx=step_idx,
                         inputs=inputs,
+                        input_views=input_views,
                     )
 
                     # ------------------------------------------------

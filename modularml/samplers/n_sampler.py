@@ -132,7 +132,9 @@ def _process_anchor_chunk(
 
     for rel_idx in rel_idx_chunk:
         # Per-anchor RNG (deterministic and indep. across anchors)
-        rng = np.random.default_rng([seed_base, rel_idx] if seed_base is not None else None)
+        rng = np.random.default_rng(
+            [seed_base, rel_idx] if seed_base is not None else None,
+        )
 
         per_cond_matches = []
         blocked_rel_idxs: set[int] = set()
@@ -157,7 +159,9 @@ def _process_anchor_chunk(
 
         if allowed_idxs:
             full_matches: set[int] = set.intersection(*per_cond_matches) & allowed_idxs
-            partial_matches: set[int] = (set.union(*per_cond_matches) & allowed_idxs) - full_matches
+            partial_matches: set[int] = (
+                set.union(*per_cond_matches) & allowed_idxs
+            ) - full_matches
             non_matches_set: set[int] = allowed_idxs - full_matches - partial_matches
 
             n_select: int = max_samples_per_anchor or (n_view - 1)
@@ -178,7 +182,11 @@ def _process_anchor_chunk(
                 else:
                     rng.shuffle(group_list)
                     group_selected = group_list[:n_select]
-                    group_scores = _compute_scores(rel_idx, group_selected, minimal_specs)
+                    group_scores = _compute_scores(
+                        rel_idx,
+                        group_selected,
+                        minimal_specs,
+                    )
 
                 selected_pairs.extend(group_selected)
                 selected_scores.extend(list(group_scores))
