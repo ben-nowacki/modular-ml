@@ -15,6 +15,7 @@ from modularml.utils.environment.environment import IN_NOTEBOOK
 from .progress_styles import (
     style_cv,
     style_sampling,
+    style_spinner,
     style_training,
     style_training_loss,
 )
@@ -72,6 +73,7 @@ class ProgressManager:
             style_training.name: style_training,
             style_training_loss.name: style_training_loss,
             style_cv.name: style_cv,
+            style_spinner.name: style_spinner,
         }
 
     # ================================================

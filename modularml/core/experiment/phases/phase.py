@@ -12,6 +12,7 @@ from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.sampling.base_sampler import BaseSampler
 from modularml.utils.data.formatting import ensure_list, find_duplicates
 from modularml.utils.errors.error_handling import ErrorMode
+from modularml.utils.nn.accelerator import Accelerator
 from modularml.visualization.visualizer.visualizer import Visualizer
 
 if TYPE_CHECKING:
@@ -458,6 +459,7 @@ class ExperimentPhase(ABC):
         losses: list[AppliedLoss] | None = None,
         active_nodes: list[GraphNode] | None = None,
         callbacks: list[Callback] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Initiallizes a new phase of the experiment.
@@ -480,6 +482,11 @@ class ExperimentPhase(ABC):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
+            accelerator (Accelerator | str | None, optional):
+                Optional phase-level accelerator. When provided, it is passed to
+                model graph execution and reused by all nodes unless a node-level
+                override exists.
+
         """
         self.label = label
         self.input_sources = self._normalize_input_sources(sources=input_sources)
@@ -488,6 +495,11 @@ class ExperimentPhase(ABC):
         self.callbacks: list[Callback] = ensure_list(callbacks)
         self._validate_callbacks()
         self.active_nodes = self._resolve_active_nodes(active_nodes)
+        self.accelerator = (
+            accelerator
+            if isinstance(accelerator, Accelerator) or accelerator is None
+            else Accelerator(device=accelerator)
+        )
         self._validate_inputs_for_head_nodes()
 
     def __repr__(self):
@@ -767,6 +779,9 @@ class ExperimentPhase(ABC):
             "losses": losses_cfg,
             "active_nodes": self.active_nodes,
             "callbacks": [cb.get_config() for cb in ensure_list(self.callbacks)],
+            "accelerator": (
+                self.accelerator.get_config() if self.accelerator is not None else None
+            ),
         }
 
     @classmethod

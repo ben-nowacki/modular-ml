@@ -52,6 +52,7 @@ from modularml.core.models.base_model import BaseModel
 from modularml.core.models.torch_base_model import TorchBaseModel
 from modularml.core.models.tensorflow_base_model import TensorflowBaseModel
 
+from modularml.utils.nn.accelerator import Accelerator
 """
 Built-in models and merge nodes are accessed with:
 
@@ -93,6 +94,7 @@ All built-in transformed are accessed with:
 
 
 __all__ = [
+    "Accelerator",
     "AppliedLoss",
     "BaseModel",
     "CVBinding",
