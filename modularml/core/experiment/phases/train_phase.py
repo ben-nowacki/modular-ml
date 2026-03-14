@@ -22,10 +22,12 @@ from modularml.core.experiment.checkpointing import (
 )
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.phase import ExperimentPhase, InputBinding
+from modularml.core.topology.compute_node import ComputeNode
 from modularml.core.training.applied_loss import AppliedLoss
 from modularml.utils.data.formatting import ensure_list
 from modularml.utils.environment.environment import IN_NOTEBOOK
 from modularml.utils.logging.logger import get_logger
+from modularml.utils.nn.accelerator import Accelerator
 from modularml.utils.progress_bars.progress_task import ProgressTask
 
 if TYPE_CHECKING:
@@ -33,12 +35,14 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
+    from modularml.core.data.batch import Batch
     from modularml.core.data.sampled_view import SampledView
     from modularml.core.experiment.experiment import Experiment
     from modularml.core.experiment.results.train_results import TrainResults
     from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.sampling.base_sampler import BaseSampler
     from modularml.core.topology.graph_node import GraphNode
+    from modularml.core.topology.model_graph import ModelGraph
 
 logger = get_logger(name="TrainPhase")
 
@@ -241,6 +245,7 @@ class TrainPhase(ExperimentPhase):
         callbacks: list[Callback] | None = None,
         checkpointing: Checkpointing | None = None,
         result_recording: ResultRecording | str = ResultRecording.ALL,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Initiallizes a new training phase for the experiment.
@@ -294,6 +299,13 @@ class TrainPhase(ExperimentPhase):
                 :class:`TrainResults`. See :class:`ResultRecording` for details.
                 Defaults to ``ResultRecording.ALL``.
 
+            accelerator (Accelerator | str | None, optional):
+                Hardware accelerator for device placement during this phase.
+                Accepts an :class:`Accelerator` instance, a device string (e.g.
+                ``"cuda:0"``, ``"mps"``), or ``None`` to run on CPU.
+                When set, this accelerator is applied to all nodes unless a node
+                defines its own accelerator. Defaults to ``None``.
+
         """
         if losses is None:
             raise ValueError("Training requires at least once defined loss.")
@@ -304,6 +316,7 @@ class TrainPhase(ExperimentPhase):
             losses=losses,
             active_nodes=active_nodes,
             callbacks=callbacks,
+            accelerator=accelerator,
         )
         self.batch_schedule = BatchSchedulingPolicy.from_value(batch_schedule)
         if n_epochs < 1:
@@ -344,6 +357,7 @@ class TrainPhase(ExperimentPhase):
         callbacks: list[Callback] | None = None,
         checkpointing: Checkpointing | None = None,
         result_recording: ResultRecording | str = ResultRecording.ALL,
+        accelerator: Accelerator | str | None = None,
     ) -> TrainPhase:
         """
         Initiallizes a new training phase for a given FeatureSet split.
@@ -401,6 +415,13 @@ class TrainPhase(ExperimentPhase):
                 :class:`TrainResults`. See :class:`ResultRecording` for details.
                 Defaults to `ResultRecording.ALL`.
 
+            accelerator (Accelerator | str | None, optional):
+                Hardware accelerator for device placement during this phase.
+                Accepts an :class:`Accelerator` instance, a device string (e.g.
+                ``"cuda:0"``, ``"mps"``), or ``None`` to run on CPU.
+                When set, this accelerator is applied to all nodes unless a node
+                defines its own accelerator. Defaults to ``None``.
+
         """
         input_sources = cls._build_input_sources_from_split(
             split=split,
@@ -417,6 +438,7 @@ class TrainPhase(ExperimentPhase):
             callbacks=callbacks,
             checkpointing=checkpointing,
             result_recording=result_recording,
+            accelerator=accelerator,
         )
         return phase
 
@@ -587,11 +609,14 @@ class TrainPhase(ExperimentPhase):
         return self._is_epoch_end
 
     def _masked_batch_like(self, bv: BatchView) -> BatchView:
-        """Creates a new, fully masked BatchView with the same size as `bv`."""
+        """Creates a masked BatchView with the same indices as `bv` but zero weights."""
         return BatchView(
             source=bv.source,
-            role_indices=np.full(bv.n_samples, -1, dtype=int),
-            role_indice_weights=None,
+            role_indices=bv.role_indices,
+            role_indice_weights={
+                role: np.zeros(len(idxs), dtype=np.float32)
+                for role, idxs in bv.role_indices.items()
+            },
         )
 
     def _build_sampler_executions(
@@ -680,13 +705,14 @@ class TrainPhase(ExperimentPhase):
                     ),
                     label=f"{fsv.label}_for_sampler",
                 )
-                # Materialize batches once
-                binding.sampler.bind_sources(sources=[sampler_src])
-                binding.sampler.show_progress = show_sampler_progress
-                binding.sampler._progress_task.enabled = show_sampler_progress
-                binding.sampler.materialize_batches(
-                    show_progress=show_sampler_progress,
-                )
+                # Materialize batches once, unless sampler was pre-built for this source
+                if not binding.sampler.is_materialized_for(fsv):
+                    binding.sampler.bind_sources(sources=[sampler_src])
+                    binding.sampler.show_progress = show_sampler_progress
+                    binding.sampler._progress_task.enabled = show_sampler_progress
+                    binding.sampler.materialize_batches(
+                        show_progress=show_sampler_progress,
+                    )
 
                 # Capture the sampled output
                 id_to_sampled[sampler_id] = binding.sampler.sampled
@@ -710,6 +736,91 @@ class TrainPhase(ExperimentPhase):
             )
 
         return execs
+
+    def _pre_materialize_sampler_execs(
+        self,
+        sampler_execs: list[SamplerExecution],
+        model_graph: ModelGraph,
+    ) -> tuple[
+        dict[tuple[str, FeatureSetReference, int], Batch],
+        dict[tuple[str, FeatureSetReference, int], BatchView],
+    ]:
+        """
+        Convert all lazy BatchViews to concrete Batch objects and move to device.
+
+        Eliminates per-epoch PyArrow materialization overhead by front-loading
+        all ``.take()`` calls, numpy conversions, and device transfers before
+        the epoch loop starts. Also pre-materializes one masked batch per binding
+        used by ALTERNATE schedulers when a sampler is inactive.
+
+        Args:
+            sampler_execs (list[SamplerExecution]):
+                All sampler executions for this training phase.
+            model_graph (ModelGraph):
+                The active model graph used to resolve node formats and devices.
+
+        Returns:
+            tuple:
+                - ``pre_batches``: Pre-materialized batches keyed by
+                  ``(node_id, upstream_ref, batch_idx)``.
+                - ``raw_bvs``: Original :class:`BatchView` objects for each
+                  active batch, keyed by ``(node_id, upstream_ref, batch_idx)``.
+
+        """
+        spinner = ProgressTask(
+            style="spinner",
+            description="Materializing batches and allocating memory on device",
+            total=None,
+            persist=False,
+        )
+        spinner.start()
+
+        cpu_acc = Accelerator("cpu")
+        pre_batches: dict[tuple[str, FeatureSetReference, int], Batch] = {}
+        raw_bvs: dict[tuple[str, FeatureSetReference, int], BatchView] = {}
+
+        for se in sampler_execs:
+            for binding in se.bindings:
+                node = model_graph.nodes.get(binding.node_id)
+                fmt = model_graph._data_format_for_node(node)
+                resolved = model_graph._resolve_node_accelerator(node, self.accelerator)
+                effective_acc = ComputeNode._normalize_accelerator(resolved) or cpu_acc
+                ref = binding.upstream_ref
+                stream = se.sampled.get_stream(name=binding.stream)
+
+                for batch_idx, bv in enumerate(stream):
+                    batch = bv.materialize_batch(
+                        fmt=fmt,
+                        features=ref.features,
+                        targets=ref.targets,
+                        tags=ref.tags,
+                    )
+                    batch = ComputeNode._move_torch_to_device_if_needed(
+                        batch,
+                        effective_acc,
+                    )
+                    pre_batches[(binding.node_id, ref, batch_idx)] = batch
+                    raw_bvs[(binding.node_id, ref, batch_idx)] = bv
+
+                # Pre-materialize one masked batch per binding
+                # Used by ALTERNATE schedulers when a sampler is inactive this step
+                # Uses real indices from stream[0] with zero weights so materialization
+                # succeeds; zero weights ensure the loss contribution is zero
+                masked_bv = self._masked_batch_like(bv=stream[0])
+                masked_batch = masked_bv.materialize_batch(
+                    fmt=fmt,
+                    features=ref.features,
+                    targets=ref.targets,
+                    tags=ref.tags,
+                )
+                masked_batch = ComputeNode._move_torch_to_device_if_needed(
+                    masked_batch,
+                    effective_acc,
+                )
+                pre_batches[(binding.node_id, ref, -1)] = masked_batch
+
+        spinner.finish()
+        return pre_batches, raw_bvs
 
     def _iter_schedule(
         self,
@@ -799,14 +910,15 @@ class TrainPhase(ExperimentPhase):
               - If a sampler is active in the current step, its corresponding
                 batch is selected.
               - If a sampler is inactive (ALTERNATE policies), its inputs are
-                replaced with a fully masked :class:`BatchView`.
+                replaced with a pre-materialized masked :class:`Batch` (zero weights).
 
         4. Yield an :class:`ExecutionContext` containing:
 
            - Phase label
            - Epoch index
            - Batch index (within the epoch)
-           - Resolved input :class:`BatchView` objects for all bindings
+           - Pre-materialized input :class:`Batch` objects for all bindings
+           - Original :class:`BatchView` objects for active bindings (for loss column resolution)
 
         Notes:
             - ZIP scheduling policies always provide one batch per sampler per step.
@@ -861,6 +973,21 @@ class TrainPhase(ExperimentPhase):
             )
             raise RuntimeError(msg)
 
+        exp_ctx = ExperimentContext.get_active()
+
+        # Pre-place model nodes on their effective devices before any epochs run
+        model_graph = exp_ctx.model_graph
+        model_graph.pre_place_nodes(
+            phase_accelerator=self.accelerator,
+            active_node_ids=self.active_nodes,
+        )
+
+        # Pre-materialize all BatchViews to concrete tensors on device
+        pre_batches, raw_bvs = self._pre_materialize_sampler_execs(
+            sampler_execs=sampler_execs,
+            model_graph=model_graph,
+        )
+
         # ------------------------------------------------
         # Progress Bar: epoch counter
         # ------------------------------------------------
@@ -883,7 +1010,6 @@ class TrainPhase(ExperimentPhase):
         # ------------------------------------------------
         # Callbacks: on_phase_start
         # ------------------------------------------------
-        exp_ctx = ExperimentContext.get_active()
         experiment = exp_ctx.get_experiment()
         last_ctx: ExecutionContext | None = None
 
@@ -938,29 +1064,35 @@ class TrainPhase(ExperimentPhase):
                 # ------------------------------------------------
                 for step_idx, step_plan in enumerate(step_iter):
                     # step_plan: {sampler_id: batch_idx_for_that_sampler}
-                    inputs: dict[tuple[str, FeatureSetReference], BatchView] = {}
+                    inputs: dict[tuple[str, FeatureSetReference], Batch] = {}
+                    input_views: dict[tuple[str, FeatureSetReference], BatchView] = {}
 
                     # For each sampler, decide whether it's active this step and select/mask
                     for sid, se in enumerate(sampler_execs):
                         for binding in se.bindings:
-                            # Get list of batches for a given binding
-                            all_bvs = se.sampled.get_stream(name=binding.stream)
                             key = (binding.node_id, binding.upstream_ref)
 
-                            # Use real batch view, if this sampler is active in this step
+                            # Use pre-materialized batch if this sampler is active this step
                             if sid in step_plan:
-                                bv = all_bvs[step_plan[sid]]
-                                inputs[key] = bv
-                            # Otherwise, use a fully masked batch
+                                batch_idx = step_plan[sid]
+                                inputs[key] = pre_batches[
+                                    (binding.node_id, binding.upstream_ref, batch_idx)
+                                ]
+                                input_views[key] = raw_bvs[
+                                    (binding.node_id, binding.upstream_ref, batch_idx)
+                                ]
+                            # Otherwise, use the pre-materialized masked batch
                             else:
-                                bv = all_bvs[0]
-                                inputs[key] = self._masked_batch_like(bv=bv)
+                                inputs[key] = pre_batches[
+                                    (binding.node_id, binding.upstream_ref, -1)
+                                ]
 
                     ctx = ExecutionContext(
                         phase_label=self.label,
                         epoch_idx=epoch_idx,
                         batch_idx=step_idx,
                         inputs=inputs,
+                        input_views=input_views,
                     )
 
                     # ------------------------------------------------
@@ -1228,5 +1360,10 @@ class TrainPhase(ExperimentPhase):
             callbacks=[Callback.from_config(cfg) for cfg in config["callbacks"]],
             checkpointing=checkpointing,
             result_recording=config.get("result_recording", "all"),
+            accelerator=(
+                Accelerator.from_config(config["accelerator"])
+                if config.get("accelerator") is not None
+                else None
+            ),
         )
         return obj

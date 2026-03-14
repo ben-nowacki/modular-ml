@@ -595,6 +595,7 @@ class Experiment:
                 ctx=ctx,
                 losses=phase.losses,
                 active_nodes=phase.active_nodes,
+                accelerator=phase.accelerator,
             )
 
             if recording == ResultRecording.ALL:
@@ -667,6 +668,7 @@ class Experiment:
                 ctx=ctx,
                 losses=phase.losses,
                 active_nodes=phase.active_nodes,
+                accelerator=phase.accelerator,
             )
             res.add_execution_context(ctx=ctx)
 
@@ -700,6 +702,7 @@ class Experiment:
                 losses=phase.losses,
                 active_nodes=phase.active_nodes,
                 freeze_after_fit=phase.freeze_after_fit,
+                accelerator=phase.accelerator,
             )
             res.add_execution_context(ctx=ctx)
 

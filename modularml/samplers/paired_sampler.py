@@ -40,6 +40,7 @@ class PairedSampler(NSampler):
         drop_last: bool = False,
         seed: int | None = None,
         show_progress: bool = True,
+        n_workers: int = 1,
         source: FeatureSet | FeatureSetView | None = None,
     ):
         """
@@ -91,6 +92,10 @@ class PairedSampler(NSampler):
             show_progress (bool):
                 Whether to show progress updates.
 
+            n_workers (int):
+                Number of worker processes for parallel anchor processing.
+                See :class:`NSampler` for details.
+
             source (FeatureSet | FeatureSetView | None):
                 Optional :class:`FeatureSet` or :class:`FeatureSetView` to bind immediately.
 
@@ -109,6 +114,7 @@ class PairedSampler(NSampler):
             drop_last=drop_last,
             seed=seed,
             show_progress=show_progress,
+            n_workers=n_workers,
             source=source,
         )
 
@@ -167,4 +173,5 @@ class PairedSampler(NSampler):
             drop_last=config["drop_last"],
             seed=config["seed"],
             show_progress=config["show_progress"],
+            n_workers=config.get("n_workers", 1),
         )
