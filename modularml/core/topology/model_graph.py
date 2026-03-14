@@ -30,6 +30,7 @@ from modularml.utils.environment.optional_imports import check_tensorflow, check
 from modularml.utils.errors.error_handling import ErrorMode
 from modularml.utils.errors.exceptions import BackendNotSupportedError
 from modularml.utils.logging.warnings import catch_warnings, get_logger, warn
+from modularml.utils.nn.accelerator import Accelerator
 from modularml.utils.nn.backend import (
     Backend,
     backend_requires_optimizer,
@@ -248,6 +249,66 @@ class ModelGraph(Configurable, Stateful):
             return False
 
         return deep_equal(self.get_state(), other.get_state())
+
+    @staticmethod
+    def _data_format_for_node(node: GraphNode) -> DataFormat:
+        """
+        Resolve the requested data format for a node safely.
+
+        Mixed/invalid backends fall back to NumPy formatting instead of raising.
+        """
+        if not hasattr(node, "backend") or node.backend is None:
+            return DataFormat.NUMPY
+        try:
+            return get_data_format_for_backend(backend=node.backend)
+        except ValueError:
+            return DataFormat.NUMPY
+
+    @staticmethod
+    def _resolve_node_accelerator(
+        node: GraphNode,
+        phase_accelerator: Accelerator | str | None,
+    ) -> Accelerator | str | None:
+        """
+        Resolve effective accelerator: node-level overrides phase-level.
+
+        Priority: node._accelerator  >  phase_accelerator  >  None
+        """
+        node_acc = getattr(node, "_accelerator", None)
+        if node_acc is not None:
+            return node_acc
+        return phase_accelerator
+
+    def pre_place_nodes(
+        self,
+        phase_accelerator: Accelerator | str | None,
+        active_node_ids: list[str] | None = None,
+    ) -> None:
+        """
+        Move all active ModelNodes (and their optimizers) to their resolved device.
+
+        For nodes without a node-level accelerator, ``phase_accelerator`` is used.
+        When ``phase_accelerator`` is ``None``, those nodes are moved to CPU so
+        that data materialized to CPU does not cause a device mismatch.
+
+        Args:
+            phase_accelerator (Accelerator | str | None):
+                Phase-level default device. ``None`` is treated as CPU for nodes
+                that do not have their own accelerator.
+            active_node_ids (list[str] | None, optional):
+                IDs of nodes to place. When ``None``, all nodes in the graph
+                are considered. Defaults to ``None``.
+
+        """
+        cpu_acc = Accelerator("cpu")
+        node_ids = active_node_ids or list(self.nodes.keys())
+        for nid in node_ids:
+            node = self.nodes.get(nid)
+            if node is None or not isinstance(node, ModelNode):
+                continue
+            resolved = self._resolve_node_accelerator(node, phase_accelerator)
+            effective = ModelNode._normalize_accelerator(resolved) or cpu_acc
+            node._ensure_node_on_device(effective)
 
     __hash__ = None
 
@@ -1385,6 +1446,7 @@ class ModelGraph(Configurable, Stateful):
         inputs: dict[tuple[str, FeatureSetReference], TForward],
         *,
         active_nodes: list[str | GraphNode] | None = None,
+        accelerator: Accelerator | str | None = None,
     ) -> dict[str, Batch]:
         """
         Execute a forward pass through the ModelGraph.
@@ -1400,6 +1462,9 @@ class ModelGraph(Configurable, Stateful):
                 Optional subset of nodes to execute. If provided, only these nodes (and
                 any required upstream dependencies within this graph) are executed. If
                 None, all nodes in the graph are executed.
+
+            accelerator (Accelerator | str | None, optional):
+                Optional accelerator shared by the phase that runs this graph.
 
         Returns:
             dict[str, TForward]:
@@ -1435,13 +1500,19 @@ class ModelGraph(Configurable, Stateful):
                 continue
 
             # Gather inputs for this node
+            node_accelerator = self._resolve_node_accelerator(
+                node=node,
+                phase_accelerator=accelerator,
+            )
             inp_data = node.get_input_data(
                 inputs=inputs,
                 outputs=outputs,
-                fmt=get_data_format_for_backend(node.backend),
+                fmt=self._data_format_for_node(node),
+                accelerator=node_accelerator,
+                backend=node.backend,
             )
             # Forward pass & record outputs
-            out_batch = node.forward(inp_data)
+            out_batch = node.forward(inp_data, accelerator=node_accelerator)
             outputs[n_id] = out_batch
 
         return outputs
@@ -1531,6 +1602,7 @@ class ModelGraph(Configurable, Stateful):
         losses: list[AppliedLoss],
         *,
         active_nodes: list[str | GraphNode] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Graph-wise training with a PyTorch global optimizer.
@@ -1547,12 +1619,19 @@ class ModelGraph(Configurable, Stateful):
                 Optional subset of nodes to train. If provided, all upstream
                 dependencies are included automatically.
 
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
+
         """
         # Reset optimizer gradients & get optimizer state info
         self._optimizer.zero_grad()
 
         # Forward pass & update ctx records
-        outputs = self.forward(inputs=ctx.inputs, active_nodes=active_nodes)
+        outputs = self.forward(
+            inputs=ctx.inputs,
+            active_nodes=active_nodes,
+            accelerator=accelerator,
+        )
         for n_id, batch in outputs.items():
             ctx.set_output(node_id=n_id, batch=batch)
 
@@ -1581,6 +1660,7 @@ class ModelGraph(Configurable, Stateful):
         losses: list[AppliedLoss],
         *,
         active_nodes: list[str | GraphNode] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Graph-wise training with a TensorFlow global optimizer.
@@ -1597,6 +1677,9 @@ class ModelGraph(Configurable, Stateful):
                 Optional subset of nodes to train. If provided, all upstream
                 dependencies are included automatically.
 
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
+
         """
         # Reset optimizer gradients & get optimizer state info
         self._optimizer.zero_grad()
@@ -1604,7 +1687,11 @@ class ModelGraph(Configurable, Stateful):
 
         # Forward pass & update ctx records
         with tf.GradientTape() as tape:
-            outputs = self.forward(inputs=ctx.inputs, active_nodes=active_nodes)
+            outputs = self.forward(
+                inputs=ctx.inputs,
+                active_nodes=active_nodes,
+                accelerator=accelerator,
+            )
             for n_id, batch in outputs.items():
                 ctx.set_output(node_id=n_id, batch=batch)
 
@@ -1633,6 +1720,7 @@ class ModelGraph(Configurable, Stateful):
         losses: list[AppliedLoss],
         *,
         active_nodes: list[str | GraphNode] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Graph-wise training with a SciKit global optimizer.
@@ -1649,6 +1737,9 @@ class ModelGraph(Configurable, Stateful):
                 Optional subset of nodes to train. If provided, all upstream
                 dependencies are included automatically.
 
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
+
         """
         # TODO: not implemented yet
         msg = "Training with a scikit global optimizer not implemented yet."
@@ -1660,6 +1751,7 @@ class ModelGraph(Configurable, Stateful):
         losses: list[AppliedLoss],
         *,
         active_nodes: list[str | GraphNode] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Execute a single training step for the ModelGraph.
@@ -1691,6 +1783,9 @@ class ModelGraph(Configurable, Stateful):
                 Note that this does not set the trainable state of the nodes, only on
                 which nodes a forward pass is called. Use `freeze()` and `unfreeze`
                 to set the trainable state of graph nodes.
+
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         # Ensure graph is built
@@ -1743,22 +1838,45 @@ class ModelGraph(Configurable, Stateful):
 
                 # If trainable, use train_step (check if frozen)
                 if isinstance(node, Trainable) and not node.is_frozen:
-                    node.train_step(ctx=ctx, losses=losses)
+                    node.train_step(
+                        ctx=ctx,
+                        losses=losses,
+                        accelerator=self._resolve_node_accelerator(
+                            node=node,
+                            phase_accelerator=accelerator,
+                        ),
+                    )
 
                 # If evaluable (or trainable + frozen), use eval_step
                 elif isinstance(node, Evaluable):
-                    node.eval_step(ctx=ctx, losses=losses)
+                    node.eval_step(
+                        ctx=ctx,
+                        losses=losses,
+                        accelerator=self._resolve_node_accelerator(
+                            node=node,
+                            phase_accelerator=accelerator,
+                        ),
+                    )
 
                 # If forwardable, record outputs of manual forward pass
                 elif isinstance(node, Forwardable):
                     # Gather inputs for this node
+                    node_accelerator = self._resolve_node_accelerator(
+                        node=node,
+                        phase_accelerator=accelerator,
+                    )
                     inp_data = node.get_input_data(
                         inputs=ctx.inputs,
                         outputs=ctx.outputs,
-                        fmt=get_data_format_for_backend(node.backend),
+                        fmt=self._data_format_for_node(node),
+                        accelerator=node_accelerator,
+                        backend=node.backend,
                     )
                     # Forward pass & record outputs
-                    ctx.outputs[node_id] = node.forward(inp_data)
+                    ctx.outputs[node_id] = node.forward(
+                        inp_data,
+                        accelerator=node_accelerator,
+                    )
 
                 # Otherwise, skip node
             return None
@@ -1779,6 +1897,7 @@ class ModelGraph(Configurable, Stateful):
                 ctx=ctx,
                 losses=losses,
                 active_nodes=active_node_ids,
+                accelerator=accelerator,
             )
 
         if backend == Backend.TENSORFLOW:
@@ -1786,6 +1905,7 @@ class ModelGraph(Configurable, Stateful):
                 ctx=ctx,
                 losses=losses,
                 active_nodes=active_node_ids,
+                accelerator=accelerator,
             )
 
         if backend == Backend.SCIKIT:
@@ -1793,6 +1913,7 @@ class ModelGraph(Configurable, Stateful):
                 ctx=ctx,
                 losses=losses,
                 active_nodes=active_node_ids,
+                accelerator=accelerator,
             )
 
         msg = f"Unknown backend: {backend}"
@@ -1807,6 +1928,7 @@ class ModelGraph(Configurable, Stateful):
         losses: list[AppliedLoss],
         *,
         active_nodes: list[str | GraphNode] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Execute a single evaluation step for the ModelGraph.
@@ -1827,6 +1949,9 @@ class ModelGraph(Configurable, Stateful):
                 Optional subset of nodes to execute. All required upstream
                 dependencies are included automatically.
 
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
+
         """
         # Ensure graph is built
         if not self.is_built:
@@ -1842,11 +1967,13 @@ class ModelGraph(Configurable, Stateful):
                 outputs = self.forward(
                     inputs=ctx.inputs,
                     active_nodes=active_nodes,
+                    accelerator=accelerator,
                 )
         else:
             outputs = self.forward(
                 inputs=ctx.inputs,
                 active_nodes=active_nodes,
+                accelerator=accelerator,
             )
 
         # Record outputs
@@ -1878,6 +2005,7 @@ class ModelGraph(Configurable, Stateful):
         *,
         active_nodes: list[str | GraphNode] | None = None,
         freeze_after_fit: bool = True,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Fit batch-fit nodes in topological order.
@@ -1906,6 +2034,9 @@ class ModelGraph(Configurable, Stateful):
                 Whether to freeze fitted nodes after completion.
                 Defaults to True.
 
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
+
         """
         # Ensure graph is built
         if not self.is_built:
@@ -1931,18 +2062,31 @@ class ModelGraph(Configurable, Stateful):
 
             # If node is Fittable and not frozen -> fit it
             if isinstance(node, Fittable) and not node.is_frozen:
-                node.fit_step(ctx=ctx, losses=losses)
+                node.fit_step(
+                    ctx=ctx,
+                    losses=losses,
+                    accelerator=self._resolve_node_accelerator(
+                        node=node,
+                        phase_accelerator=accelerator,
+                    ),
+                )
                 if freeze_after_fit:
                     node.freeze()
 
             # Otherwise, if forwardable -> forward pass only (record outputs)
             elif isinstance(node, Forwardable):
+                node_accelerator = self._resolve_node_accelerator(
+                    node=node,
+                    phase_accelerator=accelerator,
+                )
                 inp_data = node.get_input_data(
                     inputs=ctx.inputs,
                     outputs=ctx.outputs,
-                    fmt=get_data_format_for_backend(node.backend),
+                    fmt=self._data_format_for_node(node),
+                    accelerator=node_accelerator,
+                    backend=node.backend,
                 )
-                out = node.forward(inp_data)
+                out = node.forward(inp_data, accelerator=node_accelerator)
                 ctx.outputs[node_id] = out
 
     # ================================================

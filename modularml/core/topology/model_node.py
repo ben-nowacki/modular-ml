@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any, overload
 
 from modularml.core.data.batch import Batch
@@ -23,6 +24,7 @@ from modularml.utils.errors.exceptions import (
     OptimizerNotSetError,
 )
 from modularml.utils.logging.warnings import catch_warnings, warn
+from modularml.utils.nn.accelerator import Accelerator
 from modularml.utils.nn.backend import Backend
 from modularml.utils.representation.summary import safe_cast_to_summary_rows
 from modularml.utils.topology.graph_search_utils import find_upstream_featuresets
@@ -53,6 +55,7 @@ class ModelNode(ComputeNode):
         model: BaseModel | Any,
         upstream_ref: ExperimentNode | ExperimentNodeReference,
         optimizer: Optimizer | None = None,
+        accelerator: Accelerator | str | None = None,
         *,
         node_id: str | None = None,
         register: bool = True,
@@ -69,6 +72,8 @@ class ModelNode(ComputeNode):
                 Reference to the upstream node.
             optimizer (Optional[Optimizer]):
                 Optimizer to use during training (optional).
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration for this node.
             node_id (str, optional):
                 Used only for de-serialization.
             register (bool, optional):
@@ -108,6 +113,7 @@ class ModelNode(ComputeNode):
 
         # Set model (cast to BaseModel if explicit subclass not provided)
         self._model: BaseModel = wrap_model(model)
+        self._accelerator = self._normalize_accelerator(accelerator)
         self._freeze = False  # make stage trainable as default
 
         # Error checking on optimizer (can be None)
@@ -214,6 +220,64 @@ class ModelNode(ComputeNode):
             force=force,
         )
 
+    def _get_torch_module(self) -> Any:
+        """
+        Return the underlying ``torch.nn.Module``, or ``None`` if not resolvable.
+
+        Returns:
+            torch.nn.Module | None: The resolved module, or ``None`` when the
+                backend is not PyTorch or the module cannot be found.
+
+        """
+        if self.backend != Backend.TORCH:
+            return None
+        if hasattr(self._model, "model") and self._model.model is not None:
+            return self._model.model
+        if hasattr(self._model, "to"):
+            return self._model
+        return None
+
+    def _ensure_node_on_device(self, accelerator: Accelerator | None) -> None:
+        """
+        Move the PyTorch model and optimizer state to the accelerator device.
+
+        This is a no-op when ``accelerator`` is ``None``, the backend is not
+        PyTorch, or the model is already on the target device. TensorFlow
+        placement is handled by the caller via :meth:`Accelerator.tf_device_scope`.
+
+        When the model moves to a new device the optimizer's momentum/variance
+        buffers are also migrated so that the next ``optimizer.step()`` does not
+        raise a device-mismatch error.
+
+        Args:
+            accelerator (Accelerator | None):
+                Target device configuration. When ``None``, this method returns
+                immediately without touching the model or optimizer.
+
+        """
+        if accelerator is None:
+            return
+        torch_module = self._get_torch_module()
+        if torch_module is None:
+            return
+        target = accelerator.torch_device_str()
+        first_param = next(torch_module.parameters(), None)
+        already_on_device = (
+            first_param is not None and str(first_param.device) == target
+        )
+        if not already_on_device:
+            torch_module.to(target)
+            # Migrate optimizer state tensors to avoid device mismatch on .step()
+            if (
+                self._optimizer is not None
+                and self._optimizer.is_built
+                and self._optimizer.backend == Backend.TORCH
+            ):
+                for param_state in self._optimizer.instance.state.values():
+                    for k, v in param_state.items():
+                        if isinstance(v, torch.Tensor):
+                            param_state[k] = v.to(target)
+
     def _build_optimizer(self, *, force: bool = False):
         """
         Construct the optimizer once the model weights exist.
@@ -294,6 +358,9 @@ class ModelNode(ComputeNode):
         if self._optimizer is not None:
             self._build_optimizer(force=force)
 
+        # Ensure model parameters are placed after (re)build.
+        self._ensure_node_on_device(self._accelerator)
+
     @overload
     def forward_single(self, batch: Batch, **kwargs) -> Batch: ...
 
@@ -366,9 +433,6 @@ class ModelNode(ComputeNode):
                 SampleData: Output bundle preserving metadata.
 
             """
-            # Ensure SampleData is in expected backend (modified inplace)
-            d.as_backend(self.backend)
-
             # Pass features through internal model
             out_features = self._model(d.features, **kwargs)
 
@@ -433,7 +497,56 @@ class ModelNode(ComputeNode):
             )
             raise ValueError(msg)
 
+        resolved_accelerator = self._resolve_batch_accelerator(
+            kwargs.pop("accelerator", None),
+        )
+        self._ensure_node_on_device(resolved_accelerator)
+
         x = next(iter(inputs.values()))
+
+        # When no accelerator is explicitly configured, infer the effective device
+        # from the model's current location. This keeps data and model in sync when,
+        # e.g., an eval phase (accelerator=None) runs after a training phase that
+        # already moved the model to a GPU
+        eff_accelerator = resolved_accelerator
+        if eff_accelerator is None and self.backend == Backend.TORCH:
+            torch_module = self._get_torch_module()
+            if torch_module is not None:
+                param = next(torch_module.parameters(), None)
+                if param is not None and str(param.device) != "cpu":
+                    eff_accelerator = Accelerator(device=str(param.device))
+
+        if eff_accelerator is None and self.backend == Backend.TENSORFLOW:
+            try:
+                tf_model = getattr(self._model, "model", None) or self._model
+                variables = getattr(tf_model, "variables", None)
+                if variables:
+                    var_device = getattr(variables[0], "device", "") or ""
+                    if "GPU" in var_device.upper():
+                        m = re.search(r"GPU:(\d+)", var_device, re.IGNORECASE)
+                        idx = int(m.group(1)) if m else 0
+                        eff_accelerator = Accelerator(device=f"gpu:{idx}")
+            except (AttributeError, IndexError, ValueError):
+                pass
+
+        # Coerce to this node's backend format and device (no-op if already correct)
+        try:
+            fmt = get_data_format_for_backend(self.backend)
+            x = self._coerce_data_format_and_acceleration(
+                x,
+                fmt=fmt,
+                accelerator=eff_accelerator,
+                backend=self.backend,
+            )
+        except (ValueError, AttributeError):
+            pass
+
+        if self.backend == Backend.TENSORFLOW and isinstance(
+            eff_accelerator,
+            Accelerator,
+        ):
+            with eff_accelerator.tf_device_scope():
+                return self.forward_single(x, **kwargs)
         return self.forward_single(x, **kwargs)
 
     __call__ = forward_single
@@ -577,6 +690,11 @@ class ModelNode(ComputeNode):
         """
         return self._freeze
 
+    @property
+    def accelerator(self) -> Accelerator | None:
+        """Optional accelerator/placement override for this node."""
+        return self._accelerator
+
     def freeze(self):
         """Freezes this node (prevents training updates)."""
         self._freeze = True
@@ -604,19 +722,63 @@ class ModelNode(ComputeNode):
     def _get_input_batch(
         self,
         ctx: ExecutionContext,
+        accelerator: Accelerator | str | None = None,
     ) -> Batch:
-        """Retrieves Batch data for this ModelNode at the current execution step."""
+        """
+        Retrieve the input :class:`Batch` for this node at the current execution step.
+
+        Args:
+            ctx (ExecutionContext):
+                Active execution context supplying sampler inputs and cached
+                node outputs.
+            accelerator (Accelerator | str | None, optional):
+                Hardware accelerator for device placement. When provided,
+                tensors are moved to the target device before being returned.
+                Defaults to ``None``.
+
+        Returns:
+            Batch: Input batch resolved from upstream references.
+
+        """
         all_inp_data = self.get_input_data(
             inputs=ctx.inputs,
             outputs=ctx.outputs,
             fmt=get_data_format_for_backend(backend=self.backend),
+            accelerator=self._resolve_batch_accelerator(accelerator),
+            backend=self.backend,
         )
         return all_inp_data[self.upstream_ref]
+
+    def _resolve_batch_accelerator(
+        self,
+        accelerator: Accelerator | str | None,
+    ) -> Accelerator | None:
+        """
+        Return the effective accelerator for this call, normalized to ``Accelerator | None``.
+
+        The runtime ``accelerator`` argument (typically passed from the phase or graph)
+        takes priority over this node's own :attr:`_accelerator`. The result is always
+        normalized to an :class:`Accelerator` instance (never a raw string).
+
+        Args:
+            accelerator (Accelerator | str | None):
+                Runtime accelerator override, usually supplied by the phase or
+                :class:`ModelGraph`. When ``None``, falls back to this node's own
+                configured accelerator.
+
+        Returns:
+            Accelerator | None: Resolved accelerator, or ``None`` if no accelerator
+                is configured at either level.
+
+        """
+        effective = accelerator if accelerator is not None else self._accelerator
+        return self._normalize_accelerator(effective)
 
     def _train_step_torch(
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Runs a training step using PyTorch: forward, loss, backward, optimizer.
@@ -626,6 +788,8 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 List of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         # Set optimizer and train mode
@@ -635,7 +799,11 @@ class ModelNode(ComputeNode):
         loss_records: list[LossRecord] = []
 
         # Forward pass (ctx.execution modified inplace)
-        out_batch: Batch = self.forward_single(self._get_input_batch(ctx=ctx))
+        input_batch = self._get_input_batch(ctx=ctx, accelerator=accelerator)
+        out_batch: Batch = self.forward(
+            inputs={self.upstream_ref: input_batch},
+            accelerator=accelerator,
+        )
         ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses
@@ -660,6 +828,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Runs a training step using Tensorflow: forward, loss, backward, optimizer.
@@ -669,6 +838,8 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 List of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         # Zero optimizer
@@ -679,8 +850,10 @@ class ModelNode(ComputeNode):
         # Track gradients over forward passes & loss computation
         with tf.GradientTape() as tape:
             # Forward pass (ctx.execution modified inplace)
-            out_batch: Batch = self.forward_single(
-                self._get_input_batch(ctx=ctx),
+            input_batch = self._get_input_batch(ctx=ctx, accelerator=accelerator)
+            out_batch: Batch = self.forward(
+                inputs={self.upstream_ref: input_batch},
+                accelerator=accelerator,
                 training=True,
             )
             ctx.set_output(node_id=self.node_id, batch=out_batch)
@@ -707,6 +880,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Runs a training step using scikit-learn's `partial_fit`.
@@ -720,6 +894,8 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 List of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         from modularml.core.models.scikit_wrapper import (
@@ -739,7 +915,10 @@ class ModelNode(ComputeNode):
             raise RuntimeError(msg)
 
         # Get input batch
-        input_batch: Batch = self._get_input_batch(ctx=ctx)
+        input_batch: Batch = self._get_input_batch(
+            ctx=ctx,
+            accelerator=accelerator,
+        )
 
         # Merge data from all roles, then partial fit on joint set
         joint_sd = SampleData.concat(
@@ -753,7 +932,10 @@ class ModelNode(ComputeNode):
         )
 
         # Forward pass to record outputs (equivalent to .predict())
-        out_batch: Batch = self.forward_single(input_batch)
+        out_batch: Batch = self.forward(
+            inputs={self.upstream_ref: input_batch},
+            accelerator=accelerator,
+        )
         ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses (recorded as auxiliary since no gradient backprop)
@@ -775,6 +957,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Performs a training step (forward, loss, backward, optimizer step) for this stage.
@@ -787,6 +970,8 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 List of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         Raises:
             RuntimeError: If stage is frozen or optimizer is missing.
@@ -808,13 +993,25 @@ class ModelNode(ComputeNode):
         self._check_valid_optimizer(required=True)
 
         if self.backend == Backend.TORCH:
-            return self._train_step_torch(ctx=ctx, losses=valid_losses)
+            return self._train_step_torch(
+                ctx=ctx,
+                losses=valid_losses,
+                accelerator=accelerator,
+            )
 
         if self.backend == Backend.TENSORFLOW:
-            return self._train_step_tensorflow(ctx=ctx, losses=valid_losses)
+            return self._train_step_tensorflow(
+                ctx=ctx,
+                losses=valid_losses,
+                accelerator=accelerator,
+            )
 
         if self.backend == Backend.SCIKIT:
-            return self._train_step_scikit(ctx=ctx, losses=valid_losses)
+            return self._train_step_scikit(
+                ctx=ctx,
+                losses=valid_losses,
+                accelerator=accelerator,
+            )
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)
@@ -826,6 +1023,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Runs an evaluation step using PyTorch: forward + loss (no gradients).
@@ -835,6 +1033,8 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 Optional list of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         # Set eval mode
@@ -844,7 +1044,11 @@ class ModelNode(ComputeNode):
 
         # Forward pass (ctx.execution modified inplace)
         with torch.no_grad():
-            out_batch: Batch = self.forward_single(self._get_input_batch(ctx=ctx))
+            input_batch = self._get_input_batch(ctx=ctx, accelerator=accelerator)
+            out_batch: Batch = self.forward(
+                inputs={self.upstream_ref: input_batch},
+                accelerator=accelerator,
+            )
             ctx.set_output(node_id=self.node_id, batch=out_batch)
 
             # Compute losses
@@ -866,6 +1070,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Runs an evaluation step using Tensorflow: forward + loss (no gradients).
@@ -875,13 +1080,17 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 Optional list of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         loss_records: list[LossRecord] = []
 
         # Forward pass (ctx.execution modified inplace)
-        out_batch: Batch = self.forward_single(
-            self._get_input_batch(ctx=ctx),
+        input_batch = self._get_input_batch(ctx=ctx, accelerator=accelerator)
+        out_batch: Batch = self.forward(
+            inputs={self.upstream_ref: input_batch},
+            accelerator=accelerator,
             training=False,
         )
         ctx.set_output(node_id=self.node_id, batch=out_batch)
@@ -905,6 +1114,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Runs an evaluation step for a scikit-learn model: forward pass + optional loss.
@@ -914,10 +1124,16 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 Optional list of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         # Forward pass
-        out_batch: Batch = self.forward_single(self._get_input_batch(ctx=ctx))
+        input_batch = self._get_input_batch(ctx=ctx, accelerator=accelerator)
+        out_batch: Batch = self.forward(
+            inputs={self.upstream_ref: input_batch},
+            accelerator=accelerator,
+        )
         ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Compute losses (auxiliary only)
@@ -939,6 +1155,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Performs an evaluation step (forward pass and loss computation) for this stage.
@@ -950,6 +1167,8 @@ class ModelNode(ComputeNode):
                 Context (input/output data) for the given execution step.
             losses (list[AppliedLoss]):
                 Optional list of losses to be applied in this execution step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         Raises:
             RuntimeError: If stage is not frozen.
@@ -968,13 +1187,25 @@ class ModelNode(ComputeNode):
             valid_losses = [loss for loss in losses if loss.node_id == self.node_id]
 
         if self.backend == Backend.TORCH:
-            return self._eval_step_torch(ctx=ctx, losses=valid_losses)
+            return self._eval_step_torch(
+                ctx=ctx,
+                losses=valid_losses,
+                accelerator=accelerator,
+            )
 
         if self.backend == Backend.TENSORFLOW:
-            return self._eval_step_tensorflow(ctx=ctx, losses=valid_losses)
+            return self._eval_step_tensorflow(
+                ctx=ctx,
+                losses=valid_losses,
+                accelerator=accelerator,
+            )
 
         if self.backend == Backend.SCIKIT:
-            return self._eval_step_scikit(ctx=ctx, losses=valid_losses)
+            return self._eval_step_scikit(
+                ctx=ctx,
+                losses=valid_losses,
+                accelerator=accelerator,
+            )
 
         msg = f"Unknown backend: {self.backend}"
         raise ValueError(msg)
@@ -986,6 +1217,7 @@ class ModelNode(ComputeNode):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Fits this node on complete data (for batch-fit scikit-learn models).
@@ -999,6 +1231,8 @@ class ModelNode(ComputeNode):
                 Context containing full-dataset inputs.
             losses (list[AppliedLoss] | None):
                 Optional losses to compute after fitting (for metrics only).
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         Raises:
             RuntimeError: If this node is frozen.
@@ -1014,7 +1248,10 @@ class ModelNode(ComputeNode):
         self._validate_ctx(ctx=ctx)
 
         # Get input batch
-        input_batch: Batch = self._get_input_batch(ctx=ctx)
+        input_batch: Batch = self._get_input_batch(
+            ctx=ctx,
+            accelerator=accelerator,
+        )
 
         # Merge data from all roles, then fit on joint set
         joint_sd = SampleData.concat(
@@ -1028,7 +1265,10 @@ class ModelNode(ComputeNode):
         )
 
         # Forward pass to record outputs for downstream nodes
-        out_batch: Batch = self.forward_single(input_batch)
+        out_batch: Batch = self.forward(
+            inputs={self.upstream_ref: input_batch},
+            accelerator=accelerator,
+        )
         ctx.set_output(node_id=self.node_id, batch=out_batch)
 
         # Optional loss computation (auxiliary only)
@@ -1062,6 +1302,11 @@ class ModelNode(ComputeNode):
                 if self._optimizer is None
                 else self._optimizer.get_config(),
                 "frozen": self._freeze,
+                "accelerator": (
+                    self._accelerator.get_config()
+                    if self._accelerator is not None
+                    else None
+                ),
                 "graph_node_type": "ModelNode",
             },
         )
@@ -1099,6 +1344,11 @@ class ModelNode(ComputeNode):
             if config["upstream_refs"]
             else None,
             optimizer=optimizer,
+            accelerator=(
+                Accelerator.from_config(config["accelerator"])
+                if config.get("accelerator") is not None
+                else None
+            ),
             node_id=config.get("node_id"),
             register=register,
         )

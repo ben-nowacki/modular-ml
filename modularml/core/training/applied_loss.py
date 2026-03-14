@@ -257,7 +257,8 @@ class AppliedLoss(Summarizable):
             node (ModelNode):
                 Node consuming the upstream batch derived from the FeatureSet.
             ctx (ExecutionContext):
-                Execution context providing FeatureSet :class:`BatchView` instances.
+                Execution context providing the upstream :class:`BatchView` instances
+                via :attr:`~ExecutionContext.input_views`.
 
         Returns:
             tuple[TensorLike, TensorLike, TensorLike]:
@@ -342,10 +343,14 @@ class AppliedLoss(Summarizable):
                 return
             visited.add(n.node_id)
 
-            # If this is a head node, add all inputs and return
+            # If this is a head node, add all BatchViews and return
+            # `input_views` is populated by phases; it holds the original lazy
+            # BatchView that was materialized into each `inputs` entry
             if n.node_id in head_node_ids:
                 bvs: list[BatchView] = [
-                    bv for inp_key, bv in ctx.inputs.items() if inp_key[0] == n.node_id
+                    bv
+                    for inp_key, bv in ctx.input_views.items()
+                    if inp_key[0] == n.node_id
                 ]
                 upstream_views.extend(bvs)
                 return
@@ -388,7 +393,7 @@ class AppliedLoss(Summarizable):
             torch = ensure_torch()
             # Ensure loss has shape (batch_size, )
             raw_loss = raw_loss.view(-1)
-            w = torch.as_tensor(weights, device=raw_loss.device)
+            w = torch.as_tensor(weights, device=raw_loss.device, dtype=raw_loss.dtype)
             return torch.sum(raw_loss * w) * self.weight / len(raw_loss)
 
         if self.backend == Backend.TENSORFLOW:

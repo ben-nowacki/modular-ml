@@ -8,6 +8,7 @@ from rich.progress import (
     BarColumn,
     MofNCompleteColumn,
     ProgressColumn,
+    SpinnerColumn,
     TextColumn,
     TimeElapsedColumn,
     TimeRemainingColumn,
@@ -125,5 +126,15 @@ style_cv = ProgressStyle(
         TimeElapsedColumn(),
         TextColumn("|"),
         TimeRemainingColumn(),
+    ),
+)
+
+style_spinner = ProgressStyle(
+    name="spinner",
+    indent_group=1,
+    columns=(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        TimeElapsedColumn(),
     ),
 )

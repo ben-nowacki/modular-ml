@@ -1,4 +1,5 @@
 from modularml.api import (
+    Accelerator,
     AppliedLoss,
     BaseModel,
     Checkpointing,
