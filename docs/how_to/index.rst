@@ -15,3 +15,4 @@ These provide a more detailed view of available API for specific classes.
    04_create_mergenode
    05_create_experiment
    06_create_scalers
+   07_use_hardware_acceleration
