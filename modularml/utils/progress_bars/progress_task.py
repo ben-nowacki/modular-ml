@@ -104,7 +104,7 @@ class ProgressTask:
         # Update fields one last time
         if fields:
             self.fields.update(fields)
-            progress.update(self._task_id, fields=fields)
+            progress.update(self._task_id, **fields)
 
         task = progress._tasks.get(self._task_id)
         if task is not None and task.total is not None:

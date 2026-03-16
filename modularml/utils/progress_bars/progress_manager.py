@@ -136,14 +136,15 @@ class ProgressManager:
             self._render_group(),
             console=self._console,
             refresh_per_second=10,
+            auto_refresh=True,
             transient=not IN_NOTEBOOK,
         )
         self._live.start()
 
-    def _refresh_layout(self):
+    def _refresh_layout(self, *, refresh: bool = False):
         self._ensure_live()
         if self._live is not None:
-            self._live.update(self._render_group(), refresh=True)
+            self._live.update(self._render_group(), refresh=refresh)
 
     def _shutdown(self):
         if self._live is None:
@@ -218,7 +219,7 @@ class ProgressManager:
             del self._progress[task._progress_key]
             self._progress_indent.pop(task._progress_key, None)
 
-        self._refresh_layout()
+        self._refresh_layout(refresh=True)
 
         # If nothing is running anymore, shut down
         if not self._active_tasks and not IN_NOTEBOOK:
