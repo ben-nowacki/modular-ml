@@ -1290,6 +1290,60 @@ class Experiment:
             exp._exec_plan = PhaseGroup.from_config(exec_plan_cfg)
         return exp
 
+    def to_yaml(self, path: str | Path, *, overwrite: bool = False) -> Path:
+        """
+        Export this experiment to a human-readable YAML file.
+
+        Captures the model graph architecture and registered phases.
+        Learned model weights are not included (use :meth:`save` for full persistence).
+
+        Args:
+            path (str | Path): Destination file path. A ``.yaml`` extension
+                is added automatically if not already present.
+            overwrite (bool, optional): Whether to overwrite an existing file
+                at ``path``. Defaults to False.
+
+        Returns:
+            Path: The resolved path the file was written to.
+
+        Raises:
+            FileExistsError: If ``path`` already exists and ``overwrite`` is False.
+
+        """
+        from modularml.core.io.yaml import to_yaml
+
+        return to_yaml(self, path, overwrite=overwrite)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, *, overwrite: bool = False) -> Experiment:
+        """
+        Reconstruct an experiment from a YAML file.
+
+        Builds the model graph (registers into active context) and all
+        registered phases. FeatureSets referenced in phases must already
+        be in the active :class:`ExperimentContext`.
+
+        Args:
+            path (str | Path): Path to the YAML file.
+            overwrite (bool, optional): Whether to overwrite conflicting node
+                registrations already present in the active
+                :class:`ExperimentContext`. When ``False`` (default) a
+                :exc:`ValueError` is raised on any label collision. When
+                ``True`` the existing registration is replaced.
+                Defaults to False.
+
+        Returns:
+            Experiment: Reconstructed experiment (config only, no weights).
+
+        Raises:
+            ValueError: If a node label conflict is detected and
+                ``overwrite`` is False.
+
+        """
+        from modularml.core.io.yaml import from_yaml
+
+        return from_yaml(path, kind="experiment", overwrite=overwrite)
+
     # ================================================
     # Stateful
     # ================================================
