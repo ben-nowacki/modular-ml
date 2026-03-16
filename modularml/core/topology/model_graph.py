@@ -310,6 +310,22 @@ class ModelGraph(Configurable, Stateful):
             effective = ModelNode._normalize_accelerator(resolved) or cpu_acc
             node._ensure_node_on_device(effective)
 
+        # Also migrate graph-level optimizer state
+        if (
+            phase_accelerator is not None
+            and self._optimizer is not None
+            and self._optimizer.is_built
+            and self._optimizer.backend == Backend.TORCH
+            and torch is not None
+        ):
+            phase_acc = ModelNode._normalize_accelerator(phase_accelerator)
+            if phase_acc is not None:
+                target = phase_acc.torch_device_str()
+                for param_state in self._optimizer.instance.state.values():
+                    for k, v in param_state.items():
+                        if isinstance(v, torch.Tensor) and str(v.device) != target:
+                            param_state[k] = v.to(target)
+
     __hash__ = None
 
     @property
