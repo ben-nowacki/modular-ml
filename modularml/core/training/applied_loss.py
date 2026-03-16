@@ -393,7 +393,7 @@ class AppliedLoss(Summarizable):
             torch = ensure_torch()
             # Ensure loss has shape (batch_size, )
             raw_loss = raw_loss.view(-1)
-            w = torch.as_tensor(weights, device=raw_loss.device)
+            w = torch.as_tensor(weights, device=raw_loss.device, dtype=raw_loss.dtype)
             return torch.sum(raw_loss * w) * self.weight / len(raw_loss)
 
         if self.backend == Backend.TENSORFLOW:

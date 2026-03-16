@@ -49,6 +49,13 @@ class ExperimentRun:
 
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        from modularml.core.experiment.results.group_results import PhaseGroupResults
+
+        labels = self.results.labels
+        if len(labels) == 1 and isinstance(self.results[labels[0]], PhaseGroupResults):
+            self.results = self.results[labels[0]]
+
     @property
     def duration_seconds(self) -> float:
         """
