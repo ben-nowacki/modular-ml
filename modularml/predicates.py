@@ -213,6 +213,13 @@ class Lambda(Predicate):
     def __repr__(self) -> str:
         return f"Lambda({self.source!r})"
 
+    def __getstate__(self) -> dict[str, Any]:
+        return {"source": self.source}
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        self.source = state["source"]
+        self._fn = eval(self.source)  # noqa: S307
+
     def to_dict(self) -> dict[str, Any]:
         return {"type": "lambda", "source": self.source}
 
