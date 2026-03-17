@@ -34,6 +34,7 @@ from modularml.core.experiment.results.execution_meta import (
 from modularml.core.experiment.results.experiment_run import ExperimentRun
 from modularml.core.experiment.results.fit_results import FitResults
 from modularml.core.experiment.results.group_results import PhaseGroupResults
+from modularml.core.experiment.results.phase_results import PhaseResults
 from modularml.core.experiment.results.train_results import TrainResults
 from modularml.core.io.checkpoint import Checkpoint
 from modularml.utils.environment.environment import IN_NOTEBOOK
@@ -1079,22 +1080,24 @@ class Experiment:
         # Directly return group results
         return res
 
-    def run(self, **kwargs) -> PhaseGroupResults:
+    def run(self, **kwargs) -> list[PhaseGroupResults | PhaseResults]:
         """
         Run the registered execution plan.
 
         Description:
-            All phases and phase groups added to this experiment
-            will be executed in the order they were added.
-            Execution history can be viewed via the `history` attribute.
+            Each top-level item in the execution plan is run individually
+            and produces its own :class:`ExperimentRun` entry in
+            :attr:`history`. Execution history can be viewed via the
+            `history` attribute.
 
         Args:
             **kwargs:
                 Additional arguments to be passed to each executed phase.
 
         Returns:
-            PhaseGroupResults:
-                Results of all executed phases.
+            list[PhaseGroupResults | PhaseResults]:
+                Results for each top-level item in the execution plan,
+                in execution order.
 
         """
         # ------------------------------------------------
@@ -1110,11 +1113,17 @@ class Experiment:
             self._save_experiment_checkpoint(label="START")
 
         # ------------------------------------------------
-        # run all phases
+        # run each top-level item separately
         # - callback/checkpointing logic handled internally
         # ------------------------------------------------
+        results: list[PhaseGroupResults | PhaseResults] = []
         try:
-            res = self.run_group(group=self._exec_plan, **kwargs)
+            for item in self._exec_plan.all:
+                if isinstance(item, PhaseGroup):
+                    res = self.run_group(group=item, **kwargs)
+                else:
+                    res = self.run_phase(phase=item, **kwargs)
+                results.append(res)
         except BaseException as exc:
             self._in_callback = True
             try:
@@ -1140,8 +1149,7 @@ class Experiment:
         ) and self._exp_checkpointing.should_save("experiment_end"):
             self._save_experiment_checkpoint(label="END")
 
-        # Return results
-        return res
+        return results
 
     # Preview API
     @overload

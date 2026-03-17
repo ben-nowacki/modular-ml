@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
     from modularml.core.experiment.results.execution_meta import PhaseGroupExecutionMeta
     from modularml.core.experiment.results.group_results import PhaseGroupResults
+    from modularml.core.experiment.results.phase_results import PhaseResults
 
 
 @dataclass
@@ -44,7 +45,7 @@ class ExperimentRun:
     ended_at: datetime
     status: Literal["completed", "failed", "stopped"]
 
-    results: PhaseGroupResults
+    results: PhaseGroupResults | PhaseResults
     execution_meta: PhaseGroupExecutionMeta
 
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -52,6 +53,8 @@ class ExperimentRun:
     def __post_init__(self):
         from modularml.core.experiment.results.group_results import PhaseGroupResults
 
+        if not isinstance(self.results, PhaseGroupResults):
+            return
         labels = self.results.labels
         if len(labels) == 1 and isinstance(self.results[labels[0]], PhaseGroupResults):
             self.results = self.results[labels[0]]
