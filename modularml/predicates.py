@@ -149,6 +149,10 @@ class In(Predicate):
         self.values = list(values)
 
     def __call__(self, x: Any) -> bool:
+        import numpy as np
+
+        if isinstance(x, np.ndarray):
+            return np.isin(x, self.values)
         return x in self.values
 
     def __repr__(self) -> str:
@@ -169,6 +173,10 @@ class NotIn(Predicate):
         self.values = list(values)
 
     def __call__(self, x: Any) -> bool:
+        import numpy as np
+
+        if isinstance(x, np.ndarray):
+            return ~np.isin(x, self.values)
         return x not in self.values
 
     def __repr__(self) -> str:
