@@ -1255,6 +1255,65 @@ class Experiment:
 
         return res
 
+    def preview_run(self, **kwargs) -> list[PhaseGroupResults | PhaseResults]:
+        """
+        Run the registered execution plan without mutating the Experiment state.
+
+        Description:
+            Executes the full execution plan (identical to :meth:`run`) against
+            the current experiment state. Any state changes are reverted after
+            execution completes. Execution is not recorded in :attr:`history`.
+            Use :meth:`run` to persist results.
+
+        Args:
+            **kwargs:
+                Additional arguments to be passed to each executed phase.
+
+        Returns:
+            list[PhaseGroupResults | PhaseResults]:
+                Results for each top-level item in the execution plan,
+                in execution order.
+
+        """
+        # Snapshot state only if the execution plan mutates model weights
+        needs_restore = _phase_mutates_state(self._exec_plan)
+        state = self.get_state() if needs_restore else None
+
+        # Execute with checkpointing disabled
+        with self.disable_checkpointing():
+            for cb in self._exp_callbacks:
+                cb.on_experiment_start(experiment=self)
+
+            results: list[PhaseGroupResults | PhaseResults] = []
+            try:
+                for item in self._exec_plan.all:
+                    if isinstance(item, PhaseGroup):
+                        res = self.run_group(group=item, **kwargs)
+                    else:
+                        res = self.run_phase(phase=item, **kwargs)
+                    results.append(res)
+            except BaseException as exc:
+                self._in_callback = True
+                try:
+                    for cb in self._exp_callbacks:
+                        cb._on_exception(
+                            experiment=self,
+                            phase=None,
+                            exception=exc,
+                        )
+                finally:
+                    self._in_callback = False
+                raise
+
+            for cb in self._exp_callbacks:
+                cb.on_experiment_end(experiment=self)
+
+        # Restore experiment state
+        if needs_restore:
+            self.set_state(state=state)
+
+        return results
+
     # ================================================
     # Configurable
     # ================================================
