@@ -75,7 +75,7 @@ class ProgressTask:
             progress.update(self._task_id, **fields)
 
         # Must refresh layout manually
-        mgr._refresh_layout()
+        mgr._request_refresh()
 
     def set_total(self, total: int):
         """Update the total units of work for this task."""
@@ -89,7 +89,7 @@ class ProgressTask:
         mgr = ProgressManager.get_active()
         progress = mgr._progress[self._progress_key]
         progress.update(self._task_id, total=total)
-        mgr._refresh_layout()
+        mgr._request_refresh()
 
     def finish(self, **fields):
         """Mark the task as complete and persist any final fields."""
