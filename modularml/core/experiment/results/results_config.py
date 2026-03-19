@@ -103,7 +103,9 @@ class ResultsConfig:
     def get_config(self) -> dict:
         """Return configuration details required to reconstruct this object."""
         return {
-            "results_dir": str(self.results_dir) if self.results_dir is not None else None,
+            "results_dir": str(self.results_dir)
+            if self.results_dir is not None
+            else None,
             "save_execution": self.save_execution,
             "save_metrics": self.save_metrics,
             "save_artifacts": self.save_artifacts,
