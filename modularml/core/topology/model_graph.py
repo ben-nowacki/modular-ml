@@ -1612,6 +1612,23 @@ class ModelGraph(Configurable, Stateful):
                 continue
             n.unfreeze()
 
+    def reset_state(self) -> None:
+        """
+        Reset all learned state in this graph.
+
+        Re-initializes the weights of every :class:`ModelNode`, unfreezes
+        all nodes, and rebuilds the graph-level optimizer (if present).
+        After this call the graph is in the same state as a freshly-built
+        graph with no training history.
+        """
+        for node in self._nodes.values():
+            if isinstance(node, ModelNode):
+                node.reset_weights()
+
+        # Rebuild the graph-level optimizer over all (now-unfrozen) nodes
+        if self._optimizer is not None:
+            self._build_optimizer(force=True)
+
     def _train_step_torch(
         self,
         ctx: ExecutionContext,

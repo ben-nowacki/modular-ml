@@ -716,6 +716,19 @@ class ModelNode(ComputeNode):
         elif self.backend == Backend.TENSORFLOW:
             self.model.trainable = True
 
+    def reset_weights(self) -> None:
+        """
+        Re-initialize model weights and reset training state.
+
+        Re-initializes all underlying model weights to their original
+        (randomly sampled) state, unfreezes the node, and rebuilds the
+        node-level optimizer (if one exists).
+        """
+        self._model.reset_weights()
+        self.unfreeze()
+        if self._optimizer is not None:
+            self._build_optimizer(force=True)
+
     def _get_input_batch(
         self,
         ctx: ExecutionContext,
