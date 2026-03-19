@@ -31,10 +31,12 @@ from modularml.core.experiment.results.execution_meta import (
     PhaseExecutionMeta,
     PhaseGroupExecutionMeta,
 )
+from modularml.core.experiment.results.execution_store import ExecutionStore
 from modularml.core.experiment.results.experiment_run import ExperimentRun
 from modularml.core.experiment.results.fit_results import FitResults
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.results.phase_results import PhaseResults
+from modularml.core.experiment.results.results_config import ResultsConfig
 from modularml.core.experiment.results.train_results import TrainResults
 from modularml.core.io.checkpoint import Checkpoint
 from modularml.utils.environment.environment import IN_NOTEBOOK
@@ -42,6 +44,7 @@ from modularml.utils.logging.logger import get_logger
 from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
+    from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.experiment.results.phase_results import PhaseResults
     from modularml.core.topology.model_graph import ModelGraph
 
@@ -67,6 +70,7 @@ class Experiment:
         ctx: ExperimentContext | None = None,
         checkpointing: Checkpointing | None = None,
         callbacks: list[ExperimentCallback] | None = None,
+        results_config: ResultsConfig | None = None,
     ):
         """
         Constructs a new Experiment.
@@ -94,6 +98,12 @@ class Experiment:
                 An optional list of experiment-level callbacks to run during
                 `Experiment.run()` execution at phase/group boundaries.
                 Defaults to None.
+
+            results_config (ResultsConfig | None, optional):
+                Controls where phase results (artifacts, metrics) are stored.
+                When None, all results are kept in memory (default behaviour).
+                Set a directory on :class:`ResultsConfig` to serialize
+                artifacts to disk. Defaults to None.
 
         """
         self.label = label
@@ -129,6 +139,13 @@ class Experiment:
         self._exp_callbacks: list[ExperimentCallback] = list(callbacks or [])
         self._exp_callbacks.sort(key=lambda cb: cb._exec_order)
 
+        # Results storage configuration
+        self._results_config: ResultsConfig = results_config or ResultsConfig()
+
+        # Tracks the on-disk directory of the phase currently being executed;
+        # used to nest callback sub-phase results under callbacks/<label>/
+        self._active_phase_dir: Path | None = None
+
         # Bool flags for guarding
         # True while executing inside a callback
         self._in_callback: bool = False
@@ -145,6 +162,9 @@ class Experiment:
         registration_policy: RegistrationPolicy | str | None = None,
         checkpointing: Checkpointing | None = None,
         callbacks: list[ExperimentCallback] | None = None,
+        results_config: ResultsConfig | None = None,
+        *,
+        overwrite: bool = False,
     ) -> Experiment:
         """
         Construct an Experiment using the active ExperimentContext.
@@ -173,14 +193,39 @@ class Experiment:
                 `Experiment.run()` execution at phase/group boundaries.
                 Defaults to None.
 
+            results_config (ResultsConfig | None, optional):
+                Controls where phase results (artifacts, metrics, execution contexts)
+                are stored. When None, all results are kept in memory (default).
+                Set a directory on :class:`ResultsConfig` to serialize results to
+                disk. Defaults to None.
+
+            overwrite (bool, optional):
+                If ``True``, replace any Experiment already associated with
+                the active context. All registered nodes are retained but the
+                model graph state (weights, frozen flags, optimizer) is fully
+                reset so the new Experiment starts from scratch. Defaults to
+                ``False``.
+
         Returns:
             Experiment: A new Experiment utilizing the active context.
+
+        Raises:
+            ValueError: If an Experiment is already associated with the active
+                context and ``overwrite=False``.
 
         """
         active_ctx = ExperimentContext.get_active()
         if active_ctx._experiment_ref is not None:
-            msg = "An Experiment has already been associated with the active context."
-            raise ValueError(msg)
+            if not overwrite:
+                msg = (
+                    "An Experiment has already been associated with the active context. "
+                    "Pass overwrite=True to replace it and reset the model graph state."
+                )
+                raise ValueError(msg)
+
+            # Reset the model graph so the new experiment starts with clean weights
+            if active_ctx.model_graph is not None:
+                active_ctx.model_graph.reset_state()
 
         return cls(
             label=label,
@@ -188,6 +233,7 @@ class Experiment:
             ctx=active_ctx,
             checkpointing=checkpointing,
             callbacks=callbacks,
+            results_config=results_config,
         )
 
     # ================================================
@@ -522,6 +568,9 @@ class Experiment:
         self,
         phase: TrainPhase,
         *,
+        _artifact_dir: Path | None = None,
+        _execution_dir: Path | None = None,
+        _metric_dir: Path | None = None,
         show_sampler_progress: bool = True,
         show_training_progress: bool = True,
         persist_progress: bool = IN_NOTEBOOK,
@@ -568,7 +617,12 @@ class Experiment:
         self.model_graph.unfreeze(phase.active_nodes)
 
         # Run training and track results
-        res = TrainResults(label=phase.label)
+        res = TrainResults(
+            label=phase.label,
+            _artifact_dir=_artifact_dir,
+            _execution_dir=_execution_dir,
+            _metric_dir=_metric_dir,
+        )
         recording = phase.result_recording
 
         # For LAST mode, find any EarlyStopping callback with restore_best
@@ -581,7 +635,7 @@ class Experiment:
                     early_stop = cb
                     break
 
-        best_ctxs: list = []
+        best_ctxs: list[ExecutionContext] = []
         prev_epoch = -1
 
         for ctx in phase.iter_execution(
@@ -605,7 +659,7 @@ class Experiment:
                 # On epoch boundary, snapshot best and clear
                 if ctx.epoch_idx != prev_epoch and prev_epoch >= 0:
                     if early_stop and early_stop.best_epoch == prev_epoch:
-                        best_ctxs = list(res._execution)
+                        best_ctxs = res._execution.snapshot()
                     res._execution.clear()
                     res._series_cache.clear()
                 res.add_execution_context(ctx=ctx)
@@ -616,11 +670,11 @@ class Experiment:
         if recording == ResultRecording.LAST and early_stop is not None:
             # Check if the final completed epoch was also the best
             if early_stop.best_epoch == prev_epoch:
-                best_ctxs = list(res._execution)
+                best_ctxs = res._execution.snapshot()
 
             # If best epoch differs from the final epoch, restore snapshot
             if best_ctxs and early_stop.best_epoch != prev_epoch:
-                res._execution = best_ctxs
+                res._execution = ExecutionStore.from_list(best_ctxs, location=None)
                 res._series_cache.clear()
 
         return res
@@ -629,6 +683,9 @@ class Experiment:
         self,
         phase: EvalPhase,
         *,
+        _artifact_dir: Path | None = None,
+        _execution_dir: Path | None = None,
+        _metric_dir: Path | None = None,
         show_eval_progress: bool = False,
         persist_progress: bool = IN_NOTEBOOK,
     ) -> EvalResults:
@@ -659,7 +716,12 @@ class Experiment:
         self.model_graph.freeze()
 
         # Run evaluation and track results
-        res = EvalResults(label=phase.label)
+        res = EvalResults(
+            label=phase.label,
+            _artifact_dir=_artifact_dir,
+            _execution_dir=_execution_dir,
+            _metric_dir=_metric_dir,
+        )
         for ctx in phase.iter_execution(
             results=res,
             show_eval_progress=show_eval_progress,
@@ -678,6 +740,10 @@ class Experiment:
     def _execute_fit(
         self,
         phase: FitPhase,
+        *,
+        _artifact_dir: Path | None = None,
+        _execution_dir: Path | None = None,
+        _metric_dir: Path | None = None,
     ) -> FitResults:
         """
         Executes a fit phase on this experiment.
@@ -696,7 +762,12 @@ class Experiment:
             FitResults: Tracked results from fitting.
 
         """
-        res = FitResults(label=phase.label)
+        res = FitResults(
+            label=phase.label,
+            _artifact_dir=_artifact_dir,
+            _execution_dir=_execution_dir,
+            _metric_dir=_metric_dir,
+        )
         for ctx in phase.iter_execution(results=res):
             self.model_graph.fit_step(
                 ctx=ctx,
@@ -712,6 +783,9 @@ class Experiment:
     def _execute_phase_with_meta(
         self,
         phase: TrainPhase | EvalPhase | FitPhase,
+        *,
+        _path_suffix: Path | None = None,
+        _run_idx: int | None = None,
         **kwargs,
     ) -> tuple[PhaseResults, PhaseExecutionMeta]:
         """
@@ -763,33 +837,80 @@ class Experiment:
             self._save_experiment_checkpoint(label=phase.label)
 
         # ------------------------------------------------
+        # Compute phase-specific storage directories
+        # ------------------------------------------------
+        if _path_suffix is not None:
+            # Called from within a group; suffix already contains the run prefix
+            phase_dir = self._results_config.phase_dir(_path_suffix / phase.label)
+        elif _run_idx is not None:
+            # Top-level call from run_phase; prefix with run index for stable ordering
+            phase_dir = self._results_config.phase_dir(f"{_run_idx}_{phase.label}")
+        elif (
+            self._active_phase_dir is not None
+            and self._results_config.results_dir is not None
+        ):
+            # Called from preview_phase during callback execution → nest under callbacks/
+            phase_dir = self._active_phase_dir / "callbacks" / phase.label
+        else:
+            phase_dir = None  # pure preview with no disk storage
+
+        cfg = self._results_config
+        phase_execution_dir = (
+            phase_dir / "execution_data" if phase_dir is not None and cfg.save_execution else None
+        )
+        phase_metric_dir = (
+            phase_dir / "metrics" if phase_dir is not None and cfg.save_metrics else None
+        )
+        phase_artifact_dir = (
+            phase_dir / "artifacts" if phase_dir is not None and cfg.save_artifacts else None
+        )
+
+        # Track active phase dir so nested callback previews nest under callbacks/
+        prev_active_phase_dir = self._active_phase_dir
+        self._active_phase_dir = phase_dir
+
+        # ------------------------------------------------
         # run phase
         # - modifies experiment state but does not update history
         # ------------------------------------------------
         phase_start = datetime.now()
-        if isinstance(phase, TrainPhase):
-            train_keys = {
-                "show_sampler_progress",
-                "show_training_progress",
-                "persist_progress",
-                "persist_epoch_progress",
-                "val_loss_metric",
-            }
-            phase_res: TrainResults = self._execute_training(
-                phase,
-                **{k: v for k, v in kwargs.items() if k in train_keys},
-            )
-        elif isinstance(phase, EvalPhase):
-            eval_keys = {"show_eval_progress", "persist_progress"}
-            phase_res: EvalResults = self._execute_evaluation(
-                phase,
-                **{k: v for k, v in kwargs.items() if k in eval_keys},
-            )
-        elif isinstance(phase, FitPhase):
-            phase_res: FitResults = self._execute_fit(phase)
-        else:
-            msg = f"Expected type of TrainPhase, EvalPhase, or FitPhase. Received: {type(phase)}."
-            raise TypeError(msg)
+        try:
+            if isinstance(phase, TrainPhase):
+                train_keys = {
+                    "show_sampler_progress",
+                    "show_training_progress",
+                    "persist_progress",
+                    "persist_epoch_progress",
+                    "val_loss_metric",
+                }
+                phase_res: TrainResults = self._execute_training(
+                    phase,
+                    _artifact_dir=phase_artifact_dir,
+                    _execution_dir=phase_execution_dir,
+                    _metric_dir=phase_metric_dir,
+                    **{k: v for k, v in kwargs.items() if k in train_keys},
+                )
+            elif isinstance(phase, EvalPhase):
+                eval_keys = {"show_eval_progress", "persist_progress"}
+                phase_res: EvalResults = self._execute_evaluation(
+                    phase,
+                    _artifact_dir=phase_artifact_dir,
+                    _execution_dir=phase_execution_dir,
+                    _metric_dir=phase_metric_dir,
+                    **{k: v for k, v in kwargs.items() if k in eval_keys},
+                )
+            elif isinstance(phase, FitPhase):
+                phase_res: FitResults = self._execute_fit(
+                    phase,
+                    _artifact_dir=phase_artifact_dir,
+                    _execution_dir=phase_execution_dir,
+                    _metric_dir=phase_metric_dir,
+                )
+            else:
+                msg = f"Expected type of TrainPhase, EvalPhase, or FitPhase. Received: {type(phase)}."
+                raise TypeError(msg)
+        finally:
+            self._active_phase_dir = prev_active_phase_dir
 
         # Create meta for run
         phase_end = datetime.now()
@@ -829,6 +950,9 @@ class Experiment:
     def _execute_group_with_meta(
         self,
         group: PhaseGroup,
+        *,
+        _path_suffix: Path | None = None,
+        _run_idx: int | None = None,
         **kwargs,
     ) -> tuple[PhaseGroupResults, PhaseGroupExecutionMeta]:
         """
@@ -871,6 +995,15 @@ class Experiment:
         # - construct result container
         # - run each phase in order
         # ------------------------------------------------
+        if _path_suffix is not None:
+            # Nested group; suffix already contains the run prefix
+            group_suffix = _path_suffix / group.label
+        elif _run_idx is not None:
+            # Top-level call from run_group; prefix with run index for stable ordering
+            group_suffix = Path(f"{_run_idx}_{group.label}")
+        else:
+            group_suffix = Path(group.label)
+
         group_results = PhaseGroupResults(label=group.label)
         group_meta = PhaseGroupExecutionMeta(
             label=group.label,
@@ -882,6 +1015,7 @@ class Experiment:
                 # Run phase with meta tracking
                 phase_res, phase_meta = self._execute_phase_with_meta(
                     phase=element,
+                    _path_suffix=group_suffix,
                     **kwargs,
                 )
 
@@ -894,6 +1028,7 @@ class Experiment:
                 # Run group with meta tracking
                 sub_res, sub_meta = self._execute_group_with_meta(
                     group=element,
+                    _path_suffix=group_suffix,
                     **kwargs,
                 )
 
@@ -998,6 +1133,7 @@ class Experiment:
         try:
             res, meta = self._execute_phase_with_meta(
                 phase=phase,
+                _run_idx=len(self._history),
                 **kwargs,
             )
         except Exception:
@@ -1056,6 +1192,7 @@ class Experiment:
         try:
             res, meta = self._execute_group_with_meta(
                 group=group,
+                _run_idx=len(self._history),
                 **kwargs,
             )
         except Exception:
@@ -1327,6 +1464,13 @@ class Experiment:
             "label": self.label,
             "registration_policy": self._ctx._policy.value,
             "execution_plan": self._exec_plan.get_config(),
+            "checkpointing": (
+                self._exp_checkpointing.get_config()
+                if self._exp_checkpointing is not None
+                else None
+            ),
+            "callbacks": [cb.get_config() for cb in self._exp_callbacks],
+            "results_config": self._results_config.get_config(),
         }
 
     @classmethod
@@ -1344,11 +1488,32 @@ class Experiment:
             Experiment: Newly constructed experiment bound to the active context.
 
         """
+        from modularml.core.experiment.callbacks.experiment_callback import (
+            ExperimentCallback,
+        )
+        from modularml.core.experiment.checkpointing import Checkpointing
+        from modularml.core.experiment.results.results_config import ResultsConfig
+
         active_ctx = ExperimentContext.get_active()
+
+        # Restore checkpointing and results_config before constructing so
+        # __init__ receives them directly.
+        ckpt_cfg = config.get("checkpointing")
+        checkpointing = Checkpointing.from_config(ckpt_cfg) if ckpt_cfg is not None else None
+
+        results_cfg = config.get("results_config")
+        results_config = ResultsConfig.from_config(results_cfg) if results_cfg is not None else None
+
+        cb_cfgs = config.get("callbacks", [])
+        callbacks = [ExperimentCallback.from_config(cfg) for cfg in cb_cfgs]
+
         exp = cls(
             label=config["label"],
             registration_policy=config.get("registration_policy"),
             ctx=active_ctx,
+            checkpointing=checkpointing,
+            callbacks=callbacks or None,
+            results_config=results_config,
         )
 
         # Rebuild execution plan
@@ -1474,6 +1639,7 @@ class Experiment:
         filepath: Path,
         *,
         checkpoint_dir: Path | None = None,
+        results_dir: Path | None = None,
         allow_packaged_code: bool = False,
         overwrite: bool = False,
     ) -> Experiment:
@@ -1488,6 +1654,11 @@ class Experiment:
                 serialized experiment contains checkpoint artifacts and
                 this is None, the checkpoints will not be restored and
                 a warning will be emitted. Defaults to None.
+            results_dir (Path | None, optional):
+                Directory to extract saved on-disk result stores into. If the
+                serialized experiment contains disk-backed execution contexts or
+                artifacts and this is None, those results will not be restored
+                and a warning will be emitted. Defaults to None.
             allow_packaged_code : bool
                 Whether bundled code execution is allowed.
             overwrite (bool):
@@ -1508,11 +1679,15 @@ class Experiment:
         if Path(filepath).suffix == "":
             filepath = _enforce_file_suffix(path=filepath, cls=cls)
 
+        extras: dict = {}
+        if checkpoint_dir is not None:
+            extras["checkpoint_dir"] = checkpoint_dir
+        if results_dir is not None:
+            extras["results_dir"] = results_dir
+
         return serializer.load(
             filepath,
             allow_packaged_code=allow_packaged_code,
             overwrite=overwrite,
-            extras={"checkpoint_dir": checkpoint_dir}
-            if checkpoint_dir is not None
-            else None,
+            extras=extras or None,
         )
