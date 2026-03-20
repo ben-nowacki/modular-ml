@@ -1007,7 +1007,9 @@ class Experiment:
         for element in group.all:
             if isinstance(element, ExperimentPhase):
                 # Run phase with meta tracking
-                element_dir = group_dir / element.label if group_dir is not None else None
+                element_dir = (
+                    group_dir / element.label if group_dir is not None else None
+                )
                 phase_res, phase_meta = self._execute_phase_with_meta(
                     phase=element,
                     phase_dir=element_dir,
@@ -1127,7 +1129,9 @@ class Experiment:
 
         # Run phase and record phase-level meta data
         try:
-            run_dir = self._results_config.phase_dir(f"{len(self._history)}_{phase.label}")
+            run_dir = self._results_config.phase_dir(
+                f"{len(self._history)}_{phase.label}",
+            )
             res, meta = self._execute_phase_with_meta(
                 phase=phase,
                 phase_dir=run_dir,
@@ -1187,7 +1191,9 @@ class Experiment:
 
         # Run group and record phase-level meta data
         try:
-            run_dir = self._results_config.phase_dir(f"{len(self._history)}_{group.label}")
+            run_dir = self._results_config.phase_dir(
+                f"{len(self._history)}_{group.label}",
+            )
             res, meta = self._execute_group_with_meta(
                 group=group,
                 group_dir=run_dir,

@@ -42,11 +42,11 @@ class ArtifactEntry:
         if isinstance(self._artifact, Path):
             with self._artifact.open("rb") as f:
                 payload = pickle.load(f)
-    
+
             # New format: dict payload containing the artifact under "artifact" key
             if isinstance(payload, dict) and "artifact" in payload:
                 return payload["artifact"]
-            
+
             # Legacy format: file contained just the artifact object
             return payload
         return self._artifact
