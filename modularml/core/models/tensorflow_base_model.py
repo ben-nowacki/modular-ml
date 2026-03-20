@@ -64,7 +64,11 @@ class TensorflowBaseModel(BaseModel, ABC):
             return
         model = self._get_keras_model()
         for layer in model.layers:
-            if hasattr(layer, "kernel_initializer") and hasattr(layer, "kernel") and layer.kernel is not None:
+            if (
+                hasattr(layer, "kernel_initializer")
+                and hasattr(layer, "kernel")
+                and layer.kernel is not None
+            ):
                 layer.kernel.assign(layer.kernel_initializer(layer.kernel.shape))
             if (
                 hasattr(layer, "bias_initializer")

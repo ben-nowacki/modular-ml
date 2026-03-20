@@ -856,13 +856,19 @@ class Experiment:
 
         cfg = self._results_config
         phase_execution_dir = (
-            phase_dir / "execution_data" if phase_dir is not None and cfg.save_execution else None
+            phase_dir / "execution_data"
+            if phase_dir is not None and cfg.save_execution
+            else None
         )
         phase_metric_dir = (
-            phase_dir / "metrics" if phase_dir is not None and cfg.save_metrics else None
+            phase_dir / "metrics"
+            if phase_dir is not None and cfg.save_metrics
+            else None
         )
         phase_artifact_dir = (
-            phase_dir / "artifacts" if phase_dir is not None and cfg.save_artifacts else None
+            phase_dir / "artifacts"
+            if phase_dir is not None and cfg.save_artifacts
+            else None
         )
 
         # Track active phase dir so nested callback previews nest under callbacks/
@@ -1499,10 +1505,14 @@ class Experiment:
         # Restore checkpointing and results_config before constructing so
         # __init__ receives them directly.
         ckpt_cfg = config.get("checkpointing")
-        checkpointing = Checkpointing.from_config(ckpt_cfg) if ckpt_cfg is not None else None
+        checkpointing = (
+            Checkpointing.from_config(ckpt_cfg) if ckpt_cfg is not None else None
+        )
 
         results_cfg = config.get("results_config")
-        results_config = ResultsConfig.from_config(results_cfg) if results_cfg is not None else None
+        results_config = (
+            ResultsConfig.from_config(results_cfg) if results_cfg is not None else None
+        )
 
         cb_cfgs = config.get("callbacks", [])
         callbacks = [ExperimentCallback.from_config(cfg) for cfg in cb_cfgs]

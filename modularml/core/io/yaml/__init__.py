@@ -154,10 +154,7 @@ def to_yaml(obj: Any, path: str | Path, *, overwrite: bool = False) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if path.exists() and not overwrite:
-        msg = (
-            f"File already exists at '{path}'. "
-            "Pass overwrite=True to replace it."
-        )
+        msg = f"File already exists at '{path}'. Pass overwrite=True to replace it."
         raise FileExistsError(msg)
 
     d = obj_to_yaml_dict(obj)

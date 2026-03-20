@@ -399,7 +399,11 @@ class TensorflowModelWrapper(BaseModel):
         if self.model is None:
             return
         for layer in self.model.layers:
-            if hasattr(layer, "kernel_initializer") and hasattr(layer, "kernel") and layer.kernel is not None:
+            if (
+                hasattr(layer, "kernel_initializer")
+                and hasattr(layer, "kernel")
+                and layer.kernel is not None
+            ):
                 layer.kernel.assign(layer.kernel_initializer(layer.kernel.shape))
             if (
                 hasattr(layer, "bias_initializer")
