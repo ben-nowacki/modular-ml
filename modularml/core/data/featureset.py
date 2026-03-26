@@ -915,7 +915,8 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 Split name from which to fit the scaler (e.g., "train"). If None, the \
                 scaler is fit to all samples. Defaults to None.
             merged_axes (int | tuple[int]):
-                Axes whose sizes are merged into a single dimension. If None, no axes are \
+                Axes whose sizes are merged into a single dimension. If a single value is given,
+                that axis shape is preserved, and all others are merged. If None, no axes are \
                 merged. An Error will be thrown if the resulting shape is not 2-dimensional.
 
         Raises:
