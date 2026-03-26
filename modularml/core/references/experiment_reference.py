@@ -136,6 +136,55 @@ class ExperimentNodeReference(ExperimentReference):
     node_label: str | None = None
     node_id: str | None = None
 
+    def __post_init__(self):
+        if self.node_label is None and self.node_id is None:
+            raise ValueError("At least one of `node_label` or `node_id` must be set.")
+
+    def __hash__(self):
+        # Hash only on the primary identity field
+        return hash(self.node_id if self.node_id is not None else self.node_label)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ExperimentNodeReference):
+            return NotImplemented
+        # Two refs are equal if they share a non-None field value
+        # node_id takes priority since it's guaranteed unique
+        if self.node_id is not None and other.node_id is not None:
+            return self.node_id == other.node_id
+        if self.node_label is not None and other.node_label is not None:
+            return self.node_label == other.node_label
+        return False
+
+    def enrich(
+        self,
+        *,
+        node_id: str | None = None,
+        node_label: str | None = None,
+    ) -> None:
+        """
+        Fill in an identity field is missing after first resolution.
+
+        Only writes a field if it is currently None.
+        An existing value cannot be overwritten (once set, attributes are immutable)
+        """
+        if node_id is not None and self.node_id is None:
+            object.__setattr__(self, "node_id", node_id)
+        if node_label is not None and self.node_label is None:
+            object.__setattr__(self, "node_label", node_label)
+
+    def enrich_from_resolved(self, ctx: ExperimentContext | None = None):
+        """Fills in any missing identity field, based on the resolved value."""
+        from modularml.core.experiment.experiment_node import ExperimentNode
+
+        exp_node = self.resolve(ctx=ctx)
+        if not isinstance(exp_node, ExperimentNode):
+            msg = (
+                "Expected reference to resolve to ExperimentNode. "
+                f"Received: {type(exp_node)}."
+            )
+            raise TypeError(msg)
+        self.enrich(node_id=exp_node.node_id, node_label=exp_node.label)
+
     def resolve(
         self,
         ctx: ExperimentContext | None = None,
