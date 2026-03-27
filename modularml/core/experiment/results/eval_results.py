@@ -151,16 +151,25 @@ class EvalResults(PhaseResults):
             ... )
 
         """
+        from modularml.utils.data.conversion import convert_to_format
+
+        # Collect in native format; defer conversion to after concat
         tensor_series = self.tensors(
             node=node,
             domain=domain,
             role=role,
-            fmt=fmt,
+            fmt=None,
             unscale=unscale,
         )
-        # Collapse batch axis, then get single value (only epoch=0)
+        
+        # Single concat across all batches
         collapsed = tensor_series.collapse(axis="batch", reducer="concat")
-        return collapsed.one()
+        result = collapsed.one()
+
+        # Format conversion
+        if fmt is not None:
+            result = convert_to_format(result, fmt=fmt)
+        return result
 
     def stacked_batches(
         self,
@@ -200,10 +209,10 @@ class EvalResults(PhaseResults):
         batch_series = self.batches(node=node)
         batches = list(batch_series.values())
 
+        merged_batch = Batch.concat(*batches)
         if fmt is not None:
-            batches = [b.to_format(fmt) for b in batches]
-
-        return Batch.concat(*batches, fmt=fmt)
+            merged_batch = merged_batch.to_format(fmt)
+        return merged_batch
 
     def aggregated_losses(
         self,
