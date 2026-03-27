@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from modularml.core.data.featureset import FeatureSet
 from modularml.core.experiment.experiment_context import ExperimentContext
@@ -115,6 +115,53 @@ class CVBinding:
                 "produced by each fold will not be used. "
             )
             warn(message=msg, stacklevel=2)
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return a serializable configuration dict for this binding.
+
+        Returns:
+            dict[str, Any]: Configuration sufficient to reconstruct this
+                :class:`CVBinding` via :meth:`from_config`.
+
+        """
+        return {
+            "fs": self._fs_id,
+            "source_splits": self.source_splits,
+            "group_by": self.group_by,
+            "stratify_by": self.stratify_by,
+            "train_split_name": self.train_split_name,
+            "val_split_name": self.val_split_name,
+            "val_size": self.val_size,
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> CVBinding:
+        """
+        Reconstruct a :class:`CVBinding` from a configuration dict.
+
+        The :class:`FeatureSet` referenced by ``config["fs"]`` (node ID) must
+        already be registered in the active :class:`ExperimentContext`.
+
+        Args:
+            config (dict[str, Any]): Dict produced by :meth:`get_config`.
+
+        Returns:
+            CVBinding: Reconstructed binding.
+
+        """
+        return cls(
+            fs=config["fs"],
+            source_splits=config["source_splits"],
+            group_by=config.get("group_by"),
+            stratify_by=config.get("stratify_by"),
+            train_split_name=config.get("train_split_name", "train"),
+            val_split_name=config.get("val_split_name", "val"),
+            val_size=config.get("val_size"),
+        )
 
 
 @dataclass

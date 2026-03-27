@@ -55,15 +55,16 @@ def obj_to_yaml_dict(obj: Any) -> dict[str, Any]:
 
     """
     from modularml.core.experiment.experiment import Experiment
-    from modularml.core.experiment.phases.phase import ExperimentPhase
     from modularml.core.io.yaml.translators.experiment import experiment_to_yaml_dict
-    from modularml.core.io.yaml.translators.model_graph import model_graph_to_yaml_dict
+    from modularml.core.experiment.phases.phase import ExperimentPhase
     from modularml.core.io.yaml.translators.phase import phase_to_yaml_dict
-    from modularml.core.io.yaml.translators.sampler import sampler_to_yaml_dict
-    from modularml.core.io.yaml.translators.splitter import splitter_to_yaml_dict
-    from modularml.core.sampling.base_sampler import BaseSampler
-    from modularml.core.splitting.base_splitter import BaseSplitter
     from modularml.core.topology.model_graph import ModelGraph
+    from modularml.core.io.yaml.translators.model_graph import model_graph_to_yaml_dict
+    from modularml.core.sampling.base_sampler import BaseSampler
+    from modularml.core.io.yaml.translators.sampler import sampler_to_yaml_dict
+    from modularml.core.splitting.base_splitter import BaseSplitter
+    from modularml.core.io.yaml.translators.splitter import splitter_to_yaml_dict
+    
 
     if isinstance(obj, ModelGraph):
         return model_graph_to_yaml_dict(obj)
@@ -77,7 +78,6 @@ def obj_to_yaml_dict(obj: Any) -> dict[str, Any]:
         return {"splitter": d}
     if isinstance(obj, Experiment):
         return experiment_to_yaml_dict(obj)
-
     msg = f"YAML export is not supported for type: {type(obj).__name__}"
     raise TypeError(msg)
 
@@ -125,7 +125,7 @@ def yaml_dict_to_obj(
     if kind == "splitter":
         inner = d.get("splitter", d)
         return splitter_from_yaml_dict(inner)
-
+    
     msg = f"Unknown YAML kind: {kind!r}"
     raise ValueError(msg)
 

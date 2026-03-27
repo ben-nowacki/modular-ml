@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -349,3 +349,51 @@ class CrossValidation(ExecutionStrategy):
         fold_ptask.finish()
 
         return all_res
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """
+        Return a serializable configuration dict for this cross-validation strategy.
+
+        Captures label, fold count, seed, all :class:`CVBinding` configurations,
+        and the resolved phase template. Does not capture runtime state.
+
+        Returns:
+            dict[str, Any]: Configuration sufficient to reconstruct this
+                :class:`CrossValidation` via :meth:`from_config`.
+
+        """
+        return {
+            "label": self.label,
+            "bindings": [b.get_config() for b in self.bindings.values()],
+            "n_folds": self.n_folds,
+            "seed": self.seed,
+            "phase_template": self.phase_template.get_config(),
+        }
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> CrossValidation:
+        """
+        Reconstruct a :class:`CrossValidation` from a configuration dict.
+
+        All :class:`FeatureSet` nodes referenced in the bindings must already
+        be registered in the active :class:`ExperimentContext`.
+
+        Args:
+            config (dict[str, Any]): Dict produced by :meth:`get_config`.
+
+        Returns:
+            CrossValidation: Reconstructed cross-validation strategy.
+
+        """
+        bindings = [CVBinding.from_config(b) for b in config["bindings"]]
+        phase_template = PhaseGroup.from_config(config["phase_template"])
+        return cls(
+            label=config["label"],
+            bindings=bindings,
+            n_folds=config["n_folds"],
+            seed=config["seed"],
+            phase=phase_template,
+        )

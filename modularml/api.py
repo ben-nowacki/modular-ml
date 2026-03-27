@@ -24,7 +24,7 @@ from modularml.core.experiment.phases.train_phase import ResultRecording
 # ================================================
 from modularml.core.execution.cross_validation.cross_validation import CrossValidation
 from modularml.core.execution.cross_validation.cv_binding import CVBinding
-
+from modularml.core.execution.cross_validation.cv_results import CVResults
 
 # ================================================
 # Callbacks
@@ -105,6 +105,7 @@ __all__ = [
     "Checkpointing",
     "ConcatNode",
     "CrossValidation",
+    "CVResults",
     "EarlyStopping",
     "EvalLossMetric",
     "EvalPhase",

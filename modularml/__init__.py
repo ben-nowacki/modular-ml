@@ -3,6 +3,7 @@ from modularml.api import (
     AppliedLoss,
     BaseModel,
     CVBinding,
+    CVResults,
     Checkpointing,
     ConcatNode,
     CrossValidation,
