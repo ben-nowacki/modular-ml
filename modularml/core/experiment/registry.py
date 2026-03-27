@@ -1,5 +1,6 @@
 """Registration helpers for experiment symbols and serialization kinds."""
 
+from modularml.core.execution.cross_validation.cv_results import CVResults
 from modularml.core.experiment.experiment import Experiment
 from modularml.core.experiment.phases.phase_group import PhaseGroup
 from modularml.core.experiment.results.eval_results import EvalResults
@@ -70,6 +71,12 @@ def register_builtin():
         cls=TrainResults,
     )
 
+    # CV Results
+    symbol_registry.register_builtin_class(
+        key="CVResults",
+        cls=CVResults,
+    )
+
     # Experiment
     symbol_registry.register_builtin_class(
         key="Experiment",
@@ -79,6 +86,10 @@ def register_builtin():
 
 def register_kinds():
     """Register experiment serialization kinds."""
+    kind_registry.register(
+        cls=CVResults,
+        kind=SerializationKind(name="CVResults", kind="cvr"),
+    )
     kind_registry.register(
         cls=Experiment,
         kind=SerializationKind(name="Experiment", kind="exp"),
