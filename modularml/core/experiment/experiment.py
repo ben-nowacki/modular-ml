@@ -280,6 +280,40 @@ class Experiment:
         return list(self._exp_callbacks)
 
     # ================================================
+    # Execution Plan Management
+    # ================================================
+    def set_execution_plan(
+        self,
+        phases: list[ExperimentPhase | PhaseGroup],
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """
+        Set the execution plan from a list of phases and/or phase groups.
+
+        Replaces the current execution plan with the provided items, preserving
+        their order.
+
+        Args:
+            phases (list[ExperimentPhase | PhaseGroup]):
+                Ordered list of phases and/or phase groups to execute.
+            overwrite (bool, optional):
+                If ``True``, replace a non-empty execution plan. If ``False``
+                and the plan already contains items, a `ValueError` is
+                raised. Defaults to ``False``.
+
+        Raises:
+            ValueError: If the execution plan is not empty and
+                ``overwrite=False``.
+
+        """
+        if self._exec_plan.all and not overwrite:
+            msg = "The execution plan is not empty. Pass overwrite=True to replace it."
+            raise ValueError(msg)
+        self._exec_plan.clear()
+        self._exec_plan.add_items(phases)
+
+    # ================================================
     # Experiment Callback Management
     # ================================================
     def add_callback(self, callback: ExperimentCallback) -> None:
