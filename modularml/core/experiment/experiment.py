@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from modularml.core.data.execution_context import ExecutionContext
     from modularml.core.experiment.results.phase_results import PhaseResults
     from modularml.core.topology.model_graph import ModelGraph
+    from modularml.core.data.featureset import FeatureSet
 
 logger = get_logger(name="Experiment")
 
@@ -248,6 +249,19 @@ class Experiment:
     def model_graph(self) -> ModelGraph | None:
         """Gets the ModelGraph associated with this Experiment."""
         return self._ctx.model_graph
+    
+    @property
+    def featureset(self) -> FeatureSet | list[FeatureSet]:
+        """
+        Retrieves the FeatureSet(s) associated with this experiment.
+        
+        If only one FeatureSet exists, it is returned directly. Otherwise,
+        a list of all available FeatureSets is returned
+        """
+        all_fs = list(self.ctx.available_featuresets.values())
+        if len(all_fs) == 1:
+            return all_fs[0]
+        return all_fs            
 
     @property
     def execution_plan(self) -> PhaseGroup:
