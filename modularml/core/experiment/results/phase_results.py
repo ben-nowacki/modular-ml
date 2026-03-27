@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from modularml.callbacks.artifact_result import ArtifactResult
+    from modularml.callbacks.early_stopping import EarlyStoppingResult
     from modularml.callbacks.evaluation import EvaluationCallbackResult
     from modularml.callbacks.metric import MetricResult
     from modularml.core.data.featureset import FeatureSet
@@ -742,6 +743,11 @@ class PhaseResults:
 
     @overload
     def callbacks(self, *, kind: Literal["payload"]) -> AxisSeries[PayloadResult]: ...
+
+    @overload
+    def callbacks(
+        self, *, kind: Literal["early_stopping"]
+    ) -> AxisSeries[EarlyStoppingResult]: ...
 
     @overload
     def callbacks(self, *, kind: None = ...) -> CallbackDataSeries: ...
