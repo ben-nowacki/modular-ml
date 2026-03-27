@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, get_args
 
 from modularml.core.data.schema_constants import (
@@ -17,7 +17,6 @@ from modularml.core.data.schema_constants import (
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.references.experiment_reference import (
     ExperimentNodeReference,
-    ExperimentReference,
     ResolutionError,
 )
 from modularml.utils.data.pyarrow_data import resolve_column_selectors
@@ -41,10 +40,6 @@ class FeatureSetReference(ExperimentNodeReference):
         tags (tuple[str, ...] | None): Tag columns or selectors.
 
     """
-
-    # ExperimentNode
-    node_label: str | None = None
-    node_id: str | None = None
 
     # FeatureSet-specific
     features: tuple[str, ...] | None = None
@@ -129,6 +124,19 @@ class FeatureSetReference(ExperimentNodeReference):
             tags=list(selected[DOMAIN_TAGS]),
         )
 
+    def enrich_from_resolved(self, ctx: ExperimentContext | None = None):
+        """Fills in any missing identity field, based on the resolved value."""
+        from modularml.core.data.featureset_view import FeatureSetView
+
+        fsv = self.resolve(ctx=ctx)
+        if not isinstance(fsv, FeatureSetView):
+            msg = (
+                "Expected reference to resolve to FeatureSetView. "
+                f"Received: {type(fsv)}."
+            )
+            raise TypeError(msg)
+        self.enrich(node_id=fsv.source.node_id, node_label=fsv.source.label)
+
     # ================================================
     # Configurable
     # ================================================
@@ -141,8 +149,7 @@ class FeatureSetReference(ExperimentNodeReference):
 
         """
         return {
-            "node_id": self.node_id,
-            "node_label": self.node_label,
+            **super().get_config(),
             "features": self.features,
             "targets": self.targets,
             "tags": self.tags,
@@ -164,7 +171,7 @@ class FeatureSetReference(ExperimentNodeReference):
 
 
 @dataclass(frozen=True)
-class FeatureSetSplitReference(ExperimentReference):
+class FeatureSetSplitReference(FeatureSetReference):
     """
     Reference to a :class:`FeatureSet` split.
 
@@ -175,12 +182,7 @@ class FeatureSetSplitReference(ExperimentReference):
 
     """
 
-    # Split-specific
-    split_name: str
-
-    # ExperimentNode
-    node_label: str | None = None
-    node_id: str | None = None
+    split_name: str = field(kw_only=True)
 
     def resolve(
         self,
@@ -243,7 +245,7 @@ class FeatureSetSplitReference(ExperimentReference):
             )
             raise ResolutionError(msg)
 
-        return node.get_split(split_name=self.split_label)
+        return node.get_split(split_name=self.split_name)
 
     # ================================================
     # Configurable
@@ -257,8 +259,7 @@ class FeatureSetSplitReference(ExperimentReference):
 
         """
         return {
-            "node_id": self.node_id,
-            "node_label": self.node_label,
+            **super().get_config(),
             "split_name": self.split_name,
         }
 
@@ -278,7 +279,7 @@ class FeatureSetSplitReference(ExperimentReference):
 
 
 @dataclass(frozen=True)
-class FeatureSetColumnReference(ExperimentReference):
+class FeatureSetColumnReference(FeatureSetReference):
     """
     Reference to a single column of a :class:`FeatureSet`.
 
@@ -291,17 +292,13 @@ class FeatureSetColumnReference(ExperimentReference):
 
     """
 
-    # FeatureSet-specific (single column)
-    domain: str
-    key: str
-    rep: str
-
-    # ExperimentNode
-    node_label: str | None = None
-    node_id: str | None = None
+    domain: str = field(kw_only=True)
+    key: str = field(kw_only=True)
+    rep: str = field(kw_only=True)
 
     def __post_init__(self):
         """Validate the configured domain."""
+        super().__post_init__()
         valid_ds = [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS, DOMAIN_SAMPLE_UUIDS]
         if self.domain not in valid_ds:
             msg = f"Domain must be one of: {valid_ds}. Received: {self.domain}."
@@ -605,8 +602,7 @@ class FeatureSetColumnReference(ExperimentReference):
 
         """
         return {
-            "node_id": self.node_id,
-            "node_label": self.node_label,
+            **super().get_config(),
             "domain": self.domain,
             "key": self.key,
             "rep": self.rep,

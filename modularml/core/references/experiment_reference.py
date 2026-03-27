@@ -296,9 +296,6 @@ class GraphNodeReference(ExperimentNodeReference):
 
     """
 
-    node_label: str | None = None
-    node_id: str | None = None
-
     def resolve(
         self,
         ctx: ExperimentContext | None = None,
@@ -374,9 +371,8 @@ class GraphNodeReference(ExperimentNodeReference):
 
         """
         return {
+            **super().get_config(),
             "exp_node_type": "GraphNode",
-            "node_id": self.node_id,
-            "node_label": self.node_label,
         }
 
     @classmethod
