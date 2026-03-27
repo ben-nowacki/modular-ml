@@ -69,7 +69,7 @@ def format_value_to_sig_digits(
 
 
 def flatten_dict_paths(
-    d: dict[str, any],
+    d: dict[str, Any],
     prefix: str = "",
     separator: str = ".",
 ) -> list[str]:

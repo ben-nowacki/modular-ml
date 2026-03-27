@@ -740,6 +740,14 @@ def to_numpy(
     if isinstance(obj, np.ndarray):
         return obj
 
+    # tensors
+    torch = check_torch()
+    if torch is not None and isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().numpy()
+    tf = check_tensorflow()
+    if tf is not None and isinstance(obj, tf.Tensor):
+        return obj.numpy()
+
     py_obj = to_python(obj)
 
     # Dicts must use DICT_NUMPY format unless coerced
