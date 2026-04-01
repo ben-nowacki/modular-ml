@@ -40,7 +40,7 @@ class SequentialCNN(TorchBaseModel):
         n_layers: int = 2,
         hidden_dim: int = 16,
         kernel_size: int = 3,
-        padding: int = 1,
+        padding: int | None = None,
         stride: int = 1,
         activation: str = "relu",
         dropout: float = 0.0,
@@ -59,7 +59,10 @@ class SequentialCNN(TorchBaseModel):
             n_layers (int): Number of convolutional blocks.
             hidden_dim (int): Number of output channels in hidden blocks.
             kernel_size (int): Kernel size for convolutions.
-            padding (int): Padding applied to convolutions.
+            padding (int | None): Padding applied to convolutions. When
+                ``None``, defaults to ``(kernel_size - 1) // 2`` (same
+                padding), which preserves the sequence length through each
+                convolution.
             stride (int): Stride per convolution.
             activation (str): Activation name resolved via
                 :func:`resolve_activation`.
@@ -219,6 +222,9 @@ class SequentialCNN(TorchBaseModel):
             self._output_shape = (1, self.hidden_dim)
 
         act_fn = resolve_activation(self.activation, backend=self.backend)
+        effective_padding = (
+            self.padding if self.padding is not None else (self.kernel_size - 1) // 2
+        )
 
         num_features, feature_len = self._input_shape
         layers = []
@@ -229,7 +235,7 @@ class SequentialCNN(TorchBaseModel):
                     out_channels=self.hidden_dim,
                     kernel_size=self.kernel_size,
                     stride=self.stride,
-                    padding=self.padding,
+                    padding=effective_padding,
                 ),
             )
             layers.append(act_fn)
