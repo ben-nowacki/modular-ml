@@ -1031,7 +1031,7 @@ class SampleCollection:
     def get_schema_stub(self) -> dict[str, Any]:
         """
         Return schema metadata without raw data.
-        
+
         Meta data includes: columns, shapes, dtypes, n_sample.
         """
         stub: dict[str, Any] = {"n_samples": self.n_samples}

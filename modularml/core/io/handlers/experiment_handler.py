@@ -507,9 +507,7 @@ def _inject_featureset(
     *,
     allow_packaged_code: bool,
 ) -> None:
-    """
-    Locate the FeatureSet matching ``stub``, validate its schema, and register it in ``exp_ctx`` under the UUID the experiment expects.
-    """
+    """Locate the FeatureSet matching ``stub``, validate its schema, and register it in ``exp_ctx`` under the UUID the experiment expects."""
     expected_node_id: str = stub["node_id"]
     expected_label: str = stub["label"]
     schema_stub: dict[str, Any] = stub["schema_stub"]
