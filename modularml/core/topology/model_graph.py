@@ -28,7 +28,10 @@ from modularml.utils.data.data_format import DataFormat, get_data_format_for_bac
 from modularml.utils.data.dummy_data import make_dummy_sample_data
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.errors.error_handling import ErrorMode
-from modularml.utils.errors.exceptions import BackendNotSupportedError
+from modularml.utils.errors.exceptions import (
+    BackendNotSupportedError,
+    NodeNotFoundError,
+)
 from modularml.utils.logging.warnings import catch_warnings, get_logger, warn
 from modularml.utils.nn.accelerator import Accelerator
 from modularml.utils.nn.backend import (
@@ -36,6 +39,7 @@ from modularml.utils.nn.backend import (
     backend_requires_optimizer,
     is_valid_backend,
 )
+from modularml.utils.representation.summary import Summarizable
 from modularml.utils.topology.graph_search_utils import (
     get_subgraph_nodes,
     is_head_node,
@@ -60,7 +64,7 @@ torch = check_torch()
 logger = get_logger("ModelGraph")
 
 
-class ModelGraph(Configurable, Stateful):
+class ModelGraph(Configurable, Stateful, Summarizable):
     """
     Directed acyclic graph orchestrating :class:`GraphNode` nodes.
 
@@ -249,6 +253,38 @@ class ModelGraph(Configurable, Stateful):
             return False
 
         return deep_equal(self.get_state(), other.get_state())
+
+    def __repr__(self) -> str:
+        n_nodes = len(self._nodes)
+        opt = type(self._optimizer).__name__ if self._optimizer is not None else "None"
+        return (
+            f"ModelGraph(label={self.label!r}, nodes={n_nodes}, "
+            f"built={self._built}, optimizer={opt})"
+        )
+
+    def _summary_rows(self) -> list[tuple]:
+        return [
+            ("label", self.label),
+            ("is_built", str(self.is_built)),
+            (
+                "nodes",
+                [(node.label, type(node).__name__) for node in self.nodes.values()],
+            ),
+            (
+                "head_nodes",
+                [(node.label, "") for node in self.head_nodes.values()],
+            ),
+            (
+                "tail_nodes",
+                [(node.label, "") for node in self.tail_nodes.values()],
+            ),
+            (
+                "optimizer",
+                self._optimizer._summary_rows()
+                if self._optimizer is not None
+                else [("none", "")],
+            ),
+        ]
 
     @staticmethod
     def _data_format_for_node(node: GraphNode) -> DataFormat:
@@ -1672,9 +1708,18 @@ class ModelGraph(Configurable, Stateful):
         loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
+            try:
+                _gn = self.exp_ctx.get_node(
+                    node_id=loss.node_id,
+                    enforce_type="GraphNode",
+                )
+                _node_label = _gn.label
+            except NodeNotFoundError:
+                _node_label = None
             lr = LossRecord(
                 label=loss.label,
                 node_id=loss.node_id,
+                node_label=_node_label,
                 trainable=weighted_raw_loss,
             )
             loss_records.append(lr)
@@ -1732,9 +1777,18 @@ class ModelGraph(Configurable, Stateful):
         loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
+            try:
+                _gn = self.exp_ctx.get_node(
+                    node_id=loss.node_id,
+                    enforce_type="GraphNode",
+                )
+                _node_label = _gn.label
+            except NodeNotFoundError:
+                _node_label = None
             lr = LossRecord(
                 label=loss.label,
                 node_id=loss.node_id,
+                node_label=_node_label,
                 trainable=weighted_raw_loss,
             )
             loss_records.append(lr)
@@ -2017,9 +2071,18 @@ class ModelGraph(Configurable, Stateful):
         loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
+            try:
+                _gn = self.exp_ctx.get_node(
+                    node_id=loss.node_id,
+                    enforce_type="GraphNode",
+                )
+                _node_label = _gn.label
+            except NodeNotFoundError:
+                _node_label = None
             lr = LossRecord(
                 label=loss.label,
                 node_id=loss.node_id,
+                node_label=_node_label,
                 auxiliary=weighted_raw_loss,
             )
             loss_records.append(lr)

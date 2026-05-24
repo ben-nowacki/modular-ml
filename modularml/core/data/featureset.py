@@ -915,7 +915,8 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 Split name from which to fit the scaler (e.g., "train"). If None, the \
                 scaler is fit to all samples. Defaults to None.
             merged_axes (int | tuple[int]):
-                Axes whose sizes are merged into a single dimension. If None, no axes are \
+                Axes whose sizes are merged into a single dimension. If a single value is given,
+                that axis shape is preserved, and all others are merged. If None, no axes are \
                 merged. An Error will be thrown if the resulting shape is not 2-dimensional.
 
         Raises:
@@ -1330,6 +1331,26 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
                 )
 
         return new_fs
+
+    def get_schema_stub(self) -> dict[str, Any]:
+        """Schema metadata without raw data, used for lightweight experiment saves."""
+        return self.collection.get_schema_stub()
+
+    def matches_schema_stub(self, stub: dict[str, Any]) -> tuple[bool, str]:
+        """
+        Validate structural compatibility against a saved schema stub.
+
+        Returns (True, "") on match, (False, reason) on mismatch.
+        Does not validate UUID.
+        """
+        ok, msg = self.collection.matches_schema_stub(stub)
+        if not ok:
+            return False, msg
+        expected_splits = set(stub.get("split_labels", []))
+        actual_splits = set(self.available_splits)
+        if expected_splits and expected_splits != actual_splits:
+            return False, f"Split label mismatch: {actual_splits} != {expected_splits}"
+        return True, ""
 
     # ================================================
     # Referencing

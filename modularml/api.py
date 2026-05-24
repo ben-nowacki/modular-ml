@@ -24,7 +24,7 @@ from modularml.core.experiment.phases.train_phase import ResultRecording
 # ================================================
 from modularml.core.execution.cross_validation.cross_validation import CrossValidation
 from modularml.core.execution.cross_validation.cv_binding import CVBinding
-
+from modularml.core.execution.cross_validation.cv_results import CVResults
 
 # ================================================
 # Callbacks
@@ -90,6 +90,16 @@ from modularml.core.transforms.scaler import Scaler
 from modularml.scalers import scaler_registry
 
 supported_scalers = Scaler.get_supported_scalers()
+
+# ================================================
+# Settings & Exceptions
+# ================================================
+from modularml.core.settings import configure, settings
+from modularml.utils.errors.exceptions import (
+    EmptyExperimentContextError,
+    NodeNotFoundError,
+)
+
 """
 All built-in transformed are accessed with:
 
@@ -102,6 +112,7 @@ __all__ = [
     "AppliedLoss",
     "BaseModel",
     "CVBinding",
+    "CVResults",
     "Checkpointing",
     "ConcatNode",
     "CrossValidation",

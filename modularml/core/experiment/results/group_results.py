@@ -328,26 +328,18 @@ class PhaseGroupResults:
 
         Description:
             Recursively unravels the hierarchy of PhaseGroupResults into
-            a flat mapping of phase labels to their PhaseResults. The
-            returned dict preserves execution order.
+            a flat mapping of phase labels to their PhaseResults.
 
             All phase labels must be unique across the entire hierarchy.
             If duplicate labels are found, a ValueError is raised.
 
         Returns:
             dict[str, PhaseResults]:
-                A flat mapping of phase labels to results in execution order.
+                A flat mapping of phase labels to results.
 
         Raises:
             ValueError:
                 If duplicate phase labels exist across the hierarchy.
-
-        Example:
-            All internal PhaseResults can be flattened to a single list:
-
-            >>> flat = group_results.flatten()  # doctest: +SKIP
-            >>> for label, phase_res in flat.items():  # doctest: +SKIP
-            ...     print(f"{label}: {type(phase_res).__name__}")
 
         """
         flat: dict[str, PhaseResults] = {}

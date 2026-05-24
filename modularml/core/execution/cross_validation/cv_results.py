@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.results.train_results import TrainResults
@@ -67,6 +69,84 @@ class CVResults(PhaseGroupResults):
     # ================================================
     def __repr__(self):
         return f"CVResults(label='{self.label}', n_folds={self.n_folds})"
+
+    # ================================================
+    # Configurable
+    # ================================================
+    def get_config(self) -> dict[str, Any]:
+        """Return a configuration dict sufficient to reconstruct an empty shell."""
+        return {"label": self.label}
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> CVResults:
+        """Create an empty :class:`CVResults` from a configuration dict."""
+        return cls(label=config["label"])
+
+    # ================================================
+    # Stateful
+    # ================================================
+    def get_state(self) -> dict[str, Any]:
+        """Return a deep copy of the fold results."""
+        return {"results": deepcopy(self._results)}
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """Restore fold results from :meth:`get_state` output."""
+        self._results = state["results"]
+
+    # ================================================
+    # Serialization
+    # ================================================
+    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+        """
+        Serialize this :class:`CVResults` to the specified filepath.
+
+        Args:
+            filepath (Path):
+                File location to save to. The suffix is enforced to
+                ``.<kind>.mml`` automatically.
+            overwrite (bool, optional):
+                Whether to overwrite any existing file. Defaults to False.
+
+        Returns:
+            Path: The actual filepath at which the results were saved.
+
+        """
+        from modularml.core.io.serialization_policy import SerializationPolicy
+        from modularml.core.io.serializer import serializer
+
+        return serializer.save(
+            self,
+            filepath,
+            policy=SerializationPolicy.BUILTIN,
+            overwrite=overwrite,
+        )
+
+    @classmethod
+    def load(
+        cls,
+        filepath: Path,
+        *,
+        allow_packaged_code: bool = False,
+    ) -> CVResults:
+        """
+        Load a :class:`CVResults` from file.
+
+        Args:
+            filepath (Path):
+                File location of previously saved :class:`CVResults`.
+            allow_packaged_code (bool, optional):
+                Whether bundled code execution is allowed. Defaults to False.
+
+        Returns:
+            CVResults: The reloaded results.
+
+        """
+        from modularml.core.io.serializer import _enforce_file_suffix, serializer
+
+        if Path(filepath).suffix == "":
+            filepath = _enforce_file_suffix(path=filepath, cls=cls)
+
+        return serializer.load(filepath, allow_packaged_code=allow_packaged_code)
 
     # ================================================
     # Properties

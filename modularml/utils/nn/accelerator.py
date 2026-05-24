@@ -285,6 +285,36 @@ class Accelerator:
         """
         return cls(device=f"gpu:{index}", pin_memory=pin_memory)
 
+    @classmethod
+    def all_available(cls) -> list[str]:
+        """
+        Return a list of all available device strings on this machine.
+
+        Tries PyTorch first; if not installed, falls back to TensorFlow.
+        CPU is always included. CUDA/GPU devices are listed as ``"gpu:N"``
+        (backend-agnostic form). MPS is included when available (PyTorch only).
+
+        Returns:
+            list[str]: Available device strings, e.g.
+                ``["cpu", "gpu:0", "gpu:1", "mps"]``.
+
+        """
+        devices: list[str] = ["cpu"]
+        torch = check_torch()
+        if torch is not None:
+            if torch.cuda.is_available():
+                for i in range(torch.cuda.device_count()):
+                    devices.append(f"gpu:{i}")
+            if torch.backends.mps.is_available():
+                devices.append("mps")
+            return devices
+        tf = check_tensorflow()
+        if tf is not None:
+            gpus = tf.config.list_physical_devices("GPU")
+            for i in range(len(gpus)):
+                devices.append(f"gpu:{i}")
+        return devices
+
     # ================================================
     # Dunders
     # ================================================

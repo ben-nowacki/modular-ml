@@ -167,6 +167,10 @@ class InputBinding:
     sampler: BaseSampler | None = None
     stream: str = STREAM_DEFAULT
 
+    def __post_init__(self):
+        # Ensure reference is enriched with current node data
+        self.upstream_ref.enrich_from_resolved()
+
     # ================================================
     # Constructors
     # ================================================

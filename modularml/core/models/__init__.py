@@ -25,9 +25,9 @@ def wrap_model(model: Any) -> BaseModel:
     wrapper class.
 
     Supported input types:
-        - PyTorch: `torch.nn.Module` → wrapped with `TorchModelWrapper`
-        - TensorFlow: `tf.keras.Model` → wrapped with `TensorflowModelWrapper`
-        - scikit-learn: `BaseEstimator` → wrapped with `ScikitModelWrapper`
+        - PyTorch: `torch.nn.Module` -> wrapped with `TorchModelWrapper`
+        - TensorFlow: `tf.keras.Model` -> wrapped with `TensorflowModelWrapper`
+        - scikit-learn: `BaseEstimator` -> wrapped with `ScikitModelWrapper`
 
     Args:
         model (Any): The model to wrap. Can be a raw model instance from a supported backend

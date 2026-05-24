@@ -21,9 +21,9 @@ def _try_inline(key: str, rows: Iterable[SummaryRow]) -> str | None:
     Try to render iterable inline.
 
     Rules:
-        - `(k, "")`  → render as `k`
-        - `(k, v)`   → render as `k=v`
-        - Nested iterables → not inlineable
+        - `(k, "")`  -> render as `k`
+        - `(k, v)`   -> render as `k=v`
+        - Nested iterables -> not inlineable
 
     Args:
         key (str): Parent label.
