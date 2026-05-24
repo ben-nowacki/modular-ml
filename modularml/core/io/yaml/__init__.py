@@ -64,7 +64,6 @@ def obj_to_yaml_dict(obj: Any) -> dict[str, Any]:
     from modularml.core.io.yaml.translators.sampler import sampler_to_yaml_dict
     from modularml.core.splitting.base_splitter import BaseSplitter
     from modularml.core.io.yaml.translators.splitter import splitter_to_yaml_dict
-    
 
     if isinstance(obj, ModelGraph):
         return model_graph_to_yaml_dict(obj)
@@ -125,7 +124,7 @@ def yaml_dict_to_obj(
     if kind == "splitter":
         inner = d.get("splitter", d)
         return splitter_from_yaml_dict(inner)
-    
+
     msg = f"Unknown YAML kind: {kind!r}"
     raise ValueError(msg)
 

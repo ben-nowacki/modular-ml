@@ -168,6 +168,7 @@ def model_graph_from_yaml_dict(
     """
     from modularml.core.experiment.experiment_context import ExperimentContext
     from modularml.core.topology.model_graph import ModelGraph
+    from modularml.utils.errors.exceptions import EmptyExperimentContextError
 
     # Accept both {"model_graph": {...}} and the inner dict directly
     if "model_graph" in d:
@@ -176,7 +177,7 @@ def model_graph_from_yaml_dict(
     # Check for node label conflicts before constructing anything
     try:
         ctx = ExperimentContext.get_active()
-    except RuntimeError:
+    except EmptyExperimentContextError:
         ctx = None
 
     if ctx is not None and not overwrite:
@@ -201,7 +202,7 @@ def model_graph_from_yaml_dict(
     if d.get("optimizer"):
         graph_optimizer = _optimizer_from_dict(d["optimizer"])
 
-    built_nodes: dict[str, Any] = {}  # node_name → node instance
+    built_nodes: dict[str, Any] = {}  # node_name -> node instance
     nodes_list = []
 
     for node_cfg in nodes_cfg:

@@ -88,11 +88,11 @@ Phase Start
 │  ├─ on_epoch_start callbacks
 │  ├─ Batch 0
 │  │  ├─ on_batch_start callbacks
-│  │  ├─ yield ExecutionContext → ModelGraph.train_step()
+│  │  ├─ yield ExecutionContext -> ModelGraph.train_step()
 │  │  └─ on_batch_end callbacks (accumulate loss)
 │  ├─ Batch 1
 │  │  ├─ on_batch_start callbacks
-│  │  ├─ yield ExecutionContext → ModelGraph.train_step()
+│  │  ├─ yield ExecutionContext -> ModelGraph.train_step()
 │  │  └─ on_batch_end callbacks (accumulate loss)
 │  ├─ ...
 │  └─ on_epoch_end callbacks

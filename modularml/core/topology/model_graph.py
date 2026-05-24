@@ -28,7 +28,10 @@ from modularml.utils.data.data_format import DataFormat, get_data_format_for_bac
 from modularml.utils.data.dummy_data import make_dummy_sample_data
 from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
 from modularml.utils.errors.error_handling import ErrorMode
-from modularml.utils.errors.exceptions import BackendNotSupportedError
+from modularml.utils.errors.exceptions import (
+    BackendNotSupportedError,
+    NodeNotFoundError,
+)
 from modularml.utils.logging.warnings import catch_warnings, get_logger, warn
 from modularml.utils.nn.accelerator import Accelerator
 from modularml.utils.nn.backend import (
@@ -1705,9 +1708,18 @@ class ModelGraph(Configurable, Stateful, Summarizable):
         loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
+            try:
+                _gn = self.exp_ctx.get_node(
+                    node_id=loss.node_id,
+                    enforce_type="GraphNode",
+                )
+                _node_label = _gn.label
+            except NodeNotFoundError:
+                _node_label = None
             lr = LossRecord(
                 label=loss.label,
                 node_id=loss.node_id,
+                node_label=_node_label,
                 trainable=weighted_raw_loss,
             )
             loss_records.append(lr)
@@ -1765,9 +1777,18 @@ class ModelGraph(Configurable, Stateful, Summarizable):
         loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
+            try:
+                _gn = self.exp_ctx.get_node(
+                    node_id=loss.node_id,
+                    enforce_type="GraphNode",
+                )
+                _node_label = _gn.label
+            except NodeNotFoundError:
+                _node_label = None
             lr = LossRecord(
                 label=loss.label,
                 node_id=loss.node_id,
+                node_label=_node_label,
                 trainable=weighted_raw_loss,
             )
             loss_records.append(lr)
@@ -2050,9 +2071,18 @@ class ModelGraph(Configurable, Stateful, Summarizable):
         loss_records: list[LossRecord] = []
         for loss in losses:
             weighted_raw_loss = loss.compute(ctx=ctx)
+            try:
+                _gn = self.exp_ctx.get_node(
+                    node_id=loss.node_id,
+                    enforce_type="GraphNode",
+                )
+                _node_label = _gn.label
+            except NodeNotFoundError:
+                _node_label = None
             lr = LossRecord(
                 label=loss.label,
                 node_id=loss.node_id,
+                node_label=_node_label,
                 auxiliary=weighted_raw_loss,
             )
             loss_records.append(lr)

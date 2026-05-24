@@ -25,6 +25,10 @@ from modularml.core.training.loss_record import LossRecord
 from modularml.utils.data.data_format import DataFormat, normalize_format
 from modularml.utils.data.multi_keyed_data import AxisSeries
 from modularml.utils.data.scaling import unscale_sample_data
+from modularml.utils.errors.exceptions import (
+    EmptyExperimentContextError,
+    NodeNotFoundError,
+)
 from modularml.utils.topology.graph_search_utils import find_upstream_featuresets
 
 if TYPE_CHECKING:
@@ -41,6 +45,23 @@ if TYPE_CHECKING:
     from modularml.core.experiment.callbacks.callback_result import PayloadResult
 
 T = TypeVar("T")
+
+
+# ================================================
+# Offline Node Stub
+# ================================================
+@dataclass(frozen=True)
+class _SnapshotGraphNode:
+    """
+    Minimal stand-in for GraphNode when querying offline-loaded results.
+
+    Used by :meth:`PhaseResults._resolve_node` when no active
+    :class:`ExperimentContext` is available. Satisfies the ``.node_id`` and
+    ``.label`` duck-type contract required by query methods.
+    """
+
+    node_id: str
+    label: str
 
 
 # ================================================
@@ -268,6 +289,15 @@ class PhaseResults:
         repr=False,
     )
 
+    # Snapshot of {node_id -> label} populated at recording time (always has active
+    # context)
+    # Enables offline querying of results without a live ExperimentContext
+    _node_id_to_label: dict[str, str] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+
     def __post_init__(self) -> None:
         # ArtifactStore, CallbackStore, ExecutionStore, and MetricStore are computed
         # fields, not dataclass fields. Initialized here from their resolved storage
@@ -276,6 +306,11 @@ class PhaseResults:
         self._callback_store: CallbackStore = CallbackStore(location=self._callback_dir)
         self._execution: ExecutionStore = ExecutionStore(location=self._execution_dir)
         self._metrics: MetricStore = MetricStore(location=self._metric_dir)
+
+    def __setstate__(self, state: dict) -> None:
+        # Backward compatibility: old pickles lack _node_id_to_label
+        state.setdefault("_node_id_to_label", {})
+        self.__dict__.update(state)
 
     # ================================================
     # Runtime Modifiers
@@ -296,6 +331,33 @@ class PhaseResults:
         # Break any loss links too
         ctx.losses = ctx.losses.to_float()
 
+        # Populate node_id -> label snapshot while context is always active here
+        try:
+            exp_ctx = ExperimentContext.get_active()
+            for node_id in ctx.outputs:
+                if node_id not in self._node_id_to_label:
+                    try:
+                        gn = exp_ctx.get_node(node_id=node_id, enforce_type="GraphNode")
+                        self._node_id_to_label[node_id] = gn.label
+                    except NodeNotFoundError:
+                        pass
+            if ctx.losses is not None:
+                for lr in ctx.losses.values():
+                    if lr.node_id and lr.node_id not in self._node_id_to_label:
+                        if lr.node_label is not None:
+                            self._node_id_to_label[lr.node_id] = lr.node_label
+                        else:
+                            try:
+                                gn = exp_ctx.get_node(
+                                    node_id=lr.node_id,
+                                    enforce_type="GraphNode",
+                                )
+                                self._node_id_to_label[lr.node_id] = gn.label
+                            except NodeNotFoundError:
+                                pass
+        except EmptyExperimentContextError:
+            pass
+
         # Record cleaned ctx
         self._execution.append(ctx)
         self._series_cache.clear()
@@ -314,16 +376,58 @@ class PhaseResults:
     # ================================================
     # Helpers
     # ================================================
-    def _resolve_node(self, node: str | GraphNode) -> GraphNode:
-        """Resolve a GraphNode from a string ID/label or GraphNode instance."""
-        exp_ctx = ExperimentContext.get_active()
-        if isinstance(node, str):
-            return exp_ctx.get_node(val=node, enforce_type="GraphNode")
-        if isinstance(node, GraphNode):
+    def _resolve_node(self, node: str | GraphNode) -> GraphNode | _SnapshotGraphNode:
+        """
+        Resolve a node reference to a GraphNode (or offline stub).
+
+        Accepts a :class:`GraphNode` instance, a node label, or a node ID string.
+        When an active :class:`ExperimentContext` exists, it is used for
+        resolution. When offline (no active context), falls back to the embedded
+        :attr:`_node_id_to_label` snapshot populated at recording time.
+
+        Raises:
+            NodeNotFoundError: If the node cannot be resolved from either the
+                active context or the offline snapshot.
+            TypeError: If ``node`` is not a string or GraphNode.
+
+        """
+        if isinstance(node, (GraphNode, _SnapshotGraphNode)):
             return node
-        msg = (
-            f"Invalid `node` type. Must be string or GraphNode. Received: {type(node)}."
-        )
+
+        if isinstance(node, str):
+            # Fast path: active context available
+            try:
+                exp_ctx = ExperimentContext.get_active()
+                return exp_ctx.get_node(val=node, enforce_type="GraphNode")
+            except (EmptyExperimentContextError, NodeNotFoundError):
+                pass  # Offline: fall through to snapshot
+
+            # Offline: check if `node` matches a known node_id directly
+            if node in self._node_id_to_label:
+                return _SnapshotGraphNode(
+                    node_id=node,
+                    label=self._node_id_to_label[node],
+                )
+
+            # Offline: check if `node` matches a known label
+            label_to_id = {v: k for k, v in self._node_id_to_label.items()}
+            if node in label_to_id:
+                return _SnapshotGraphNode(
+                    node_id=label_to_id[node],
+                    label=node,
+                )
+
+            known = list(self._node_id_to_label.values()) or list(
+                self._node_id_to_label.keys(),
+            )
+            msg = (
+                f"Cannot resolve node '{node}': no active ExperimentContext and "
+                f"'{node}' is not in the embedded node snapshot. "
+                f"Known nodes: {known}."
+            )
+            raise NodeNotFoundError(msg)
+
+        msg = f"Invalid `node` type. Must be str or GraphNode. Received: {type(node)}."
         raise TypeError(msg)
 
     def _cache_get(self, key: tuple[Hashable, ...]):
@@ -413,7 +517,15 @@ class PhaseResults:
 
         # Trace upstream FeatureSets and create filtered views
         upstream_refs = find_upstream_featuresets(node=graph_node)
-        exp_ctx = ExperimentContext.get_active()
+        try:
+            exp_ctx = ExperimentContext.get_active()
+        except EmptyExperimentContextError as exc:
+            msg = (
+                "source_views() requires an active ExperimentContext to trace "
+                "upstream FeatureSets. Load or reconstruct the experiment before "
+                "calling this method."
+            )
+            raise EmptyExperimentContextError(msg) from exc
 
         views: dict[str, FeatureSetView] = {}
         uuid_list = list(all_uuids)
@@ -746,7 +858,9 @@ class PhaseResults:
 
     @overload
     def callbacks(
-        self, *, kind: Literal["early_stopping"]
+        self,
+        *,
+        kind: Literal["early_stopping"],
     ) -> AxisSeries[EarlyStoppingResult]: ...
 
     @overload

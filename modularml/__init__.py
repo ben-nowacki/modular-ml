@@ -8,6 +8,7 @@ from modularml.api import (
     ConcatNode,
     CrossValidation,
     EarlyStopping,
+    EmptyExperimentContextError,
     EvalLossMetric,
     EvalPhase,
     EvalResults,
@@ -21,6 +22,7 @@ from modularml.api import (
     Loss,
     ModelGraph,
     ModelNode,
+    NodeNotFoundError,
     Optimizer,
     PhaseGroup,
     PhaseGroupResults,
@@ -33,7 +35,9 @@ from modularml.api import (
     TorchBaseModel,
     TrainPhase,
     TrainResults,
+    configure,
     scaler_registry,
+    settings,
     supported_scalers,
 )
 from modularml.registry import register_all

@@ -220,3 +220,26 @@ class ShapeSpecError(ModularMLError):
         if message is None:
             message = "Invalid ShapeSpec."
         super().__init__(message)
+
+
+class ExperimentContextError(ModularMLError):
+    """Base exception for ExperimentContext-related issues."""
+
+
+class EmptyExperimentContextError(ExperimentContextError):
+    """Raised when there is no active ExperimentContext."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(message or "There is no active ExperimentContext.")
+
+
+class NodeNotFoundError(ExperimentContextError, KeyError):
+    """
+    Raised when a node cannot be found in the active ExperimentContext.
+
+    Inherits from KeyError for backward compatibility with existing
+    ``except KeyError`` handlers around ``get_node()`` calls.
+    """
+
+    def __init__(self, message: str | None = None):
+        ModularMLError.__init__(self, message or "Node not found in ExperimentContext.")

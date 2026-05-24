@@ -82,7 +82,7 @@ def yaml_safe_cfg(value: Any) -> Any:
     if isinstance(value, dict):
         return {str(k): yaml_safe_cfg(v) for k, v in value.items()}
 
-    # Tuples → list
+    # Tuples -> list
     if isinstance(value, tuple):
         return [yaml_safe_cfg(x) for x in value]
 
@@ -96,7 +96,7 @@ def yaml_safe_cfg(value: Any) -> Any:
             return yaml_safe_cfg(value.to_dict())
         return yaml_safe_cfg(dataclasses.asdict(value))
 
-    # Classes and callables → dotted path string
+    # Classes and callables -> dotted path string
     if isinstance(value, type) or callable(value):
         return callable_to_path(value)
 

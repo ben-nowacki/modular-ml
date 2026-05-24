@@ -366,6 +366,7 @@ class Loss:
         if self.fn is not None:
             if self.kwargs:
                 import functools
+
                 self._callable = functools.partial(self.fn, **self.kwargs)
             else:
                 self._callable = self.fn

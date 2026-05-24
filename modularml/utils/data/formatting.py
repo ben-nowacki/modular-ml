@@ -60,7 +60,7 @@ def format_value_to_sig_digits(
         # Scale number so we can round to sig_digits
         factor = 10 ** (order - sig_digits + 1)
         rounded = normal_round(value / factor) * factor
-        # Decide decimals: if order >= sig_digits-1 → no decimals, else show needed
+        # Decide decimals: if order >= sig_digits-1 -> no decimals, else show needed
         decimals = max(0, sig_digits - order - 1)
         return f"{rounded:.{decimals}f}"
 

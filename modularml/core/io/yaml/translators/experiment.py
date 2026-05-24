@@ -134,6 +134,7 @@ def experiment_from_yaml_dict(
     """
     from modularml.core.experiment.experiment import Experiment
     from modularml.core.experiment.experiment_context import ExperimentContext
+    from modularml.utils.errors.exceptions import EmptyExperimentContextError
 
     if "experiment" in d:
         d = d["experiment"]
@@ -145,7 +146,7 @@ def experiment_from_yaml_dict(
     # overwriting the active one via ExperimentContext._set_active()
     try:
         active_ctx = ExperimentContext.get_active()
-    except RuntimeError:
+    except EmptyExperimentContextError:
         active_ctx = None
     experiment = Experiment(label=label, ctx=active_ctx)
 

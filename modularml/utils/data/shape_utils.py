@@ -22,10 +22,10 @@ def shapes_similar_except_singleton(
     Returns True if two shapes are equal except for singleton (size-1) dimensions.
 
     Examples:
-        (32, 1, 4) ≈ (32, 4)        → True
-        (1, 64, 1, 1) ≈ (64,)       → True
-        (16, 8, 4) ≈ (8, 16, 4)     → False  (order mismatch)
-        (32, 2, 4) ≈ (32, 4)        → False  (non-singleton mismatch)
+        (32, 1, 4) ≈ (32, 4)        -> True
+        (1, 64, 1, 1) ≈ (64,)       -> True
+        (16, 8, 4) ≈ (8, 16, 4)     -> False  (order mismatch)
+        (32, 2, 4) ≈ (32, 4)        -> False  (non-singleton mismatch)
 
     Args:
         shape_a (tuple[int, ...]): First shape.

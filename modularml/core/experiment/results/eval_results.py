@@ -161,7 +161,7 @@ class EvalResults(PhaseResults):
             fmt=None,
             unscale=unscale,
         )
-        
+
         # Single concat across all batches
         collapsed = tensor_series.collapse(axis="batch", reducer="concat")
         result = collapsed.one()

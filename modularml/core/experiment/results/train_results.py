@@ -110,14 +110,15 @@ class TrainResults(PhaseResults):
         """
         available = self.metric_names()
         if metric not in available:
-            msg = (
-                f"Metric '{metric}' not found. "
-                f"Available metrics: {available}."
-            )
+            msg = f"Metric '{metric}' not found. Available metrics: {available}."
             raise ValueError(msg)
 
         entries = self.metrics().where(name=metric).values()
-        best_entry = min(entries, key=lambda e: e.value) if direction == "min" else max(entries, key=lambda e: e.value)
+        best_entry = (
+            min(entries, key=lambda e: e.value)
+            if direction == "min"
+            else max(entries, key=lambda e: e.value)
+        )
         return best_entry.epoch_idx
 
     @property

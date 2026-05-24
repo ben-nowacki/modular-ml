@@ -401,7 +401,7 @@ class SplitMixin:
                 - Explicit fully-qualified columns (e.g. "features.voltage.raw")
                 - Domain-based selectors via `features`, `targets`, and `tags`
                 - Wildcards (e.g. "*.raw", "voltage.*", "*.*")
-                - Automatic domain prefixing ("voltage.raw" → "features.voltage.raw")
+                - Automatic domain prefixing ("voltage.raw" -> "features.voltage.raw")
                 - Optional default representation inference via `rep`
 
             No data is copied. The returned object is a lightweight view that
