@@ -1028,6 +1028,62 @@ class SampleCollection:
             include_domain_prefix=include_domain_prefix,
         )
 
+    def get_schema_stub(self) -> dict[str, Any]:
+        """
+        Return schema metadata without raw data.
+        
+        Meta data includes: columns, shapes, dtypes, n_sample.
+        """
+        stub: dict[str, Any] = {"n_samples": self.n_samples}
+        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
+            domain_info: dict[str, dict[str, dict[str, Any]]] = {}
+            for key in self.schema.domain_keys(domain):
+                reps: dict[str, dict[str, Any]] = {}
+                for rep in self.schema.rep_keys(domain, key):
+                    reps[rep] = {
+                        "shape": list(self._get_rep_shape(domain, key, rep)),
+                        "dtype": self._get_rep_dtype(domain, key, rep),
+                    }
+                domain_info[key] = reps
+            stub[domain] = domain_info
+        return stub
+
+    def matches_schema_stub(self, stub: dict[str, Any]) -> tuple[bool, str]:
+        """
+        Validate that this collection's schema matches a saved stub.
+
+        Returns (True, "") on match, (False, reason) on mismatch.
+        """
+        if self.n_samples != stub.get("n_samples"):
+            return False, f"n_samples mismatch: {self.n_samples} != {stub['n_samples']}"
+        for domain in [DOMAIN_FEATURES, DOMAIN_TARGETS, DOMAIN_TAGS]:
+            expected = stub.get(domain, {})
+            actual_keys = set(self.schema.domain_keys(domain))
+            expected_keys = set(expected.keys())
+            if actual_keys != expected_keys:
+                return (
+                    False,
+                    f"{domain} column mismatch: {actual_keys} != {expected_keys}",
+                )
+            for key, reps in expected.items():
+                for rep, info in reps.items():
+                    actual_reps = set(self.schema.rep_keys(domain, key))
+                    if rep not in actual_reps:
+                        return False, f"Missing representation {domain}.{key}.{rep}"
+                    actual_shape = self._get_rep_shape(domain, key, rep)
+                    actual_dtype = self._get_rep_dtype(domain, key, rep)
+                    if tuple(info["shape"]) != actual_shape:
+                        return (
+                            False,
+                            f"Shape mismatch {domain}.{key}.{rep}: {actual_shape} != {tuple(info['shape'])}",
+                        )
+                    if info["dtype"] != actual_dtype:
+                        return (
+                            False,
+                            f"Dtype mismatch {domain}.{key}.{rep}: {actual_dtype} != {info['dtype']}",
+                        )
+        return True, ""
+
     # ================================================
     # Domain data accessors
     # ================================================

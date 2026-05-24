@@ -1332,6 +1332,26 @@ class FeatureSet(ExperimentNode, SplitMixin, SampleCollectionMixin):
 
         return new_fs
 
+    def get_schema_stub(self) -> dict[str, Any]:
+        """Schema metadata without raw data, used for lightweight experiment saves."""
+        return self.collection.get_schema_stub()
+
+    def matches_schema_stub(self, stub: dict[str, Any]) -> tuple[bool, str]:
+        """
+        Validate structural compatibility against a saved schema stub.
+
+        Returns (True, "") on match, (False, reason) on mismatch.
+        Does not validate UUID.
+        """
+        ok, msg = self.collection.matches_schema_stub(stub)
+        if not ok:
+            return False, msg
+        expected_splits = set(stub.get("split_labels", []))
+        actual_splits = set(self.available_splits)
+        if expected_splits and expected_splits != actual_splits:
+            return False, f"Split label mismatch: {actual_splits} != {expected_splits}"
+        return True, ""
+
     # ================================================
     # Referencing
     # ================================================

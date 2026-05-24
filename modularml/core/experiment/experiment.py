@@ -45,9 +45,9 @@ from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
     from modularml.core.data.execution_context import ExecutionContext
+    from modularml.core.data.featureset import FeatureSet
     from modularml.core.experiment.results.phase_results import PhaseResults
     from modularml.core.topology.model_graph import ModelGraph
-    from modularml.core.data.featureset import FeatureSet
 
 logger = get_logger(name="Experiment")
 
@@ -249,19 +249,19 @@ class Experiment:
     def model_graph(self) -> ModelGraph | None:
         """Gets the ModelGraph associated with this Experiment."""
         return self._ctx.model_graph
-    
+
     @property
     def featureset(self) -> FeatureSet | list[FeatureSet]:
         """
         Retrieves the FeatureSet(s) associated with this experiment.
-        
+
         If only one FeatureSet exists, it is returned directly. Otherwise,
         a list of all available FeatureSets is returned
         """
         all_fs = list(self.ctx.available_featuresets.values())
         if len(all_fs) == 1:
             return all_fs[0]
-        return all_fs            
+        return all_fs
 
     @property
     def execution_plan(self) -> PhaseGroup:
@@ -1665,7 +1665,13 @@ class Experiment:
     # ================================================
     # Serialization
     # ================================================
-    def save(self, filepath: Path, *, overwrite: bool = False) -> Path:
+    def save(
+        self,
+        filepath: Path,
+        *,
+        overwrite: bool = False,
+        include_featuresets: bool = True,
+    ) -> Path:
         """
         Serializes this experiment to the specified filepath.
 
@@ -1676,6 +1682,11 @@ class Experiment:
             overwrite (bool, optional):
                 Whether to overwrite any existing file at the save location.
                 Defaults to False.
+            include_featuresets (bool, optional):
+                Whether to bundle full FeatureSet data in the artifact. When
+                False, only lightweight structural metadata (schema, splits,
+                scalers) is saved and the FeatureSets must be supplied via the
+                ``featuresets`` argument of :meth:`load`. Defaults to True.
 
         Returns:
             Path: The actual filepath at which the experiment was saved.
@@ -1689,6 +1700,7 @@ class Experiment:
             filepath,
             policy=SerializationPolicy.BUILTIN,
             overwrite=overwrite,
+            extras={"include_featuresets": include_featuresets},
         )
 
     @classmethod
@@ -1696,6 +1708,7 @@ class Experiment:
         cls,
         filepath: Path,
         *,
+        featuresets: list[str | Path | FeatureSet] | None = None,
         checkpoint_dir: Path | None = None,
         results_dir: Path | None = None,
         allow_packaged_code: bool = False,
@@ -1707,6 +1720,13 @@ class Experiment:
         Args:
             filepath (Path):
                 File location of a previously saved Experiment.
+            featuresets (list[str | Path | FeatureSet] | None, optional):
+                FeatureSets to inject when the experiment was saved with
+                ``include_featuresets=False``. Each entry is either a
+                :class:`FeatureSet` instance or a path to a saved FeatureSet
+                artifact. Each provided FeatureSet is matched to the saved
+                stub by label and validated for structural compatibility.
+                Defaults to None.
             checkpoint_dir (Path | None, optional):
                 Directory to extract saved checkpoints into. If the
                 serialized experiment contains checkpoint artifacts and
@@ -1737,7 +1757,9 @@ class Experiment:
         if Path(filepath).suffix == "":
             filepath = _enforce_file_suffix(path=filepath, cls=cls)
 
-        extras: dict = {}
+        extras: dict[str, Any] = {}
+        if featuresets is not None:
+            extras["featuresets"] = featuresets
         if checkpoint_dir is not None:
             extras["checkpoint_dir"] = checkpoint_dir
         if results_dir is not None:

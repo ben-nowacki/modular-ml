@@ -97,6 +97,7 @@ class SaveContext:
         artifact_path: Path,
         serializer: Serializer,
         mml_version: str = "1.0.0",
+        extras: dict[str, Any] | None = None,
     ):
         """
         Initialize a :class:`SaveContext`.
@@ -105,11 +106,13 @@ class SaveContext:
             artifact_path (Path): Root folder where artifacts are written.
             serializer (Serializer): Owning serializer instance.
             mml_version (str): Version string recorded in emitted manifests.
+            extras (dict[str, Any] | None): Additional metadata forwarded to handlers.
 
         """
         self.artifact_path = artifact_path
         self.serializer = serializer
         self.mml_version = mml_version
+        self.extras: dict[str, Any] = extras or {}
 
         self._packaged_symbols: dict[object, SymbolSpec] = {}
 
@@ -591,6 +594,7 @@ class Serializer:
         *,
         policy: SerializationPolicy,
         overwrite: bool = False,
+        extras: dict[str, Any] | None = None,
     ) -> str:
         """
         Serialize `obj` to disk as a ModularML artifact.
@@ -600,6 +604,7 @@ class Serializer:
             save_path (str): Output path for the resulting `.mml` file.
             policy (SerializationPolicy): Class resolution policy for `obj`.
             overwrite (bool): Overwrite existing artifacts when True.
+            extras (dict[str, Any] | None): Additional metadata forwarded via :class:`SaveContext`.
 
         Returns:
             str: Path to the written artifact file.
@@ -624,6 +629,7 @@ class Serializer:
                 artifact_path=tmp_path,
                 serializer=self,
                 mml_version=self.mml_version,
+                extras=extras,
             )
 
             # Write artifact

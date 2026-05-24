@@ -44,7 +44,7 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         obj: Experiment,
         save_dir: Path,
         *,
-        ctx: SaveContext,  # noqa: ARG002
+        ctx: SaveContext,
     ) -> dict[str, Any]:
         """
         Encode :class:`Experiment` dependencies and runtime state.
@@ -68,19 +68,39 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         # ------------------------------------------------
         # 1. Save FeatureSets as sub-artifacts
         # ------------------------------------------------
+        include_featuresets: bool = ctx.extras.get("include_featuresets", True)
         featuresets = obj.ctx.available_featuresets
         if featuresets:
             fs_dir = save_dir / "featuresets"
             fs_dir.mkdir(exist_ok=True)
 
-            # Serialize each featureset
-            fs_entries: dict[str, str] = {}
-            for fs_id, fs in featuresets.items():
-                save_path = fs.save(filepath=(fs_dir / fs_id), overwrite=True)
-                fs_entries[fs_id] = str(Path(save_path).relative_to(save_dir))
-
-            # Mapping of each featureset to its serialized file
-            file_mapping["featuresets"] = fs_entries
+            if include_featuresets:
+                # Full artifact per FeatureSet
+                fs_entries: dict[str, str] = {}
+                for fs_id, fs in featuresets.items():
+                    save_path = fs.save(filepath=(fs_dir / fs_id), overwrite=True)
+                    fs_entries[fs_id] = str(Path(save_path).relative_to(save_dir))
+                file_mapping["featuresets"] = fs_entries
+            else:
+                # Lightweight: schema stub + split/scaler configs, no raw data
+                stub_entries: dict[str, str] = {}
+                for fs_id, fs in featuresets.items():
+                    stub: dict[str, Any] = {
+                        "node_id": fs.node_id,
+                        "label": fs.label,
+                        "schema_stub": fs.get_schema_stub(),
+                        "config": fs.get_config(),
+                        "split_labels": fs.available_splits,
+                        "split_indices": {
+                            k: v.indices.tolist() for k, v in fs._splits.items()
+                        },
+                        "split_recs": [rec.get_config() for rec in fs._split_recs],
+                        "scaler_recs": [rec.get_config() for rec in fs._scaler_recs],
+                    }
+                    stub_path = fs_dir / f"{fs_id}_stub.json"
+                    self._write_json(stub, stub_path)
+                    stub_entries[fs_id] = str(stub_path.relative_to(save_dir))
+                file_mapping["featureset_stubs"] = stub_entries
 
         # ------------------------------------------------
         # 2. Save ModelGraph as sub-artifact
@@ -259,16 +279,37 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         # 1. Load FeatureSets
         # ------------------------------------------------
         fs_entries: dict[str, str] = file_mapping.get("featuresets", {})
-        for fs_rel_path in fs_entries.values():
-            # Get filepath to serialized object (.fs.mml file)
-            file_fs = load_dir / fs_rel_path
+        fs_stubs: dict[str, str] = file_mapping.get("featureset_stubs", {})
 
-            # Load featureset - this automatically registers to the active ctx
-            _ = FeatureSet.load(
-                filepath=file_fs,
-                allow_packaged_code=ctx.allow_packaged_code,
-                overwrite=ctx.overwrite_collision,
-            )
+        if fs_entries:
+            # Full featuresets saved
+            for fs_rel_path in fs_entries.values():
+                file_fs = load_dir / fs_rel_path
+                _ = FeatureSet.load(
+                    filepath=file_fs,
+                    allow_packaged_code=ctx.allow_packaged_code,
+                    overwrite=ctx.overwrite_collision,
+                )
+
+        elif fs_stubs:
+            # Lightweight stubs -> requires user-provided FeatureSets
+            provided: list[str | Path | FeatureSet] = ctx.extras.get("featuresets", [])
+            if not provided:
+                msg = (
+                    "This experiment was saved without FeatureSet data "
+                    "(include_featuresets=False). Provide the original FeatureSets "
+                    "via Experiment.load(..., featuresets=[...])."
+                )
+                raise ValueError(msg)
+
+            for stub_rel_path in fs_stubs.values():
+                stub_data: dict[str, Any] = self._read_json(load_dir / stub_rel_path)
+                _inject_featureset(
+                    stub=stub_data,
+                    provided=provided,
+                    exp_ctx=exp_ctx,
+                    allow_packaged_code=ctx.allow_packaged_code,
+                )
 
         # ------------------------------------------------
         # 2. Load ModelGraph (registers nodes + graph)
@@ -457,3 +498,75 @@ class ExperimentHandler(BaseHandler["Experiment"]):
                         pr._callback_dir = dest
 
                 pr._series_cache.clear()
+
+
+def _inject_featureset(
+    stub: dict[str, Any],
+    provided: list[str | Path | FeatureSet],
+    exp_ctx: Any,
+    *,
+    allow_packaged_code: bool,
+) -> None:
+    """
+    Locate the FeatureSet matching ``stub``, validate its schema, and register it in ``exp_ctx`` under the UUID the experiment expects.
+    """
+    expected_node_id: str = stub["node_id"]
+    expected_label: str = stub["label"]
+    schema_stub: dict[str, Any] = stub["schema_stub"]
+    expected_splits: list[str] = stub.get("split_labels", [])
+
+    matched_fs: FeatureSet | None = None
+    for item in provided:
+        if isinstance(item, (str, Path)):
+            candidate: FeatureSet = FeatureSet.load(
+                filepath=item,
+                allow_packaged_code=allow_packaged_code,
+                overwrite=False,
+            )
+        else:
+            candidate = item
+
+        if candidate.label != expected_label:
+            continue
+
+        ok, reason = candidate.matches_schema_stub(
+            {**schema_stub, "split_labels": expected_splits},
+        )
+        if not ok:
+            msg = (
+                f"Provided FeatureSet '{expected_label}' label matches but "
+                f"schema is incompatible: {reason}"
+            )
+            raise ValueError(msg)
+        matched_fs = candidate
+        break
+
+    if matched_fs is None:
+        available = [getattr(x, "label", str(x)) for x in provided]
+        msg = (
+            f"No provided FeatureSet matches label '{expected_label}'. "
+            f"Available labels: {available}"
+        )
+        raise ValueError(msg)
+
+    _reassign_and_register(
+        fs=matched_fs,
+        expected_node_id=expected_node_id,
+        ctx=exp_ctx,
+    )
+
+
+def _reassign_and_register(
+    fs: FeatureSet,
+    expected_node_id: str,
+    ctx: Any,
+) -> None:
+    """Mutate ``fs._node_id`` to match the UUID the experiment graph expects, then register in the active ExperimentContext."""
+    current_id = fs._node_id
+
+    if ctx.has_node(node_id=current_id):
+        ctx.remove_node(node_id=current_id, error_if_missing=False)
+
+    # Reassign UUID
+    fs._node_id = expected_node_id
+    ctx.register_experiment_node(fs)
