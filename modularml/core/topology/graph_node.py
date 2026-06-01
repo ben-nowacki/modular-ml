@@ -145,9 +145,17 @@ class GraphNode(ABC, ExperimentNode):
             failed: list[GraphNodeReference] = []
             for r in refs:
                 try:
-                    _ = r.resolve(ctx=exp_ctx)
-                except ResolutionError:  # noqa: PERF203
+                    resolved_node = r.resolve(ctx=exp_ctx)
+                except ResolutionError:
                     failed.append(r)
+
+                # Since a reference can exist with only one of label or node_id set,
+                # ensure both are set after validating connection
+                r.enrich(
+                    node_id=getattr(resolved_node, "node_id", None),
+                    node_label=getattr(resolved_node, "label", None),
+                )
+
             if failed:
                 details = "\n".join(
                     f"  - {ref.__class__.__name__}: {ref!r}" for ref in failed

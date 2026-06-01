@@ -11,11 +11,15 @@ from modularml.core.data.schema_constants import ROLE_DEFAULT
 from modularml.core.experiment.callbacks.callback import Callback
 from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.phases.phase import ExperimentPhase, InputBinding
+from modularml.core.topology.compute_node import ComputeNode
 from modularml.core.training.applied_loss import AppliedLoss
+from modularml.utils.nn.accelerator import Accelerator
+from modularml.utils.progress_bars.progress_task import ProgressTask
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from modularml.core.data.batch import Batch
     from modularml.core.data.featureset import FeatureSet
     from modularml.core.experiment.results.fit_results import FitResults
     from modularml.core.references.featureset_reference import FeatureSetReference
@@ -49,6 +53,7 @@ class FitPhase(ExperimentPhase):
         active_nodes: list[GraphNode] | None = None,
         freeze_after_fit: bool = True,
         callbacks: list[Callback] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Initialize a new fit phase for the experiment.
@@ -81,6 +86,13 @@ class FitPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
+            accelerator (Accelerator | str | None, optional):
+                Hardware accelerator for device placement during this phase.
+                Accepts an :class:`Accelerator` instance, a device string (e.g.
+                ``"cuda:0"``, ``"mps"``), or ``None`` to run on CPU.
+                When set, this accelerator is applied to all nodes unless a node
+                defines its own accelerator. Defaults to ``None``.
+
         """
         super().__init__(
             label=label,
@@ -88,6 +100,7 @@ class FitPhase(ExperimentPhase):
             losses=losses,
             active_nodes=active_nodes,
             callbacks=callbacks,
+            accelerator=accelerator,
         )
         self.freeze_after_fit = freeze_after_fit
         self._inp_fsv: FeatureSetView | None = None
@@ -106,6 +119,7 @@ class FitPhase(ExperimentPhase):
         active_nodes: list[GraphNode] | None = None,
         freeze_after_fit: bool = True,
         callbacks: list[Callback] | None = None,
+        accelerator: Accelerator | str | None = None,
     ) -> FitPhase:
         """
         Initialize a new fit phase for a given FeatureSet split.
@@ -135,6 +149,13 @@ class FitPhase(ExperimentPhase):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
+            accelerator (Accelerator | str | None, optional):
+                Hardware accelerator for device placement during this phase.
+                Accepts an :class:`Accelerator` instance, a device string (e.g.
+                ``"cuda:0"``, ``"mps"``), or ``None`` to run on CPU.
+                When set, this accelerator is applied to all nodes unless a node
+                defines its own accelerator. Defaults to ``None``.
+
         """
         input_sources = cls._build_input_sources_from_split(
             split=split,
@@ -148,6 +169,7 @@ class FitPhase(ExperimentPhase):
             active_nodes=active_nodes,
             freeze_after_fit=freeze_after_fit,
             callbacks=callbacks,
+            accelerator=accelerator,
         )
 
     # ================================================
@@ -226,10 +248,49 @@ class FitPhase(ExperimentPhase):
             msg = f"FitPhase '{self.label}' has no samples in view '{self._inp_fsv!r}'."
             raise RuntimeError(msg)
 
+        # Pre-place model nodes on their effective devices before fitting
+        exp_ctx = ExperimentContext.get_active()
+        model_graph = exp_ctx.model_graph
+        model_graph.pre_place_nodes(
+            phase_accelerator=self.accelerator,
+            active_node_ids=self.active_nodes,
+        )
+
+        # Pre-materialize the single full-dataset BatchView to concrete tensors on device
+        spinner = ProgressTask(
+            style="spinner",
+            description="Materializing batches and allocating memory on device",
+            total=None,
+            persist=False,
+        )
+        spinner.start()
+        cpu_acc = Accelerator("cpu")
+        bv = BatchView(
+            source=self._inp_fsv.source,
+            role_indices={ROLE_DEFAULT: self._inp_fsv.indices},
+        )
+        inputs: dict[tuple[str, FeatureSetReference], Batch] = {}
+        input_views: dict[tuple[str, FeatureSetReference], BatchView] = {}
+        for binding in self.input_sources:
+            node = model_graph.nodes.get(binding.node_id)
+            fmt = model_graph._data_format_for_node(node)
+            resolved = model_graph._resolve_node_accelerator(node, self.accelerator)
+            effective_acc = ComputeNode._normalize_accelerator(resolved) or cpu_acc
+            ref = binding.upstream_ref
+            batch = bv.materialize_batch(
+                fmt=fmt,
+                features=ref.features,
+                targets=ref.targets,
+                tags=ref.tags,
+            )
+            batch = ComputeNode._move_torch_to_device_if_needed(batch, effective_acc)
+            inputs[(binding.node_id, ref)] = batch
+            input_views[(binding.node_id, ref)] = bv
+        spinner.finish()
+
         # ------------------------------------------------
         # Callbacks: on_phase_start
         # ------------------------------------------------
-        exp_ctx = ExperimentContext.get_active()
         experiment = exp_ctx.get_experiment()
 
         experiment._in_callback = True
@@ -244,20 +305,12 @@ class FitPhase(ExperimentPhase):
             experiment._in_callback = False
 
         try:
-            # Create a single BatchView over the entire dataset
-            bv = BatchView(
-                source=self._inp_fsv.source,
-                role_indices={ROLE_DEFAULT: self._inp_fsv.indices},
-            )
-            inputs: dict[tuple[str, FeatureSetReference], BatchView] = {
-                (binding.node_id, binding.upstream_ref): bv
-                for binding in self.input_sources
-            }
             exec_ctx = ExecutionContext(
                 phase_label=self.label,
                 epoch_idx=0,
                 batch_idx=0,
                 inputs=inputs,
+                input_views=input_views,
             )
 
             # ------------------------------------------------
@@ -372,4 +425,9 @@ class FitPhase(ExperimentPhase):
             active_nodes=config["active_nodes"],
             freeze_after_fit=config.get("freeze_after_fit", True),
             callbacks=[Callback.from_config(cfg) for cfg in config["callbacks"]],
+            accelerator=(
+                Accelerator.from_config(config["accelerator"])
+                if config.get("accelerator") is not None
+                else None
+            ),
         )

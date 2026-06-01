@@ -44,7 +44,7 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         obj: Experiment,
         save_dir: Path,
         *,
-        ctx: SaveContext,  # noqa: ARG002
+        ctx: SaveContext,
     ) -> dict[str, Any]:
         """
         Encode :class:`Experiment` dependencies and runtime state.
@@ -68,19 +68,39 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         # ------------------------------------------------
         # 1. Save FeatureSets as sub-artifacts
         # ------------------------------------------------
+        include_featuresets: bool = ctx.extras.get("include_featuresets", True)
         featuresets = obj.ctx.available_featuresets
         if featuresets:
             fs_dir = save_dir / "featuresets"
             fs_dir.mkdir(exist_ok=True)
 
-            # Serialize each featureset
-            fs_entries: dict[str, str] = {}
-            for fs_id, fs in featuresets.items():
-                save_path = fs.save(filepath=(fs_dir / fs_id), overwrite=True)
-                fs_entries[fs_id] = str(Path(save_path).relative_to(save_dir))
-
-            # Mapping of each featureset to its serialized file
-            file_mapping["featuresets"] = fs_entries
+            if include_featuresets:
+                # Full artifact per FeatureSet
+                fs_entries: dict[str, str] = {}
+                for fs_id, fs in featuresets.items():
+                    save_path = fs.save(filepath=(fs_dir / fs_id), overwrite=True)
+                    fs_entries[fs_id] = str(Path(save_path).relative_to(save_dir))
+                file_mapping["featuresets"] = fs_entries
+            else:
+                # Lightweight: schema stub + split/scaler configs, no raw data
+                stub_entries: dict[str, str] = {}
+                for fs_id, fs in featuresets.items():
+                    stub: dict[str, Any] = {
+                        "node_id": fs.node_id,
+                        "label": fs.label,
+                        "schema_stub": fs.get_schema_stub(),
+                        "config": fs.get_config(),
+                        "split_labels": fs.available_splits,
+                        "split_indices": {
+                            k: v.indices.tolist() for k, v in fs._splits.items()
+                        },
+                        "split_recs": [rec.get_config() for rec in fs._split_recs],
+                        "scaler_recs": [rec.get_config() for rec in fs._scaler_recs],
+                    }
+                    stub_path = fs_dir / f"{fs_id}_stub.json"
+                    self._write_json(stub, stub_path)
+                    stub_entries[fs_id] = str(stub_path.relative_to(save_dir))
+                file_mapping["featureset_stubs"] = stub_entries
 
         # ------------------------------------------------
         # 2. Save ModelGraph as sub-artifact
@@ -122,7 +142,14 @@ class ExperimentHandler(BaseHandler["Experiment"]):
             file_mapping["checkpoints"] = ckpt_entries
 
         # ------------------------------------------------
-        # 4. Save experiment-specific runtime state
+        # 4. Copy disk-backed result stores into the artifact
+        # ------------------------------------------------
+        results_manifest = self._collect_result_files(obj, save_dir)
+        if results_manifest:
+            file_mapping["results"] = results_manifest
+
+        # ------------------------------------------------
+        # 5. Save experiment-specific runtime state
         # ------------------------------------------------
         exp_state = {
             "history": obj._history,
@@ -135,6 +162,58 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         file_mapping["state"] = self.state_rel_path
 
         return file_mapping
+
+    def _collect_result_files(
+        self,
+        obj: Experiment,
+        save_dir: Path,
+    ) -> dict[str, Any]:
+        """Copy disk-backed result stores into the archive and return the manifest."""
+        from modularml.core.experiment.results.group_results import PhaseGroupResults
+
+        manifest: dict[str, dict] = {}
+        for run_idx, run in enumerate(obj._history):
+            if run.results is None:
+                continue
+
+            if isinstance(run.results, PhaseGroupResults):
+                phases = run.results.flatten()
+            else:
+                phases = {run.results.label: run.results}
+
+            for label, pr in phases.items():
+                entry: dict[str, Any] = {}
+                base = save_dir / "results" / str(run_idx) / label
+
+                exec_loc = pr._execution._location
+                if exec_loc is not None and Path(exec_loc).is_dir():
+                    dest = base / "execution_data"
+                    shutil.copytree(exec_loc, dest, dirs_exist_ok=True)
+                    entry["execution_data"] = str(dest.relative_to(save_dir))
+
+                met_loc = pr._metrics._location
+                if met_loc is not None and Path(met_loc).is_dir():
+                    dest = base / "metrics"
+                    shutil.copytree(met_loc, dest, dirs_exist_ok=True)
+                    entry["metrics"] = str(dest.relative_to(save_dir))
+
+                art_loc = pr._artifacts._location
+                if art_loc is not None and Path(art_loc).is_dir():
+                    dest = base / "artifacts"
+                    shutil.copytree(art_loc, dest, dirs_exist_ok=True)
+                    entry["artifacts"] = str(dest.relative_to(save_dir))
+
+                # Collect callback results (flat pkls under CallbackStore location)
+                cb_loc = pr._callback_store._location
+                if cb_loc is not None and Path(cb_loc).is_dir():
+                    dest = base / "callbacks"
+                    shutil.copytree(cb_loc, dest, dirs_exist_ok=True)
+                    entry["callbacks"] = str(dest.relative_to(save_dir))
+
+                if entry:
+                    manifest.setdefault(str(run_idx), {})[label] = entry
+
+        return manifest
 
     # ================================================
     # Decoding
@@ -200,16 +279,37 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         # 1. Load FeatureSets
         # ------------------------------------------------
         fs_entries: dict[str, str] = file_mapping.get("featuresets", {})
-        for fs_rel_path in fs_entries.values():
-            # Get filepath to serialized object (.fs.mml file)
-            file_fs = load_dir / fs_rel_path
+        fs_stubs: dict[str, str] = file_mapping.get("featureset_stubs", {})
 
-            # Load featureset - this automatically registers to the active ctx
-            _ = FeatureSet.load(
-                filepath=file_fs,
-                allow_packaged_code=ctx.allow_packaged_code,
-                overwrite=ctx.overwrite_collision,
-            )
+        if fs_entries:
+            # Full featuresets saved
+            for fs_rel_path in fs_entries.values():
+                file_fs = load_dir / fs_rel_path
+                _ = FeatureSet.load(
+                    filepath=file_fs,
+                    allow_packaged_code=ctx.allow_packaged_code,
+                    overwrite=ctx.overwrite_collision,
+                )
+
+        elif fs_stubs:
+            # Lightweight stubs -> requires user-provided FeatureSets
+            provided: list[str | Path | FeatureSet] = ctx.extras.get("featuresets", [])
+            if not provided:
+                msg = (
+                    "This experiment was saved without FeatureSet data "
+                    "(include_featuresets=False). Provide the original FeatureSets "
+                    "via Experiment.load(..., featuresets=[...])."
+                )
+                raise ValueError(msg)
+
+            for stub_rel_path in fs_stubs.values():
+                stub_data: dict[str, Any] = self._read_json(load_dir / stub_rel_path)
+                _inject_featureset(
+                    stub=stub_data,
+                    provided=provided,
+                    exp_ctx=exp_ctx,
+                    allow_packaged_code=ctx.allow_packaged_code,
+                )
 
         # ------------------------------------------------
         # 2. Load ModelGraph (registers nodes + graph)
@@ -231,6 +331,15 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         # ------------------------------------------------
         json_cfg = self.decode_config(load_dir=load_dir, ctx=ctx)
         cfg = self._restore_json_cfg(data=json_cfg, ctx=ctx)
+
+        # Override results_dir in the config with the path provided to load(),
+        # so the reconstructed ResultsConfig points to the correct directory
+        results_dir_override: Path | None = ctx.extras.get("results_dir")
+        if results_dir_override is not None:
+            results_cfg = cfg.get("results_config")
+            if results_cfg is not None:
+                results_cfg["results_dir"] = str(results_dir_override)
+
         exp = cls.from_config(cfg)
 
         # ------------------------------------------------
@@ -243,7 +352,34 @@ class ExperimentHandler(BaseHandler["Experiment"]):
         exp._history = exp_state.get("history", [])
 
         # ------------------------------------------------
-        # 5. Extract checkpoints to user-provided directory
+        # 5. Restore disk-backed result stores
+        # ------------------------------------------------
+        results_manifest: dict[str, Any] = file_mapping.get("results", {})
+        if results_manifest:
+            results_dir: Path | None = ctx.extras.get("results_dir")
+            if results_dir is not None:
+                self._restore_result_files(
+                    exp=exp,
+                    load_dir=load_dir,
+                    results_dir=Path(results_dir),
+                    manifest=results_manifest,
+                )
+            else:
+                from modularml.utils.logging.warnings import warn
+
+                warn(
+                    "The serialized experiment contains disk-backed result stores "
+                    "(execution contexts or artifacts), but no `results_dir` was "
+                    "provided to `Experiment.load()`. These results were not restored.",
+                    hints=[
+                        "Pass `results_dir=Path(...)` to `Experiment.load()` "
+                        "to extract and re-link disk-backed result stores.",
+                    ],
+                    stacklevel=2,
+                )
+
+        # ------------------------------------------------
+        # 6. Extract checkpoints to user-provided directory
         # ------------------------------------------------
         ckpt_entries: dict[str, str] = file_mapping.get("checkpoints", {})
         checkpoint_dir: Path | None = ctx.extras.get("checkpoint_dir")
@@ -290,3 +426,145 @@ class ExperimentHandler(BaseHandler["Experiment"]):
             )
 
         return exp
+
+    def _restore_result_files(
+        self,
+        exp: Experiment,
+        load_dir: Path,
+        results_dir: Path,
+        manifest: dict[str, Any],
+    ) -> None:
+        """Extract archived result files and re-link stores in ``exp._history``."""
+        from modularml.core.experiment.results.artifact_store import ArtifactStore
+        from modularml.core.experiment.results.callback_store import CallbackStore
+        from modularml.core.experiment.results.execution_store import ExecutionStore
+        from modularml.core.experiment.results.group_results import PhaseGroupResults
+        from modularml.core.experiment.results.metric_store import MetricStore
+
+        results_dir.mkdir(parents=True, exist_ok=True)
+
+        for run_idx, run in enumerate(exp._history):
+            run_manifest: dict[str, Any] = manifest.get(str(run_idx), {})
+            if not run_manifest or run.results is None:
+                continue
+
+            if isinstance(run.results, PhaseGroupResults):
+                phases = run.results.flatten()
+            else:
+                phases = {run.results.label: run.results}
+
+            for label, pr in phases.items():
+                phase_manifest: dict[str, Any] = run_manifest.get(label, {})
+                if not phase_manifest:
+                    continue
+
+                base = results_dir / str(run_idx) / label
+
+                exec_rel = phase_manifest.get("execution_data")
+                if exec_rel is not None:
+                    src = load_dir / exec_rel
+                    dest = base / "execution_data"
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        pr._execution = ExecutionStore.from_directory(dest)
+                        pr._execution_dir = dest
+
+                met_rel = phase_manifest.get("metrics")
+                if met_rel is not None:
+                    src = load_dir / met_rel
+                    dest = base / "metrics"
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        pr._metrics = MetricStore.from_directory(dest)
+                        pr._metric_dir = dest
+
+                art_rel = phase_manifest.get("artifacts")
+                if art_rel is not None:
+                    src = load_dir / art_rel
+                    dest = base / "artifacts"
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        pr._artifacts = ArtifactStore.from_directory(dest)
+                        pr._artifact_dir = dest
+
+                # Restore callback results (flat pkls in CallbackStore)
+                cb_rel = phase_manifest.get("callbacks")
+                if cb_rel is not None:
+                    src: Path = load_dir / cb_rel
+                    dest = base / "callbacks"
+                    if src.is_dir():
+                        shutil.copytree(src, dest, dirs_exist_ok=True)
+                        pr._callback_store = CallbackStore.from_directory(dest)
+                        pr._callback_dir = dest
+
+                pr._series_cache.clear()
+
+
+def _inject_featureset(
+    stub: dict[str, Any],
+    provided: list[str | Path | FeatureSet],
+    exp_ctx: Any,
+    *,
+    allow_packaged_code: bool,
+) -> None:
+    """Locate the FeatureSet matching ``stub``, validate its schema, and register it in ``exp_ctx`` under the UUID the experiment expects."""
+    expected_node_id: str = stub["node_id"]
+    expected_label: str = stub["label"]
+    schema_stub: dict[str, Any] = stub["schema_stub"]
+    expected_splits: list[str] = stub.get("split_labels", [])
+
+    matched_fs: FeatureSet | None = None
+    for item in provided:
+        if isinstance(item, (str, Path)):
+            candidate: FeatureSet = FeatureSet.load(
+                filepath=item,
+                allow_packaged_code=allow_packaged_code,
+                overwrite=False,
+            )
+        else:
+            candidate = item
+
+        if candidate.label != expected_label:
+            continue
+
+        ok, reason = candidate.matches_schema_stub(
+            {**schema_stub, "split_labels": expected_splits},
+        )
+        if not ok:
+            msg = (
+                f"Provided FeatureSet '{expected_label}' label matches but "
+                f"schema is incompatible: {reason}"
+            )
+            raise ValueError(msg)
+        matched_fs = candidate
+        break
+
+    if matched_fs is None:
+        available = [getattr(x, "label", str(x)) for x in provided]
+        msg = (
+            f"No provided FeatureSet matches label '{expected_label}'. "
+            f"Available labels: {available}"
+        )
+        raise ValueError(msg)
+
+    _reassign_and_register(
+        fs=matched_fs,
+        expected_node_id=expected_node_id,
+        ctx=exp_ctx,
+    )
+
+
+def _reassign_and_register(
+    fs: FeatureSet,
+    expected_node_id: str,
+    ctx: Any,
+) -> None:
+    """Mutate ``fs._node_id`` to match the UUID the experiment graph expects, then register in the active ExperimentContext."""
+    current_id = fs._node_id
+
+    if ctx.has_node(node_id=current_id):
+        ctx.remove_node(node_id=current_id, error_if_missing=False)
+
+    # Reassign UUID
+    fs._node_id = expected_node_id
+    ctx.register_experiment_node(fs)

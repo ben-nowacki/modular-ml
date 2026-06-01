@@ -3,6 +3,8 @@
 from enum import Enum
 from typing import Any
 
+from modularml.utils.environment.optional_imports import check_tensorflow, check_torch
+
 
 class Backend(str, Enum):
     """
@@ -120,27 +122,25 @@ def infer_backend(obj_or_cls: Any) -> Backend:
     # ================================================
     # PyTorch
     # ================================================
-    try:
-        import torch
-
-        if isinstance(
+    torch = check_torch()
+    if torch is not None and (
+        isinstance(
             obj_or_cls,
             (torch.Tensor, torch.nn.Module, torch.optim.Optimizer),
-        ) or (
+        )
+        or (
             isinstance(obj_or_cls, type)
             and _safe_issubclass(obj_or_cls, (torch.nn.Module, torch.optim.Optimizer))
-        ):
-            return Backend.TORCH
-    except ImportError:
-        pass
+        )
+    ):
+        return Backend.TORCH
 
     # ================================================
     # Tensorflow
     # ================================================
-    try:
-        import tensorflow as tf
-
-        if isinstance(
+    tf = check_tensorflow()
+    if tf is not None and (
+        isinstance(
             obj_or_cls,
             (
                 tf.Tensor,
@@ -148,16 +148,16 @@ def infer_backend(obj_or_cls: Any) -> Backend:
                 tf.keras.losses.Loss,
                 tf.keras.optimizers.Optimizer,
             ),
-        ) or (
+        )
+        or (
             isinstance(obj_or_cls, type)
             and _safe_issubclass(
                 obj_or_cls,
                 (tf.keras.Model, tf.keras.losses.Loss, tf.keras.optimizers.Optimizer),
             )
-        ):
-            return Backend.TENSORFLOW
-    except ImportError:
-        pass
+        )
+    ):
+        return Backend.TENSORFLOW
 
     # ================================================
     # NumPy

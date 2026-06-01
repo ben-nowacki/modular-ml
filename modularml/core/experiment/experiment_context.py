@@ -5,12 +5,15 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 from weakref import ref
 
-from matplotlib.pylab import Enum
-
 from modularml.utils.environment.environment import IN_NOTEBOOK
+from modularml.utils.errors.exceptions import (
+    EmptyExperimentContextError,
+    NodeNotFoundError,
+)
 from modularml.utils.logging.warnings import warn
 
 if TYPE_CHECKING:
@@ -107,7 +110,7 @@ class ExperimentContext:
         """
         ctx = _ACTIVE_EXPERIMENT_CONTEXT.get()
         if ctx is None:
-            raise RuntimeError("There is no active ExperimentContext.")
+            raise EmptyExperimentContextError
         return ctx
 
     @contextmanager
@@ -181,19 +184,26 @@ class ExperimentContext:
 
         Priority (highest to lowest):
             1. Environment variable
-            2. Jupyter notebook detection
-            3. Script default
+            2. Package-level ``settings.require_unique_labels``
+            3. Jupyter notebook detection
+            4. Script default
         """
         # 1. Explicit env override
         env = os.getenv("MODULARML_EXP_REGISTRATION_POLICY")
         if env:
             return RegistrationPolicy.from_value(env)
 
-        # 2. If running in Jupyter Notebook -> default to OVERWRITE_WARN
+        # 2. Package-level setting
+        from modularml.core.settings import settings
+
+        if settings.require_unique_labels:
+            return RegistrationPolicy.ERROR
+
+        # 3. If running in Jupyter Notebook -> default to OVERWRITE_WARN
         if IN_NOTEBOOK:
             return RegistrationPolicy.OVERWRITE_WARN
 
-        # 3. Else --> default to ERROR
+        # 4. Else --> default to ERROR
         return RegistrationPolicy.ERROR
 
     def set_registration_policy(self, policy: str | RegistrationPolicy):
@@ -387,7 +397,7 @@ class ExperimentContext:
             if node_id is None:
                 if error_if_missing:
                     msg = f"No ExperimentNode with label '{label}'."
-                    raise KeyError(msg)
+                    raise NodeNotFoundError(msg)
                 return None
 
         # Remove node
@@ -395,7 +405,7 @@ class ExperimentContext:
         if node is None:
             if error_if_missing:
                 msg = f"No ExperimentNode with id '{node_id}'."
-                raise KeyError(msg)
+                raise NodeNotFoundError(msg)
             return None
 
         # Remove label mapping
@@ -542,7 +552,7 @@ class ExperimentContext:
                 node = self._nodes_by_id[node_id]
             except KeyError as exc:
                 msg = f"No ExperimentNode with id '{node_id}'"
-                raise KeyError(msg) from exc
+                raise NodeNotFoundError(msg) from exc
 
         # Get node from label
         elif label is not None:
@@ -553,7 +563,7 @@ class ExperimentContext:
                 node = self._nodes_by_id[self._node_label_to_id[label]]
             except KeyError as exc:
                 msg = f"No ExperimentNode with label '{label}'"
-                raise KeyError(msg) from exc
+                raise NodeNotFoundError(msg) from exc
 
         else:
             raise ValueError("Must provide node_id or label.")

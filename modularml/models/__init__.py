@@ -6,6 +6,7 @@ from modularml.utils.nn.backend import Backend
 # Import all pre-built models
 from .torch.sequential_mlp import SequentialMLP as Torch_SequentialMLP
 from .torch.sequential_cnn import SequentialCNN as Torch_SequentialCNN
+from .torch.temporal_cnn import TemporalCNN as Torch_TemporalCNN
 
 
 # Create registry
@@ -30,6 +31,7 @@ def model_naming_fn(x: type):
 torch_models = [
     Torch_SequentialMLP,
     Torch_SequentialCNN,
+    Torch_TemporalCNN,
 ]
 for t in torch_models:
     model_registry.register(model_naming_fn(t), t)

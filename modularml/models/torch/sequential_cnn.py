@@ -1,12 +1,15 @@
 """Torch SequentialCNN reference implementation with lazy building."""
 
 import numpy as np
-import torch
 
 from modularml.core.models.torch_base_model import TorchBaseModel
 from modularml.utils.data.shape_utils import ensure_tuple_shape
+from modularml.utils.data.types import TorchTensor
+from modularml.utils.environment.optional_imports import check_torch
 from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.activations import resolve_activation
+
+torch = check_torch()
 
 
 class SequentialCNN(TorchBaseModel):
@@ -37,7 +40,7 @@ class SequentialCNN(TorchBaseModel):
         n_layers: int = 2,
         hidden_dim: int = 16,
         kernel_size: int = 3,
-        padding: int = 1,
+        padding: int | None = None,
         stride: int = 1,
         activation: str = "relu",
         dropout: float = 0.0,
@@ -56,7 +59,10 @@ class SequentialCNN(TorchBaseModel):
             n_layers (int): Number of convolutional blocks.
             hidden_dim (int): Number of output channels in hidden blocks.
             kernel_size (int): Kernel size for convolutions.
-            padding (int): Padding applied to convolutions.
+            padding (int | None): Padding applied to convolutions. When
+                ``None``, defaults to ``(kernel_size - 1) // 2`` (same
+                padding), which preserves the sequence length through each
+                convolution.
             stride (int): Stride per convolution.
             activation (str): Activation name resolved via
                 :func:`resolve_activation`.
@@ -216,6 +222,9 @@ class SequentialCNN(TorchBaseModel):
             self._output_shape = (1, self.hidden_dim)
 
         act_fn = resolve_activation(self.activation, backend=self.backend)
+        effective_padding = (
+            self.padding if self.padding is not None else (self.kernel_size - 1) // 2
+        )
 
         num_features, feature_len = self._input_shape
         layers = []
@@ -226,7 +235,7 @@ class SequentialCNN(TorchBaseModel):
                     out_channels=self.hidden_dim,
                     kernel_size=self.kernel_size,
                     stride=self.stride,
-                    padding=self.padding,
+                    padding=effective_padding,
                 ),
             )
             layers.append(act_fn)
@@ -256,16 +265,16 @@ class SequentialCNN(TorchBaseModel):
 
         self._built = True
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: TorchTensor) -> TorchTensor:
         """
         Run the forward pass through the sequential CNN.
 
         Args:
-            x (torch.Tensor):
+            x (TorchTensor):
                 Input tensor of shape `(batch, num_channels, length)`.
 
         Returns:
-            torch.Tensor: Output tensor shaped `(batch, *output_shape)`.
+            TorchTensor: Output tensor shaped `(batch, *output_shape)`.
 
         """
         # ensure input is 3D

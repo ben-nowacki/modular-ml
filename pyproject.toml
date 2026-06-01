@@ -46,6 +46,9 @@ dependencies = [
     "nbformat",
     "joblib",
     "typing-extensions",
+    "matplotlib",
+    "rich",
+    "pyyaml",
 ]
 
 [project.urls]
@@ -87,10 +90,6 @@ examples = [
     "ipykernel",
     "ipywidgets",
 ]
-plot = [
-    "matplotlib",
-    "rich",
-]
 dev = [
     "pre-commit",           # For working with pre-commit hooks
     "ruff",                 # For code style checks (linting and auto-formatting)
@@ -105,13 +104,13 @@ dev = [
     "importlib.metadata",
 ]
 all = [
-    "modularml[torch,tensorflow,optimize,examples,plot]"
+    "modularml[torch,tensorflow,optimize,examples]"
 ]
 all-torch = [
-    "modularml[torch,optimize,examples,plot]"
+    "modularml[torch,optimize,examples]"
 ]
 all-tf = [
-    "modularml[tensorflow,optimize,examples,plot]"
+    "modularml[tensorflow,optimize,examples]"
 ]
 
 

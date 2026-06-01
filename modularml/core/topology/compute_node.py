@@ -8,9 +8,13 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from modularml.core.data.batch import Batch
 from modularml.core.data.batch_view import BatchView
 from modularml.core.data.sample_data import RoleData, SampleData
+from modularml.core.data.schema_constants import DOMAIN_FEATURES, DOMAIN_TARGETS
 from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.topology.graph_node import GraphNode
-from modularml.utils.data.data_format import DataFormat
+from modularml.utils.data.data_format import DataFormat, get_data_format_for_backend
+from modularml.utils.environment.optional_imports import check_torch
+from modularml.utils.nn.accelerator import Accelerator
+from modularml.utils.nn.backend import Backend, infer_backend
 
 if TYPE_CHECKING:
     from modularml.core.references.experiment_reference import ExperimentNodeReference
@@ -86,6 +90,182 @@ class ComputeNode(GraphNode):
             ("output_shapes", [(k, str(v)) for k, v in self.output_shapes.items()]),
         ]
 
+    # ================================================
+    # Backend / Accelerator Helpers
+    # ================================================
+    @staticmethod
+    def _normalize_accelerator(
+        accelerator: Accelerator | str | None,
+    ) -> Accelerator | None:
+        """Normalize accelerator configuration values."""
+        if accelerator is None:
+            return None
+        if isinstance(accelerator, Accelerator):
+            return accelerator
+        if isinstance(accelerator, str):
+            return Accelerator(device=accelerator)
+        msg = f"Accelerator must be Accelerator, str, or None. Received: {type(accelerator)}."
+        raise TypeError(msg)
+
+    @staticmethod
+    def _infer_data_backend(obj: Any) -> Backend | None:
+        """Infer backend from a runtime tensor-like payload."""
+        if isinstance(obj, SampleData):
+            if obj.features is not None:
+                return infer_backend(obj.features)
+            if obj.targets is not None:
+                return infer_backend(obj.targets)
+            return None
+
+        if isinstance(obj, RoleData):
+            sample_data = obj.get_data(role=obj.available_roles[0])
+            if sample_data.features is not None:
+                return infer_backend(sample_data.features)
+            if sample_data.targets is not None:
+                return infer_backend(sample_data.targets)
+            return None
+
+        if isinstance(obj, Batch):
+            if len(obj.role_data.available_roles) == 0:
+                return None
+            sample_data = obj.role_data.get_data(role=obj.role_data.available_roles[0])
+            if sample_data.features is not None:
+                return infer_backend(sample_data.features)
+            if sample_data.targets is not None:
+                return infer_backend(sample_data.targets)
+            return None
+
+        return infer_backend(obj)
+
+    @staticmethod
+    def _infer_data_format(obj: Any) -> DataFormat | None:
+        """Infer DataFormat from payload backend."""
+        backend = ComputeNode._infer_data_backend(obj)
+        if backend in (None, Backend.NONE):
+            return None
+        try:
+            return get_data_format_for_backend(backend)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _move_torch_to_device_if_needed(
+        obj: Any,
+        accelerator: Accelerator,
+    ) -> Any:
+        """
+        Move tensor-like values to device, if requested.
+
+        Moved only if they are already torch tensors and on a different device.
+        """
+        if obj is None:
+            return obj
+
+        target_device = accelerator.torch_device_str()
+        torch = check_torch()
+        if torch is None:
+            msg = "Accelerator requested for torch but torch is not installed."
+            raise ImportError(msg)
+
+        if isinstance(obj, SampleData):
+            changed = False
+            new_data: dict[str, Any] = {}
+            for k, v in obj.data.items():
+                if k not in [DOMAIN_FEATURES, DOMAIN_TARGETS]:
+                    new_data[k] = v
+                    continue
+                if isinstance(v, torch.Tensor) and str(v.device) != target_device:
+                    changed = True
+                    new_data[k] = accelerator.move_torch_tensor(v)
+                else:
+                    new_data[k] = v
+            if changed:
+                return SampleData(data=new_data, kind=obj._kind)
+            return obj
+
+        if isinstance(obj, RoleData):
+            changed = False
+            new_role_data: dict[str, SampleData] = {}
+            for role, sample_data in obj._data.items():
+                moved_sample_data = ComputeNode._move_torch_to_device_if_needed(
+                    obj=sample_data,
+                    accelerator=accelerator,
+                )
+                changed = changed or (moved_sample_data is not sample_data)
+                new_role_data[role] = moved_sample_data
+            if changed:
+                return RoleData(data=new_role_data)
+            return obj
+
+        if isinstance(obj, Batch):
+            moved_role_data = ComputeNode._move_torch_to_device_if_needed(
+                obj=obj.role_data,
+                accelerator=accelerator,
+            )
+            if moved_role_data is obj.role_data:
+                return obj
+            return Batch(
+                batch_size=obj.batch_size,
+                role_data=moved_role_data,
+                shapes=obj.shapes,
+                role_weights=dict(obj.role_weights),
+                role_masks=dict(obj.role_masks),
+            )
+
+        if isinstance(obj, torch.Tensor):
+            if str(obj.device) == target_device:
+                return obj
+            return accelerator.move_torch_tensor(obj)
+
+        return obj
+
+    def _coerce_data_format_and_acceleration(
+        self,
+        data: Any,
+        *,
+        fmt: DataFormat,
+        accelerator: Accelerator | str | None = None,
+        backend: Backend | None = None,
+    ) -> Any:
+        """
+        Normalize a data payload to the requested format and accelerator placement.
+
+        Conversion/mutation is avoided when the payload is already in the target
+        format and device position is already correct.
+
+        Args:
+            data (Any): Input data payload to normalize.
+            fmt (DataFormat): Target tensor format (e.g. :attr:`DataFormat.TORCH`).
+            accelerator (Accelerator | str | None, optional):
+                Hardware accelerator for device placement. PyTorch tensors are
+                moved to the target device only when this is set and ``backend``
+                is :attr:`Backend.TORCH`. Defaults to ``None``.
+            backend (Backend | None, optional):
+                Backend of the node consuming this data. Used to gate whether
+                device movement is attempted. Defaults to ``None``.
+
+        Returns:
+            Any: Data in the requested format and on the correct device.
+
+        """
+        acc = self._normalize_accelerator(accelerator=accelerator)
+
+        # Convert tensor-like format only if needed.
+        current_fmt = self._infer_data_format(data)
+        if current_fmt is None or current_fmt == fmt:
+            converted = data
+        else:
+            converted = data.to_format(fmt=fmt) if hasattr(data, "to_format") else data
+
+        # Move torch tensors to the requested device only when needed.
+        if (
+            acc is not None
+            and backend == Backend.TORCH
+            and self._infer_data_format(converted) == DataFormat.TORCH
+        ):
+            return self._move_torch_to_device_if_needed(converted, acc)
+        return converted
+
     def __repr__(self):
         """
         Return developer-friendly representation for debugging.
@@ -144,6 +324,8 @@ class ComputeNode(GraphNode):
         outputs: dict[str, TForward],
         *,
         fmt: DataFormat = DataFormat.NUMPY,
+        accelerator: Accelerator | str | None = None,
+        backend: Backend | None = None,
     ) -> dict[ExperimentNodeReference, TForward]:
         """
         Resolve upstream data for the current execution step.
@@ -156,6 +338,14 @@ class ComputeNode(GraphNode):
                 compute nodes.
             fmt (DataFormat): Output format requested when materializing
                 :class:`BatchView` instances.
+            accelerator (Accelerator | str | None, optional):
+                Hardware accelerator for device placement. When provided,
+                PyTorch tensors are moved to the target device after format
+                conversion. Defaults to ``None``.
+            backend (Backend | None, optional):
+                Backend hint used to gate device movement; tensors are only
+                moved when ``backend`` is :attr:`Backend.TORCH`. Defaults to
+                ``None``.
 
         Returns:
             dict[ExperimentNodeReference, TForward]: Data keyed by
@@ -187,20 +377,31 @@ class ComputeNode(GraphNode):
                         targets=ref.targets,
                         tags=ref.tags,
                     )
-                    input_data[ref] = batch
+                    input_data[ref] = self._coerce_data_format_and_acceleration(
+                        data=batch,
+                        fmt=fmt,
+                        accelerator=accelerator,
+                        backend=backend,
+                    )
 
                 # Otherwise, keep as is
                 else:
-                    input_data[ref] = data
+                    input_data[ref] = self._coerce_data_format_and_acceleration(
+                        data=data,
+                        fmt=fmt,
+                        accelerator=accelerator,
+                        backend=backend,
+                    )
 
             # Otherwise, get output of upstream node, and cast to this backend
             elif ref.node_id in outputs:
                 data = outputs[ref.node_id]
-                if hasattr(data, "to_format"):
-                    # Cast to format needed for this model (returns copy)
-                    input_data[ref] = data.to_format(fmt=fmt)
-                else:
-                    input_data[ref] = data
+                input_data[ref] = self._coerce_data_format_and_acceleration(
+                    data=data,
+                    fmt=fmt,
+                    accelerator=accelerator,
+                    backend=backend,
+                )
 
             else:
                 msg = (

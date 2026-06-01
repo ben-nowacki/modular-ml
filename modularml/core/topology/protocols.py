@@ -11,7 +11,9 @@ if TYPE_CHECKING:
     from modularml.core.references.experiment_reference import ExperimentNodeReference
     from modularml.core.references.featureset_reference import FeatureSetReference
     from modularml.core.training.applied_loss import AppliedLoss
+    from modularml.utils.nn.accelerator import Accelerator
     from modularml.utils.nn.backend import Backend
+
 
 # ================================================
 # Forwardable
@@ -57,6 +59,7 @@ class Forwardable(Protocol[T]):
         outputs: dict[str, T],
         *,
         fmt: DataFormat = DataFormat.NUMPY,
+        accelerator: Accelerator | str | None = None,
     ) -> dict[ExperimentNodeReference, T]:
         """
         Retrieve input data for this node at the current execution step.
@@ -68,6 +71,10 @@ class Forwardable(Protocol[T]):
                 keyed by :attr:`GraphNode.node_id`.
             fmt (DataFormat): Output format requested when resolving
                 :class:`BatchView` objects.
+            accelerator (Accelerator | str | None): Optional accelerator to
+                enforce backend placement. If specified, tensor data may be moved
+                to the accelerator device before being consumed by downstream
+                nodes.
 
         Returns:
             dict[ExperimentNodeReference, T]: Data keyed by each upstream
@@ -88,6 +95,7 @@ class Evaluable(Forwardable[T], Protocol):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
+        accelerator: Accelerator | str | None = None,
     ) -> None:
         """
         Run evaluation logic for the node.
@@ -98,6 +106,8 @@ class Evaluable(Forwardable[T], Protocol):
             losses (list[AppliedLoss] | None):
                 Loss functions evaluated during the step. When omitted, only
                 forward outputs are materialized.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         ...
@@ -147,6 +157,7 @@ class Trainable(Evaluable[T], Protocol):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss],
+        accelerator: Accelerator | str | None = None,
     ) -> None:
         """
         Execute a full training step including loss/optimizer updates.
@@ -156,6 +167,8 @@ class Trainable(Evaluable[T], Protocol):
                 Execution context that supplies batches, samplers, and caches.
             losses (list[AppliedLoss]):
                 Loss objects to evaluate and aggregate during the step.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         ...
@@ -205,6 +218,7 @@ class Fittable(Forwardable[T], Protocol):
         self,
         ctx: ExecutionContext,
         losses: list[AppliedLoss] | None = None,
+        accelerator: Accelerator | str | None = None,
     ) -> None:
         """
         Execute a fitting iteration for batch-oriented estimators.
@@ -214,6 +228,8 @@ class Fittable(Forwardable[T], Protocol):
                 Execution context with current batch.
             losses (list[AppliedLoss] | None):
                 Optional loss functions to compute once fitting completes.
+            accelerator (Accelerator | str | None):
+                Optional accelerator configuration.
 
         """
         ...

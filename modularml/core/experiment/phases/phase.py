@@ -12,10 +12,12 @@ from modularml.core.references.featureset_reference import FeatureSetReference
 from modularml.core.sampling.base_sampler import BaseSampler
 from modularml.utils.data.formatting import ensure_list, find_duplicates
 from modularml.utils.errors.error_handling import ErrorMode
+from modularml.utils.nn.accelerator import Accelerator
 from modularml.visualization.visualizer.visualizer import Visualizer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from modularml.core.data.batch_view import BatchView
     from modularml.core.data.execution_context import ExecutionContext
@@ -164,6 +166,10 @@ class InputBinding:
     split: str | None = None
     sampler: BaseSampler | None = None
     stream: str = STREAM_DEFAULT
+
+    def __post_init__(self):
+        # Ensure reference is enriched with current node data
+        self.upstream_ref.enrich_from_resolved()
 
     # ================================================
     # Constructors
@@ -379,6 +385,10 @@ class InputBinding:
         """
         Executes sampling of the source data defined by this binding.
 
+        Description:
+            If the sampler was already materialized manually for the same source
+            and row indices, it is reused as-is and sampling is skipped.
+
         Args:
             show_progress (bool, optional):
                 Whether to show a progress bar of the batch construction process.
@@ -391,14 +401,12 @@ class InputBinding:
         if self.sampler is None:
             raise ValueError("Cannot materialize batches for a `sampler` of None.")
 
-        # Bind resolved source to sampler
         fsv = self.resolve_input_view()
-        self.sampler.bind_sources(sources=[fsv])
 
-        # Create batches for all streams defined by sampler
-        self.sampler.materialize_batches(show_progress=show_progress)
+        if not self.sampler.is_materialized_for(fsv):
+            self.sampler.bind_sources(sources=[fsv])
+            self.sampler.materialize_batches(show_progress=show_progress)
 
-        # Return only the batches for the specified stream
         return self.sampler.get_batches(stream=self.stream)
 
     # ================================================
@@ -456,6 +464,7 @@ class ExperimentPhase(ABC):
         losses: list[AppliedLoss] | None = None,
         active_nodes: list[GraphNode] | None = None,
         callbacks: list[Callback] | None = None,
+        accelerator: Accelerator | str | None = None,
     ):
         """
         Initiallizes a new phase of the experiment.
@@ -478,6 +487,11 @@ class ExperimentPhase(ABC):
             callbacks (list[Callback] | None, optional):
                 An optional list of Callbacks to run during phase execution.
 
+            accelerator (Accelerator | str | None, optional):
+                Optional phase-level accelerator. When provided, it is passed to
+                model graph execution and reused by all nodes unless a node-level
+                override exists.
+
         """
         self.label = label
         self.input_sources = self._normalize_input_sources(sources=input_sources)
@@ -486,6 +500,11 @@ class ExperimentPhase(ABC):
         self.callbacks: list[Callback] = ensure_list(callbacks)
         self._validate_callbacks()
         self.active_nodes = self._resolve_active_nodes(active_nodes)
+        self.accelerator = (
+            accelerator
+            if isinstance(accelerator, Accelerator) or accelerator is None
+            else Accelerator(device=accelerator)
+        )
         self._validate_inputs_for_head_nodes()
 
     def __repr__(self):
@@ -765,6 +784,9 @@ class ExperimentPhase(ABC):
             "losses": losses_cfg,
             "active_nodes": self.active_nodes,
             "callbacks": [cb.get_config() for cb in ensure_list(self.callbacks)],
+            "accelerator": (
+                self.accelerator.get_config() if self.accelerator is not None else None
+            ),
         }
 
     @classmethod
@@ -802,6 +824,53 @@ class ExperimentPhase(ABC):
 
         msg = f"Unknown ExperimentPhase subclass: {phase_type}."
         raise ValueError(msg)
+
+    # ================================================
+    # YAML
+    # ================================================
+    def to_yaml(self, path: str | Path, *, overwrite: bool = False) -> Path:
+        """
+        Export this phase to a human-readable YAML file.
+
+        Args:
+            path (str | Path): Destination file path. A ``.yaml`` extension
+                is added automatically if not already present.
+            overwrite (bool, optional): Whether to overwrite an existing file
+                at ``path``. Defaults to False.
+
+        Returns:
+            Path: The resolved path the file was written to.
+
+        Raises:
+            FileExistsError: If ``path`` already exists and ``overwrite`` is False.
+
+        """
+        from modularml.core.io.yaml import to_yaml
+
+        return to_yaml(self, path, overwrite=overwrite)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path, *, overwrite: bool = False) -> ExperimentPhase:
+        """
+        Reconstruct a phase from a YAML file.
+
+        All referenced graph nodes and FeatureSets must already exist in
+        the active :class:`ExperimentContext`.
+
+        Args:
+            path (str | Path): Path to the YAML file.
+            overwrite (bool, optional): Passed to node-registering translators.
+                When False (default), raises ValueError if any reconstructed
+                node label conflicts with an existing registration in the active
+                ExperimentContext. Defaults to False.
+
+        Returns:
+            ExperimentPhase: Reconstructed phase.
+
+        """
+        from modularml.core.io.yaml import from_yaml
+
+        return from_yaml(path, overwrite=overwrite)
 
     # ================================================
     # Visualizer

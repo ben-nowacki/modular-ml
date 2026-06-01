@@ -212,6 +212,30 @@ class BaseSampler(Configurable, Stateful, ABC):
         """Whether batches have been materialized."""
         return self.is_bound and (self._sampled is not None)
 
+    def is_materialized_for(self, fsv: FeatureSetView) -> bool:
+        """
+        True if this sampler is already materialized for a source matching ``fsv``.
+
+        Matching checks source identity (node_id) and row indices only.
+        Column selection is intentionally ignored; samplers are column-agnostic.
+
+        Args:
+            fsv (FeatureSetView): The view that would be bound for sampling.
+
+        Returns:
+            bool: True if the sampler can be reused as-is.
+
+        """
+        if not self.is_materialized:
+            return False
+        if self.sources is None or len(self.sources) != 1:
+            return False
+        bound_view = next(iter(self.sources.values()))
+        return bound_view.source.node_id == fsv.source.node_id and np.array_equal(
+            bound_view.indices,
+            fsv.indices,
+        )
+
     @property
     def sampled(self) -> SampledView:
         """
@@ -477,6 +501,35 @@ class BaseSampler(Configurable, Stateful, ABC):
 
         sampler_cls: BaseSampler = sampler_registry[str(config["sampler_name"])]
         return sampler_cls.from_config(config)
+
+    def to_yaml(self, path: str | Path) -> None:
+        """
+        Export this sampler to a human-readable YAML file.
+
+        Args:
+            path (str | Path): Destination file path. A ``.yaml`` extension
+                is added automatically if not already present.
+
+        """
+        from modularml.core.io.yaml import to_yaml
+
+        to_yaml(self, path)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> BaseSampler:
+        """
+        Reconstruct a sampler from a YAML file.
+
+        Args:
+            path (str | Path): Path to the YAML file.
+
+        Returns:
+            BaseSampler: Reconstructed sampler instance.
+
+        """
+        from modularml.core.io.yaml import from_yaml
+
+        return from_yaml(path, kind="sampler")
 
     # ================================================
     # Stateful

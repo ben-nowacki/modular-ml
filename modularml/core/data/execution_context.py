@@ -26,7 +26,15 @@ class ExecutionContext:
         phase_label (str): Label identifying the current phase.
         epoch_idx (int): Current epoch index.
         batch_idx (int): Current batch index within the epoch.
-        inputs (dict): Inputs to head nodes, keyed by (node_id, upstream_ref).
+        inputs (dict): Pre-materialized :class:`Batch` inputs to head nodes,
+            keyed by ``(node_id, upstream_ref)``. Values are concrete tensor
+            batches that have already been device-placed by the phase before
+            execution begins.
+        input_views (dict): Original lazy :class:`BatchView` objects for
+            each active (non-masked) head-node binding, keyed by
+            ``(node_id, upstream_ref)``. Populated by phases so that loss
+            functions that reference specific FeatureSet columns can
+            re-materialize with a custom column filter.
         outputs (dict[str, Batch]): Outputs of graph nodes, keyed by node ID.
         losses (LossCollection | None): Losses computed in this batch.
 
@@ -37,8 +45,13 @@ class ExecutionContext:
     epoch_idx: int
     batch_idx: int
 
-    # Inputs to head nodes (keyed by node ID + upstream ref)
-    inputs: dict[tuple[str, FeatureSetReference], BatchView] = field(
+    # Pre-materialized inputs to head nodes (keyed by node ID + upstream ref)
+    inputs: dict[tuple[str, FeatureSetReference], Batch] = field(
+        default_factory=dict,
+    )
+
+    # Original BatchView objects for each active binding (for column-level loss resolution)
+    input_views: dict[tuple[str, FeatureSetReference], BatchView] = field(
         default_factory=dict,
     )
 
@@ -56,20 +69,37 @@ class ExecutionContext:
         *,
         node_id: str,
         upstream: FeatureSetReference,
-        batch_view: BatchView,
+        batch: Batch,
     ):
         """
-        Register an input :class:`BatchView` for a head node.
+        Register a pre-materialized :class:`Batch` for a head node.
 
         Args:
             node_id (str): Node identifier.
             upstream (FeatureSetReference): Upstream reference for the node.
-            batch_view (BatchView): The input :class:`BatchView`.
+            batch (Batch): The pre-materialized input :class:`Batch`.
 
         """
-        if node_id not in self.inputs:
-            self.inputs[node_id] = {}
-        self.inputs[(node_id, upstream)] = batch_view
+        self.inputs[(node_id, upstream)] = batch
+
+    def set_input_view(
+        self,
+        *,
+        node_id: str,
+        upstream: FeatureSetReference,
+        batch_view: BatchView,
+    ):
+        """
+        Register the originating :class:`BatchView` for a head node input.
+
+        Args:
+            node_id (str): Node identifier.
+            upstream (FeatureSetReference): Upstream reference for the node.
+            batch_view (BatchView): The lazy :class:`BatchView` that was
+                materialized into the corresponding :attr:`inputs` entry.
+
+        """
+        self.input_views[(node_id, upstream)] = batch_view
 
     def set_output(self, *, node_id: str, batch: Batch):
         """

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import pickle
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar
 
 from modularml.utils.data.multi_keyed_data import AxisSeries
@@ -140,19 +142,16 @@ class MetricStore:
     """
     A flat namespace of named scalar metric values recorded during phase execution.
 
-    Description:
-        MetricStore provides a simple key-value ledger for named scalar metrics
-        (e.g. "val_loss", "train_loss", "val_r2"). Any producer (MetricCallbacks,
-        the training loop itself) can log values, and any consumer (EarlyStopping,
-        progress bars) can read them by name.
-
-        Entries are stored per-name in insertion order. Each entry is tagged with
-        its epoch and optional batch index.
-
+    Entries are stored per-name in insertion order, each tagged with an epoch
+    and optional batch index. When a ``location`` directory is provided,
+    each entry is also pickled to disk as it is recorded so that large
+    result sets do not exhaust RAM.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, location: Path | None = None) -> None:
+        self._location: Path | None = location
         self._entries: dict[str, list[MetricEntry]] = defaultdict(list)
+        self._count: int = 0
 
     # ================================================
     # Writing
@@ -180,27 +179,30 @@ class MetricStore:
                 an epoch-level metric. Defaults to None.
 
         """
-        self._entries[name].append(
-            MetricEntry(
-                name=name,
-                value=value,
-                epoch_idx=epoch_idx,
-                batch_idx=batch_idx,
-            ),
+        entry = MetricEntry(
+            name=name,
+            value=value,
+            epoch_idx=epoch_idx,
+            batch_idx=batch_idx,
         )
+        self._entries[name].append(entry)
+        if self._location is not None:
+            self._save_to_disk(entry)
+
+    def _save_to_disk(self, entry: MetricEntry) -> None:
+        """Pickle a single :class:`MetricEntry` to ``_location``."""
+        filepath = Path(self._location) / f"{self._count}.pkl"
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        with filepath.open("wb") as f:
+            pickle.dump(entry, f, protocol=pickle.HIGHEST_PROTOCOL)
+        self._count += 1
 
     # ================================================
     # Reading
     # ================================================
     @property
     def names(self) -> list[str]:
-        """
-        List all recorded metric names.
-
-        Returns:
-            list[str]: Metric names that have at least one entry.
-
-        """
+        """List all recorded metric names."""
         return [name for name, entries in self._entries.items() if entries]
 
     def entries(self) -> MetricDataSeries:
@@ -220,6 +222,46 @@ class MetricStore:
                 key = (entry.name, entry.epoch_idx, entry.batch_idx)
                 data[key] = entry
         return MetricDataSeries(axes=axes, _data=data)
+
+    # ================================================
+    # Snapshots / Reconstruction
+    # ================================================
+    def to_memory(self) -> MetricStore:
+        """
+        Return a new in-memory :class:`MetricStore` with all entries loaded.
+
+        Returns:
+            MetricStore: In-memory copy of this store.
+
+        """
+        new_store = MetricStore(location=None)
+        new_store._entries = defaultdict(
+            list,
+            {name: list(entries) for name, entries in self._entries.items()},
+        )
+        return new_store
+
+    @classmethod
+    def from_directory(cls, location: Path) -> MetricStore:
+        """
+        Reconstruct a :class:`MetricStore` from pickle files in ``location``.
+
+        Args:
+            location (Path): Directory containing ``*.pkl`` metric files.
+
+        Returns:
+            MetricStore: Store with all entries loaded from disk.
+
+        """
+        location = Path(location)
+        store = cls(location=location)
+        pkl_files = sorted(location.glob("*.pkl"), key=lambda p: int(p.stem))
+        for pkl_file in pkl_files:
+            with pkl_file.open("rb") as f:
+                entry: MetricEntry = pickle.load(f)
+            store._entries[entry.name].append(entry)
+        store._count = len(pkl_files)
+        return store
 
     # ================================================
     # Representation

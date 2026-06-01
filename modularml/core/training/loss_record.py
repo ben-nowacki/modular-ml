@@ -9,6 +9,10 @@ from modularml.core.experiment.experiment_context import ExperimentContext
 from modularml.core.experiment.experiment_node import ExperimentNode
 from modularml.utils.data.conversion import to_python
 from modularml.utils.data.multi_keyed_data import AxisSeries
+from modularml.utils.errors.exceptions import (
+    EmptyExperimentContextError,
+    NodeNotFoundError,
+)
 
 if TYPE_CHECKING:
     from matplotlib.pylab import Hashable
@@ -33,6 +37,7 @@ class LossRecord:
 
     label: str
     node_id: str | None = None
+    node_label: str | None = None
     trainable: Any | None = None
     auxiliary: Any | None = None
 
@@ -64,6 +69,7 @@ class LossRecord:
         return {
             "label": self.label,
             "node_id": self.node_id,
+            "node_label": self.node_label,
             "trainable": self.trainable,
             "auxiliary": self.auxiliary,
         }
@@ -83,6 +89,7 @@ class LossRecord:
         return LossRecord(
             label=self.label,
             node_id=self.node_id,
+            node_label=self.node_label,
             trainable=to_python(self.trainable),
             auxiliary=to_python(self.auxiliary),
         )
@@ -136,12 +143,31 @@ class LossRecord:
                 )
                 raise ValueError(msg)
 
+            # Enforce same node_label (allow None on either side)
+            if (
+                lr.node_label is not None
+                and ref.node_label is not None
+                and lr.node_label != ref.node_label
+            ):
+                msg = (
+                    "Cannot combine LossRecords with different node labels: "
+                    f"{ref.node_label} != {lr.node_label}."
+                )
+                raise ValueError(msg)
+
+        # Resolve shared node_label (prefer first non-None value)
+        merged_node_label = next(
+            (lr.node_label for lr in records if lr.node_label is not None),
+            None,
+        )
+
         # Combine
         t_vals = [lr.trainable for lr in records if lr.trainable is not None]
         a_vals = [lr.auxiliary for lr in records if lr.auxiliary is not None]
         return LossRecord(
             label=ref.label,
             node_id=ref.node_id,
+            node_label=merged_node_label,
             trainable=sum(t_vals) if len(t_vals) > 0 else None,
             auxiliary=sum(a_vals) if len(a_vals) > 0 else None,
         )
@@ -227,6 +253,7 @@ class LossRecord:
         return LossRecord(
             label=lr_total.label,
             node_id=lr_total.node_id,
+            node_label=lr_total.node_label,
             trainable=avg_train,
             auxiliary=avg_aux,
         )
@@ -295,13 +322,33 @@ class LossCollection(AxisSeries[LossRecord]):
 
         """
         if "node" in coords:
-            # Get actual node from given values, then retrieve node_id
             node = coords["node"]
-            if not isinstance(node, ExperimentNode):
-                exp_ctx = ExperimentContext.get_active()
-                node = exp_ctx.get_node(val=coords["node"])
-            # Replace coord value with node_id
-            coords["node"] = node.node_id
+            if isinstance(node, ExperimentNode):
+                coords["node"] = node.node_id
+                return coords
+
+            if isinstance(node, str):
+                # Fast path: active context
+                try:
+                    exp_ctx = ExperimentContext.get_active()
+                    coords["node"] = exp_ctx.get_node(val=node).node_id
+                except EmptyExperimentContextError:
+                    pass  # Offline: fall through to record scan
+                else:
+                    return coords
+
+                # Offline: scan stored records for a matching label or node_id
+                for rec in self._records:
+                    if node in (rec.node_label, rec.node_id):
+                        coords["node"] = rec.node_id
+                        return coords
+
+                known = {r.node_label or r.node_id for r in self._records}
+                msg = (
+                    f"Cannot resolve node '{node}': no active ExperimentContext "
+                    f"and no matching label or id in stored records. Known: {known}."
+                )
+                raise NodeNotFoundError(msg)
 
         return coords
 
@@ -340,7 +387,14 @@ class LossCollection(AxisSeries[LossRecord]):
                 Resolved nodes retrieved from the active experiment context.
 
         """
-        exp_ctx = ExperimentContext.get_active()
+        try:
+            exp_ctx = ExperimentContext.get_active()
+        except EmptyExperimentContextError as exc:
+            msg = (
+                "LossCollection.nodes requires an active ExperimentContext. "
+                "Use .node_ids for offline access."
+            )
+            raise EmptyExperimentContextError(msg) from exc
         return [exp_ctx.get_node(node_id=x) for x in self.node_ids]
 
     # ================================================

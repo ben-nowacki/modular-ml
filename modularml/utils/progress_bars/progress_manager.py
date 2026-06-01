@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import threading
+import time
 from typing import TYPE_CHECKING, ClassVar
 
 from rich.console import Console, Group
@@ -15,6 +17,7 @@ from modularml.utils.environment.environment import IN_NOTEBOOK
 from .progress_styles import (
     style_cv,
     style_sampling,
+    style_spinner,
     style_training,
     style_training_loss,
 )
@@ -72,7 +75,18 @@ class ProgressManager:
             style_training.name: style_training,
             style_training_loss.name: style_training_loss,
             style_cv.name: style_cv,
+            style_spinner.name: style_spinner,
         }
+
+        # Manual refresh control
+        self._refresh_interval = 0.1  # seconds
+        self._last_refresh_time = 0.0
+        self._dirty = False
+
+        # Background refresh thread for styles that need continuous animation
+        self._auto_refresh_count: int = 0
+        self._auto_refresh_stop = threading.Event()
+        self._auto_refresh_thread: threading.Thread | None = None
 
     # ================================================
     # Scope Managemenet
@@ -110,6 +124,29 @@ class ProgressManager:
         self._styles[style.name] = style
 
     # ================================================
+    # Background Auto-Refresh (for spinner-style tasks)
+    # ================================================
+    def _start_auto_refresh_thread(self):
+        if (
+            self._auto_refresh_thread is not None
+            and self._auto_refresh_thread.is_alive()
+        ):
+            return
+        self._auto_refresh_stop.clear()
+        self._auto_refresh_thread = threading.Thread(
+            target=self._auto_refresh_loop,
+            daemon=True,
+        )
+        self._auto_refresh_thread.start()
+
+    def _auto_refresh_loop(self):
+        while not self._auto_refresh_stop.is_set() and self._auto_refresh_count > 0:
+            self._auto_refresh_stop.wait(timeout=self._refresh_interval)
+            if self._auto_refresh_stop.is_set() or self._auto_refresh_count <= 0:
+                break
+            self._request_refresh(force=True)
+
+    # ================================================
     # Rich.live Control
     # ================================================
     def _render_group(self):
@@ -131,21 +168,39 @@ class ProgressManager:
             return
 
         self._live = Live(
-            self._render_group(),
             console=self._console,
-            refresh_per_second=10,
+            get_renderable=self._render_group,
+            auto_refresh=False,
             transient=not IN_NOTEBOOK,
+            redirect_stderr=False,
+            redirect_stdout=False,
         )
-        self._live.start()
+        self._live.start(refresh=False)
 
     def _refresh_layout(self):
         self._ensure_live()
-        if self._live is not None:
-            self._live.update(self._render_group(), refresh=True)
-
-    def _shutdown(self):
         if self._live is None:
             return
+
+        self._live.refresh()
+        self._last_refresh_time = time.monotonic()
+        self._dirty = False
+
+    def _request_refresh(self, *, force: bool = False):
+        self._dirty = True
+        now = time.monotonic()
+        if force or (now - self._last_refresh_time >= self._refresh_interval):
+            self._refresh_layout()
+
+    def _shutdown(self):
+        self._auto_refresh_stop.set()
+        self._auto_refresh_count = 0
+
+        if self._live is None:
+            return
+
+        if self._dirty:
+            self._refresh_layout()
 
         self._live.stop()
         self._live = None
@@ -158,6 +213,10 @@ class ProgressManager:
     # Task Registration
     # ================================================
     def _reset_for_new_cell(self):
+        # Stop background refresh thread
+        self._auto_refresh_stop.set()
+        self._auto_refresh_count = 0
+
         # Stop any existing Live display
         if self._live is not None:
             with contextlib.suppress(Exception):
@@ -188,26 +247,28 @@ class ProgressManager:
             self._next_indent_level += 1
         self._progress_indent[key] = self._style_indent[group]
 
-        self._progress[key] = Progress(
-            *style.columns,
-            auto_refresh=False,
-        )
-
-        self._ensure_live()
-
-        progress = self._progress[key]
+        progress = Progress(*style.columns, auto_refresh=False)
+        self._progress[key] = progress
         task._task_id = progress.add_task(
             task.description,
             total=task.total,
             **base_fields,
         )
         task._progress_key = key
-
         self._active_tasks.add(task)
-        self._refresh_layout()
+
+        if style.needs_auto_refresh:
+            self._auto_refresh_count += 1
+            self._start_auto_refresh_thread()
+
+        self._request_refresh(force=True)
 
     def _mark_task_finished(self, task: ProgressTask):
         self._active_tasks.discard(task)
+
+        style = self._styles[task.style_name]
+        if style.needs_auto_refresh and self._auto_refresh_count > 0:
+            self._auto_refresh_count -= 1
 
         progress = self._progress[task._progress_key]
 
@@ -216,7 +277,7 @@ class ProgressManager:
             del self._progress[task._progress_key]
             self._progress_indent.pop(task._progress_key, None)
 
-        self._refresh_layout()
+        self._request_refresh(force=True)
 
         # If nothing is running anymore, shut down
         if not self._active_tasks and not IN_NOTEBOOK:

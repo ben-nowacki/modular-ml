@@ -207,7 +207,7 @@ class SymbolRegistry:
             entry = self._builtin_registries[k]
             try:
                 key = entry.naming_fn(cls)
-                if key in entry.registry:
+                if key in entry.registry and entry.registry[key] is cls:
                     return True
             except Exception:  # noqa: BLE001, S112
                 continue

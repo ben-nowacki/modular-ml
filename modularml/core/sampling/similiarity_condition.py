@@ -51,7 +51,7 @@ class SimilarityCondition(Configurable):
             If False, non-matches always score 0.0.
 
     Weight semantics:
-        - Matches always receive weight ≥ 1.0 (better matches → larger weight).
+        - Matches always receive weight ≥ 1.0 (better matches -> larger weight).
         - Non-matches receive weight < 1.0 if `allow_fallback=True`, else 0.0.
         - `fallback=False` is equivalent to \
             `weightmode='binary', min_weight=0.0, max_weight=1.0`

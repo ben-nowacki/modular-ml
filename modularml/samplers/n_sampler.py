@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import bisect
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import wait as futures_wait
 from dataclasses import dataclass
+from multiprocessing import Manager
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -39,14 +42,186 @@ class SortedColumn:
     )  # relative indices used to sort the original array
 
 
+# ================================================
+# Module-level helpers for parallel workers
+# ================================================
+def _build_minimal_specs(specs: list[dict]) -> list[dict]:
+    """Return copies of specs with the non-picklable 'ref' key removed."""
+    return [{k: v for k, v in s.items() if k != "ref"} for s in specs]
+
+
+def _process_anchor_chunk(
+    rel_idx_chunk: list[int],
+    n_view: int,
+    abs_indices: np.ndarray,
+    minimal_specs: list[dict],
+    max_samples_per_anchor: int | None,
+    choose_best_only: bool,  # noqa: FBT001
+    seed_base: int | None,
+    progress_counter: Any,
+) -> tuple[list[int], list[int], list[float]]:
+    """
+    Process a chunk of anchor indices and return matched pairs.
+
+    All inputs are passed explicitly.  After each anchor is processed,
+    ``progress_counter`` is incremented atomically so the main process
+    can poll real-time progress without a background thread.
+
+    Args:
+        rel_idx_chunk (list[int]):
+            Relative anchor indices assigned to this worker.
+        n_view (int):
+            Total number of samples in the view.
+        abs_indices (np.ndarray):
+            Absolute index mapping from relative positions.
+        minimal_specs (list[dict]):
+            Picklable column specs (``ref`` key removed).
+        max_samples_per_anchor (int | None):
+            Maximum matches per anchor.
+        choose_best_only (bool):
+            Whether to select highest-scoring candidates.
+        seed_base (int | None):
+            Role-specific seed used to derive per-anchor RNGs.
+        progress_counter (Any):
+            Shared integer counter incremented per completed anchor.
+
+    Returns:
+        tuple[list[int], list[int], list[float]]:
+            Merged anchor absolute indices, role absolute indices, and scores
+            for all anchors in ``rel_idx_chunk``.
+
+    """
+
+    def _find_numeric(anchor_val, cond, spec):
+        sorted_col = spec["sorted"]
+        vals = sorted_col.values
+        idxs = sorted_col.original_to_sorted_idxs
+        tol = cond.tolerance
+        li = bisect.bisect_left(vals, anchor_val - tol)
+        ri = bisect.bisect_right(vals, anchor_val + tol)
+        sim_idxs = set(idxs[li:ri])
+        dissim_idxs = set(idxs) - sim_idxs
+        if cond.mode == "similar":
+            return sim_idxs, dissim_idxs
+        return dissim_idxs, sim_idxs
+
+    def _find_categorical(anchor_val, cond, spec):
+        vals = spec["col"]
+        cat_map = spec["cat_map"]
+        sim_idxs = set(cat_map.get(anchor_val, []))
+        dissim_idxs = set(range(len(vals))) - sim_idxs
+        if cond.mode == "similar":
+            return sim_idxs, dissim_idxs
+        return dissim_idxs, sim_idxs
+
+    def _compute_scores(anchor_idx, cand_list, specs):
+        out = []
+        for p_idx in cand_list:
+            per_cond_score = []
+            for spec in specs:
+                cond = spec["cond"]
+                a_val = spec["col"][anchor_idx]
+                b_val = spec["col"][p_idx]
+                per_cond_score.append(cond.score(a_val, b_val))
+            out.append(float(np.mean(per_cond_score)))
+        return np.array(out)
+
+    anchor_abs_idxs: list[int] = []
+    role_abs_idxs: list[int] = []
+    role_scores: list[float] = []
+
+    for rel_idx in rel_idx_chunk:
+        # Per-anchor RNG (deterministic and indep. across anchors)
+        rng = np.random.default_rng(
+            [seed_base, rel_idx] if seed_base is not None else None,
+        )
+
+        per_cond_matches = []
+        blocked_rel_idxs: set[int] = set()
+
+        for spec in minimal_specs:
+            cond = spec["cond"]
+            anchor_val = spec["col"][rel_idx]
+
+            if not spec["categorical"]:
+                matches, non_matches = _find_numeric(anchor_val, cond, spec)
+            else:
+                matches, non_matches = _find_categorical(anchor_val, cond, spec)
+
+            matches -= blocked_rel_idxs
+            matches.discard(rel_idx)
+            per_cond_matches.append(matches)
+
+            if not cond.allow_fallback:
+                blocked_rel_idxs |= non_matches
+
+        allowed_idxs: set[int] = set(range(n_view)) - blocked_rel_idxs - {rel_idx}
+
+        if allowed_idxs:
+            full_matches: set[int] = set.intersection(*per_cond_matches) & allowed_idxs
+            partial_matches: set[int] = (
+                set.union(*per_cond_matches) & allowed_idxs
+            ) - full_matches
+            non_matches_set: set[int] = allowed_idxs - full_matches - partial_matches
+
+            n_select: int = max_samples_per_anchor or (n_view - 1)
+            selected_pairs: list[int] = []
+            selected_scores: list[float] = []
+
+            for group in (full_matches, partial_matches, non_matches_set):
+                if not group:
+                    continue
+
+                group_list: list[int] = list(group)
+
+                if choose_best_only:
+                    scores = _compute_scores(rel_idx, group_list, minimal_specs)
+                    order = np.flip(np.argsort(scores))
+                    group_selected = [group_list[j] for j in order[:n_select]]
+                    group_scores = [scores[j] for j in order[:n_select]]
+                else:
+                    rng.shuffle(group_list)
+                    group_selected = group_list[:n_select]
+                    group_scores = _compute_scores(
+                        rel_idx,
+                        group_selected,
+                        minimal_specs,
+                    )
+
+                selected_pairs.extend(group_selected)
+                selected_scores.extend(list(group_scores))
+
+                n_select -= len(group_selected)
+                if n_select <= 0:
+                    break
+
+            for p_rel_idx, score in zip(selected_pairs, selected_scores, strict=True):
+                if p_rel_idx == rel_idx:
+                    msg = f"Pairing between the same sample is not allowed: {rel_idx} == {p_rel_idx}"
+                    raise ValueError(msg)
+                anchor_abs_idxs.append(int(abs_indices[rel_idx]))
+                role_abs_idxs.append(int(abs_indices[p_rel_idx]))
+                role_scores.append(score)
+
+        progress_counter.put(1)
+
+    return anchor_abs_idxs, role_abs_idxs, role_scores
+
+
+# ================================================
+# NSampler
+# ================================================
 class NSampler(BaseSampler):
     """
     General N-way sampler for similarity-based multi-role batching.
 
     Attributes:
-        condition_mapping (dict[str, dict[str, SimilarityCondition]]): Per-role column conditions.
-        max_samples_per_anchor (int | None): Cap on matches selected per anchor.
-        choose_best_only (bool): Whether to keep only the top-scoring matches per role.
+        condition_mapping (dict[str, dict[str, SimilarityCondition]]):
+            Per-role column conditions.
+        max_samples_per_anchor (int | None):
+            Cap on matches selected per anchor.
+        choose_best_only (bool):
+            Whether to keep only the top-scoring matches per role.
 
     """
 
@@ -71,6 +246,7 @@ class NSampler(BaseSampler):
         drop_last: bool = False,
         seed: int | None = None,
         show_progress: bool = True,
+        n_workers: int = 1,
         source: FeatureSet | FeatureSetView | None = None,
     ):
         """
@@ -87,22 +263,43 @@ class NSampler(BaseSampler):
         Args:
             condition_mapping (dict[str, dict[str, SimilarityCondition]]):
                 Mapping from role name to column-condition pairs (e.g. `{"positive": {...}}`).
-            batch_size (int): Number of N-way samples per batch.
-            shuffle (bool): Whether to shuffle aligned samples prior to batching.
-            max_samples_per_anchor (int | None): Maximum matches to keep per role; `None` keeps every candidate.
-            choose_best_only (bool): Select only the highest-scoring matches per role when True.
-            group_by (list[str] | None): Optional FeatureSet keys used for grouping (mutually exclusive with `stratify_by`).
-            group_by_role (str): Role whose data drive grouping operations.
-            stratify_by (list[str] | None): Optional keys for stratified sampling.
-            stratify_by_role (str): Role whose data drive stratification.
-            strict_stratification (bool): Whether to stop when any stratum exhausts.
-            drop_last (bool): Drop the final incomplete batch.
-            seed (int | None): Random seed for reproducible shuffling.
-            show_progress (bool): Whether to display progress updates.
-            source (FeatureSet | FeatureSetView | None): Optional :class:`FeatureSet` or :class:`FeatureSetView` to bind immediately.
+            batch_size (int):
+                Number of N-way samples per batch.
+            shuffle (bool):
+                Whether to shuffle aligned samples prior to batching.
+            max_samples_per_anchor (int | None):
+                Maximum matches to keep per role; `None` keeps every candidate.
+            choose_best_only (bool):
+                Select only the highest-scoring matches per role when True.
+            group_by (list[str] | None):
+                Optional FeatureSet keys used for grouping (mutually exclusive with `stratify_by`).
+            group_by_role (str):
+                Role whose data drive grouping operations.
+            stratify_by (list[str] | None):
+                Optional keys for stratified sampling.
+            stratify_by_role (str):
+                Role whose data drive stratification.
+            strict_stratification (bool):
+                Whether to stop when any stratum exhausts.
+            drop_last (bool):
+                Drop the final incomplete batch.
+            seed (int | None):
+                Random seed for reproducible shuffling.
+            show_progress (bool):
+                Whether to display progress updates.
+            n_workers (int):
+                Number of worker processes for parallel anchor processing.
+                Set to ``1`` (default) to disable parallelism. Values ``> 1`` use
+                :class:`~concurrent.futures.ProcessPoolExecutor` to distribute anchor
+                indices across workers. Not supported when any
+                :class:`~modularml.core.sampling.similiarity_condition.SimilarityCondition`
+                has a custom ``metric`` callable.
+            source (FeatureSet | FeatureSetView | None):
+                Optional :class:`FeatureSet` or :class:`FeatureSetView` to bind immediately.
 
         Raises:
             ValueError: If `condition_mapping` defines the reserved role `anchor`.
+            ValueError: If `n_workers` is less than 1.
 
         """
         self.condition_mapping = {
@@ -113,6 +310,10 @@ class NSampler(BaseSampler):
             raise ValueError(msg)
         self.max_samples_per_anchor = max_samples_per_anchor
         self.choose_best_only = choose_best_only
+        if n_workers < 1:
+            msg = "`n_workers` must be >= 1."
+            raise ValueError(msg)
+        self.n_workers = n_workers
 
         super().__init__(
             batch_size=batch_size,
@@ -174,8 +375,8 @@ class NSampler(BaseSampler):
         # Each role key contains a tuple of: anchor indices, role indices, and role scores
         # All returned indices are absolute indicies from the parent source
         role_results: dict[str, tuple[np.ndarray]] = {
-            role: self._generate_role_matches(view=src, specs=specs)
-            for role, specs in role_specs.items()
+            role: self._generate_role_matches(view=src, specs=specs, role_index=i)
+            for i, (role, specs) in enumerate(role_specs.items())
         }
 
         # Each role may return a different array of anchor indices
@@ -520,7 +721,12 @@ class NSampler(BaseSampler):
 
         return specs
 
-    def _generate_role_matches(self, view: FeatureSetView, specs: list[dict[str, Any]]):
+    def _generate_role_matches(
+        self,
+        view: FeatureSetView,
+        specs: list[dict[str, Any]],
+        role_index: int = 0,
+    ):
         """
         Generate matched samples for a single role.
 
@@ -529,23 +735,123 @@ class NSampler(BaseSampler):
                 Bound :class:`FeatureSetView` containing samples.
             specs (list[dict[str, Any]]):
                 Column specification dictionaries per condition.
+            role_index (int):
+                Position of this role in the ordered role list, used to derive
+                independent per-role RNG seeds when ``n_workers > 1``.
 
         Returns:
             tuple[list[int], list[int], list[float]]:
                 Parallel arrays of anchor indices, matched indices, and match scores.
 
         Raises:
-            ValueError: If a sample is paired with itself.
+            ValueError: If a sample is paired with itself or if ``n_workers > 1``
+                and any condition uses a custom ``metric`` callable.
 
         """
+        n_anchors = len(view)
+
+        # ------------------------------------------------
+        # Parallel sampling (n_workers > 1)
+        # ------------------------------------------------
+        if self.n_workers > 1:
+            for spec in specs:
+                if spec["cond"].metric is not None:
+                    msg = (
+                        "Parallel processing (n_workers > 1) is not supported when "
+                        "a SimilarityCondition has a custom metric callable. "
+                        "Set n_workers=1 or remove the custom metric."
+                    )
+                    raise ValueError(msg)
+
+            effective_workers = min(self.n_workers, n_anchors)
+
+            # Derive a role-specific seed base so anchors in different roles get
+            # independent RNG streams even when self.seed is the same.
+            if self.seed is not None:
+                role_seq = np.random.SeedSequence(self.seed).spawn(role_index + 1)[-1]
+                seed_base: int | None = int(role_seq.generate_state(1)[0])
+            else:
+                seed_base = None
+
+            minimal_specs = _build_minimal_specs(specs)
+
+            # Split anchor indices into even chunks
+            all_rel_idxs = list(range(n_anchors))
+            chunk_size = (n_anchors + effective_workers - 1) // effective_workers
+            chunks = [
+                c
+                for c in (
+                    all_rel_idxs[i * chunk_size : (i + 1) * chunk_size]
+                    for i in range(effective_workers)
+                )
+                if c
+            ]
+
+            anchor_abs_idxs: list[int] = []
+            role_abs_idxs: list[int] = []
+            role_scores: list[float] = []
+
+            # Manager creates a server process whose proxy objects are picklable
+            # under Windows' spawn start method (unlike bare Queue/Value).
+            with Manager() as manager:
+                # Workers put(1) after each anchor; main thread drains and calls tick()
+                progress_counter = manager.Queue()
+
+                with ProcessPoolExecutor(max_workers=effective_workers) as executor:
+                    pending = {
+                        executor.submit(
+                            _process_anchor_chunk,
+                            chunk,
+                            n_anchors,
+                            view.indices,
+                            minimal_specs,
+                            self.max_samples_per_anchor,
+                            self.choose_best_only,
+                            seed_base,
+                            progress_counter,
+                        )
+                        for chunk in chunks
+                    }
+
+                    while pending:
+                        # Short timeout so progress is drained at ~50 ms granularity
+                        done, pending = futures_wait(pending, timeout=0.05)
+
+                        # Drain any per-anchor completions — tick() always in main thread
+                        drained = progress_counter.qsize()
+                        for _ in range(drained):
+                            progress_counter.get_nowait()
+                        if drained:
+                            self._progress_task.tick(n=drained)
+
+                        for future in done:
+                            a_chunk, r_chunk, s_chunk = future.result()
+                            anchor_abs_idxs.extend(a_chunk)
+                            role_abs_idxs.extend(r_chunk)
+                            role_scores.extend(s_chunk)
+
+                    # Final drain — workers are done, qsize() is exact here
+                    remaining = progress_counter.qsize()
+                    for _ in range(remaining):
+                        progress_counter.get_nowait()
+                    if remaining:
+                        self._progress_task.tick(n=remaining)
+
+            return anchor_abs_idxs, role_abs_idxs, role_scores
+
+        # ------------------------------------------------
+        # Sequential sampling (n_workers = 1)
+        # ------------------------------------------------
         abs_indices = view.indices
 
-        # Store selected pairings (anchor + role store relative indices, score stores scores of pairing)
-        anchor_abs_idxs: list[int] = []
-        role_abs_idxs: list[int] = []
-        role_scores: list[float] = []
+        # Store selected pairings
+        # - anchor + role store relative indices
+        # - score stores scores of pairing
+        anchor_abs_idxs = []
+        role_abs_idxs = []
+        role_scores = []
 
-        for rel_idx in range(len(view)):
+        for rel_idx in range(n_anchors):
             # Collect matches per condition
             per_cond_matches = []
             per_cond_fallbacks = []
@@ -676,6 +982,7 @@ class NSampler(BaseSampler):
                 "condition_mapping": self.condition_mapping,
                 "max_samples_per_anchor": self.max_samples_per_anchor,
                 "choose_best_only": self.choose_best_only,
+                "n_workers": self.n_workers,
             },
         )
         return cfg
@@ -712,4 +1019,5 @@ class NSampler(BaseSampler):
             drop_last=config["drop_last"],
             seed=config["seed"],
             show_progress=config["show_progress"],
+            n_workers=config.get("n_workers", 1),
         )

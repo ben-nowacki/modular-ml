@@ -1,12 +1,15 @@
 """Torch SequentialMLP reference implementation with lazy building."""
 
 import numpy as np
-import torch
 
 from modularml.core.models.torch_base_model import TorchBaseModel
 from modularml.utils.data.shape_utils import ensure_tuple_shape
+from modularml.utils.data.types import TorchTensor
+from modularml.utils.environment.optional_imports import check_torch
 from modularml.utils.logging.warnings import warn
 from modularml.utils.nn.activations import resolve_activation
+
+torch = check_torch()
 
 
 class SequentialMLP(TorchBaseModel):
@@ -208,15 +211,15 @@ class SequentialMLP(TorchBaseModel):
         self.fc = torch.nn.Sequential(*layers)
         self._built = True
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: TorchTensor) -> TorchTensor:
         """
         Run the forward pass through the sequential MLP.
 
         Args:
-            x (torch.Tensor): Input tensor shaped ``(batch, *input_shape)``.
+            x (TorchTensor): Input tensor shaped ``(batch, *input_shape)``.
 
         Returns:
-            torch.Tensor: Output tensor shaped ``(batch, *output_shape)``.
+            TorchTensor: Output tensor shaped ``(batch, *output_shape)``.
 
         """
         # ensure input is 3D

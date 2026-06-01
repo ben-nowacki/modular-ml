@@ -286,7 +286,7 @@ class Loss:
         """
         if self._backend is None:
             raise LossError("Loss backend has not been resolved.")
-        return self._backend
+        return normalize_backend(self._backend)
 
     @property
     def is_built(self) -> bool:
@@ -364,7 +364,12 @@ class Loss:
 
         # Case 2: callable loss function
         if self.fn is not None:
-            self._callable = self.fn
+            if self.kwargs:
+                import functools
+
+                self._callable = functools.partial(self.fn, **self.kwargs)
+            else:
+                self._callable = self.fn
             return
 
         # Case 3: factory

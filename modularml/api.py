@@ -2,12 +2,16 @@
 # Experiment & Phases
 # ================================================
 from modularml.core.experiment.experiment import Experiment
-from modularml.core.experiment.experiment_context import ExperimentContext
+from modularml.core.experiment.experiment_context import (
+    ExperimentContext,
+    RegistrationPolicy,
+)
 from modularml.core.experiment.phases.phase_group import PhaseGroup
 from modularml.core.experiment.results.group_results import PhaseGroupResults
 from modularml.core.experiment.phases.eval_phase import EvalPhase
 from modularml.core.experiment.results.eval_results import EvalResults
 from modularml.core.experiment.phases.train_phase import TrainPhase
+from modularml.core.experiment.results.results_config import ResultsConfig
 from modularml.core.experiment.results.train_results import TrainResults
 from modularml.core.experiment.phases.phase import InputBinding
 from modularml.core.experiment.phases.fit_phase import FitPhase
@@ -15,13 +19,12 @@ from modularml.core.experiment.results.fit_results import FitResults
 from modularml.core.experiment.checkpointing import Checkpointing
 from modularml.core.experiment.phases.train_phase import ResultRecording
 
-
 # ================================================
 # Execution Strategies
 # ================================================
 from modularml.core.execution.cross_validation.cross_validation import CrossValidation
 from modularml.core.execution.cross_validation.cv_binding import CVBinding
-
+from modularml.core.execution.cross_validation.cv_results import CVResults
 
 # ================================================
 # Callbacks
@@ -51,6 +54,8 @@ from modularml.core.training.loss import Loss
 from modularml.core.models.base_model import BaseModel
 from modularml.core.models.torch_base_model import TorchBaseModel
 from modularml.core.models.tensorflow_base_model import TensorflowBaseModel
+
+from modularml.utils.nn.accelerator import Accelerator
 
 """
 Built-in models and merge nodes are accessed with:
@@ -82,8 +87,19 @@ All built-in splitters are accessed with:
 # Scaling
 # ================================================
 from modularml.core.transforms.scaler import Scaler
+from modularml.scalers import scaler_registry
 
 supported_scalers = Scaler.get_supported_scalers()
+
+# ================================================
+# Settings & Exceptions
+# ================================================
+from modularml.core.settings import configure, settings
+from modularml.utils.errors.exceptions import (
+    EmptyExperimentContextError,
+    NodeNotFoundError,
+)
+
 """
 All built-in transformed are accessed with:
 
@@ -92,9 +108,11 @@ All built-in transformed are accessed with:
 
 
 __all__ = [
+    "Accelerator",
     "AppliedLoss",
     "BaseModel",
     "CVBinding",
+    "CVResults",
     "Checkpointing",
     "ConcatNode",
     "CrossValidation",
@@ -115,12 +133,15 @@ __all__ = [
     "Optimizer",
     "PhaseGroup",
     "PhaseGroupResults",
+    "RegistrationPolicy",
     "ResultRecording",
+    "ResultsConfig",
     "Scaler",
     "SimilarityCondition",
     "TensorflowBaseModel",
     "TorchBaseModel",
     "TrainPhase",
     "TrainResults",
+    "scaler_registry",
     "supported_scalers",
 ]

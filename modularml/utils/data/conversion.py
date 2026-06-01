@@ -317,12 +317,12 @@ def merge_dict_of_arrays_to_numpy(
 
     The behavior depends on the specified `mode`:
         - **"stack"**:   Adds a new axis for the dictionary keys (default axis=0).
-                         e.g. [(10, 4), (10, 4)] → (2, 10, 4)
+                         e.g. [(10, 4), (10, 4)] -> (2, 10, 4)
         - **"concat"**:  Concatenates along an existing axis (default axis=0).
-                         e.g. [(10, 4), (10, 4)] → (20, 4)
+                         e.g. [(10, 4), (10, 4)] -> (20, 4)
         - **"flatten"**: Flattens and concatenates across features.
-                         e.g. [(10, 4), (10, 3)] → (10, 7)
-        - **"auto"**:    Attempts stack → concat(axis=0) → concat(axis=-1) → flatten.
+                         e.g. [(10, 4), (10, 3)] -> (10, 7)
+        - **"auto"**:    Attempts stack -> concat(axis=0) -> concat(axis=-1) -> flatten.
 
     Args:
         data (dict[str, np.ndarray]): Mapping of key to array-like objects to merge.
@@ -739,6 +739,14 @@ def to_numpy(
     # If it's already a numpy array, just return
     if isinstance(obj, np.ndarray):
         return obj
+
+    # tensors
+    torch = check_torch()
+    if torch is not None and isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().numpy()
+    tf = check_tensorflow()
+    if tf is not None and isinstance(obj, tf.Tensor):
+        return obj.numpy()
 
     py_obj = to_python(obj)
 
