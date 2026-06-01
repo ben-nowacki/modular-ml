@@ -32,4 +32,4 @@ jobs:
         with:
           message: '(auto) JOSS Paper PDF Draft'
           add: 'joss_paper/paper.pdf'
-    
+

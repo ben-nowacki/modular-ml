@@ -84,7 +84,7 @@ Each sample, defined by its feature, target, and tag attributes, is assigned a g
 This identifier propagates through splitting, sampling, batching, model execution, and evaluation, enabling transparent lineage tracking and reproducible analysis.
 
 Data within a `modularml.FeatureSet` is stored in backend-agnostic containers supporting `NumPy` [@numpy] arrays, `Pandas` [@pandas] dataframes, `PyTorch` tensors, and `TensorFlow` [@tensorflow] tensors.
-All downstream operations, such as splitting, subsetting, and batching, operate using no-copy views of the underlying data. 
+All downstream operations, such as splitting, subsetting, and batching, operate using no-copy views of the underlying data.
 This design makes split definitions explicit and inspectable, reduces memory overhead, and minimizes the risk of data leakage or unintended experimentation bias.
 
 ## Sampling
