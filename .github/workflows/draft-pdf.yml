@@ -1,0 +1,35 @@
+name: Draft JOSS Paper PDF
+on:
+  push:
+    paths:
+      - joss_paper/**
+      - docs/_static/figures/modularml_collaboration.png
+      - docs/_static/figures/modularml_overview_diagram.png
+      - .github/workflows/draft-pdf.yml
+
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    name: JOSS Paper Draft
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build draft PDF
+        uses: openjournals/openjournals-draft-action@master
+        with:
+          journal: joss
+          paper-path: joss_paper/paper.md
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper
+          path: joss_paper/paper.pdf
+
+      - name: Commit PDF to repository
+        uses: EndBug/add-and-commit@v9
+        with:
+          message: '(auto) JOSS Paper PDF Draft'
+          add: 'joss_paper/paper.pdf'
+    
