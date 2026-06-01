@@ -10,15 +10,17 @@ authors:
   - name: Ben Nowacki
     orcid: 0009-0000-6723-3085
     affiliation: "1"
-  - name: Tingkai Li            # TODO: add orcID?
+  - name: Tingkai Li            # TODO: add orcID
     affiliation: "1"
-  - name: Mohammad Mundiwala    # TODO: include? add orcID?
+  - name: Sina Navidi           # TODO: add orcID
     affiliation: "1"
-  - name: Hui Hua               # TODO: include? add orcID?
+  - name: Mohammad Mundiwala    # TODO: add orcID
     affiliation: "1"
-  - name: Fei Miao              # TODO: add orcID?
+  - name: Hui Hua               # TODO: add orcID
     affiliation: "1"
-  - name: Chao Hu               # TODO: add orcID?
+  - name: Fei Miao              # TODO: add orcID
+    affiliation: "1"
+  - name: Chao Hu               # TODO: add orcID
     affiliation: "1"
     corresponding: true
 affiliations:
@@ -31,7 +33,7 @@ bibliography: paper.bib
 # Summary
 
 Modern machine learning (ML), particularly deep learning, has become central to scientific research across domains such as energy systems, materials science, structural health monitoring, and biomedical engineering.
-However, core ML frameworks primarily focus on model implementation and optimization, leaving experiment structure, data partitioning, and reproducibility patterns to user-defined scripts
+However, core ML frameworks primarily focus on model implementation and optimization, leaving experiment structure, data partitioning, and reproducibility patterns to user-defined scripts.
 As a result, domain researchers often rely on fragmented scripts, backend-specific conventions, and ad hoc experiment management workflows that limit reproducibility and collaboration.
 
 `ModularML` is an open-source Python framework designed to address this gap.
@@ -50,11 +52,12 @@ Existing libraries such as `PyTorch Lightning` [@pytorch_lightning], `Catalyst` 
 In contrast, `ModularML` is built around the principle of *configuration-as-contract*: the entire ML experiment is represented as a structured, inspectable object. This design offers three major benefits:
 
 1. **Reproducibility through serialization.** Entire experiments, from initial data curation to multi-stage training and evaluation, can be saved and shared as a single file. A collaborator can load this artifact and inspect the full pipeline without having to trace the source code.
-2. **Backend abstraction.** Model nodes are agnostic to the backend in which the underlying model is defined. `ModularML` does not replace existing ML libraries such as `PyTorch`, `Keras`, or `scikit-learn` [@scikit_learn]; rather, it improves their usage by providing a unified interface that researchers can intuitively understand. This backend-agnostic design supports reuse of collaborator models regardless of which library was used to implement them.
+2. **Backend abstraction.** Model nodes are agnostic to the backend in which the underlying model is defined. `ModularML` does not replace existing ML libraries such as `PyTorch`, `Keras`, or `scikit-learn` [@scikit_learn]; rather, it complements them by providing a unified experiment structure around backend-specific model implementations. This backend-agnostic design supports reuse of collaborator models regardless of which library was used to implement them.
 3. **Transparency for non-ML experts.** Built-in `summary` and `visualize` methods for feature sets, model graphs, and experiment execution phases allow users and code reviewers to quickly inspect data splits, model architecture, loss routing, and training sequencing without needing to understand backend-specific implementation details.
 
 These features directly address common reproducibility and collaboration challenges in research, while still supporting a comprehensive suite of modeling techniques and existing ML libraries.
-
+In particular, `ModularML` is intended to serve as an experiment-structure layer rather than a replacement for backend frameworks: users can continue relying on established libraries for model implementation and numerical execution while using `ModularML` to define, serialize, and inspect the full experimental workflow.
+This makes the framework especially useful in collaborative research settings where model design, data partitioning, and training logic must be reviewed across users with different levels of ML software expertise.
 
 # State of the field
 
@@ -69,7 +72,7 @@ It provides concrete abstractions for data (`modularml.FeatureSet`), sampling lo
 
 The `ModularML` architecture provides abstractions for data storage and processing, graph-based modeling, and execution of distinct training sequences (\autoref{fig:architecture}).
 Rather than embedding these responsibilities within custom training scripts, `ModularML` separates them into explicit, composable components that can be independently configured, inspected, and serialized.
-This separation enables rapid experimentation with data pipelines, model architectures, and training strategies while preserving reproducibility and traceability across the entire machine learning workflow.
+This separation enables rapid experimentation with data pipelines, model architectures, and training strategies while preserving reproducibility and traceability across the entire ML workflow.
 
 ![ModularML architecture overview: FeatureSet curation into samples with feature, target, and tag domains; flexible ModelGraph construction for rapid experimentation of model topology; and multi-phase training workflows sequenced within a single Experiment container.\label{fig:architecture}](modularml_overview_diagram.png)
 
