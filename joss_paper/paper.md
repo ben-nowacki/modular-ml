@@ -17,7 +17,8 @@ authors:
     affiliation: "1"
   - name: Mohammad Mundiwala    # TODO: add orcID
     affiliation: "1"
-  - name: Hui Hua               # TODO: add orcID
+  - name: Hui Hua
+    orcid: 0009-0006-9938-2281
     affiliation: "1"
   - name: Fei Miao              # TODO: add orcID
     affiliation: "1"
@@ -28,7 +29,7 @@ authors:
 affiliations:
  - name: School of Mechanical, Aerospace, and Manufacturing Engineering, University of Connecticut, Storrs, CT 06269, USA
    index: 1
-date: 2 June 2026
+date: 9 June 2026
 bibliography: paper.bib
 ---
 
