@@ -1,0 +1,39 @@
+// Template for a shared UI primitive: Radix (if interactive) + CVA + cn().
+// Copy into the project's primitive kit dir; replace NAME and token names to
+// match the project manifest. Delete this comment block.
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+
+const nameVariants = cva(
+  // base classes: layout + focus-visible ring + disabled handling
+  "inline-flex items-center gap-2 rounded-md text-sm transition-colors " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring " +
+    "disabled:opacity-50 disabled:pointer-events-none",
+  {
+    variants: {
+      variant: {
+        primary: "bg-primary text-primary-foreground hover:bg-primary/90",
+        outline: "border border-border bg-transparent hover:bg-muted",
+        ghost: "hover:bg-muted",
+      },
+      size: { sm: "h-8 px-3", md: "h-9 px-4" },
+    },
+    defaultVariants: { variant: "primary", size: "md" },
+  }
+);
+
+export interface NameProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof nameVariants> {}
+
+export const Name = React.forwardRef<HTMLButtonElement, NameProps>(
+  ({ className, variant, size, ...props }, ref) => (
+    <button
+      ref={ref}
+      className={cn(nameVariants({ variant, size }), className)}
+      {...props}
+    />
+  )
+);
+Name.displayName = "Name";
